@@ -148,19 +148,24 @@ export const Register = () => {
       );
       const user = userCredential.user;
 
-      // ✅ Firestore user document with role = 'user' by default
+      // ✅ Firestore user document
       await setDoc(doc(db, "users", user.uid), {
         firstname: formData.firstname,
         lastname: formData.lastname,
         email: formData.email,
-        role: "user", // automatic role
+        role: "user",
         createdAt: new Date().toISOString(),
       });
 
       router.push("/login");
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Failed to register. Please try again.");
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        console.error(err);
+        setError(err.message || "Failed to register. Please try again.");
+      } else {
+        console.error("Unexpected error:", err);
+        setError("An unexpected error occurred. Please try again.");
+      }
     } finally {
       setLoading(false);
     }

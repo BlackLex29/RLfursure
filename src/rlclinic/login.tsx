@@ -162,9 +162,13 @@ const LoginPage: React.FC = () => {
       } else {
         setError("No role assigned. Contact support.");
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Login error:", error);
-      setError("Invalid email or password");
+      if (error instanceof Error) {
+        setError(error.message);
+      } else {
+        setError("Invalid email or password");
+      }
     } finally {
       setLoading(false);
     }

@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import styled from "styled-components";
-import { useRouter, useSearchParams } from "next/navigation";
 import { db } from "../firebaseConfig";
 import { doc, updateDoc } from "firebase/firestore";
 
@@ -13,12 +13,18 @@ const PaymentForm: React.FC = () => {
 
   const [paymentMethod, setPaymentMethod] = useState<"Cash" | "Online" | "">("");
 
-  const handlePaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Auto redirect kung walang appointmentId
+  useEffect(() => {
     if (!appointmentId) {
-      alert("No appointment linked!");
-      return;
+      alert("No appointment selected.");
+      router.push("/userdashboard");
     }
+  }, [appointmentId, router]);
+
+  if (!appointmentId) return null; // Avoid render flicker
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!paymentMethod) {
       alert("Please select a payment method.");
       return;
@@ -30,15 +36,12 @@ const PaymentForm: React.FC = () => {
         status: "Payment Completed",
       });
 
-      alert(`Payment method ${paymentMethod} saved successfully!`);
+      alert(`Payment method ${paymentMethod} saved!`);
 
-      if (paymentMethod === "Cash") {
-        router.push("/userdashboard");
-      } else {
-        router.push("/online-payment");
-      }
-    } catch (error) {
-      console.error("Error saving payment method:", error);
+      if (paymentMethod === "Cash") router.push("/userdashboard");
+      else router.push("/online-payment");
+    } catch (err) {
+      console.error(err);
       alert("Failed to save payment method.");
     }
   };
@@ -46,10 +49,8 @@ const PaymentForm: React.FC = () => {
   return (
     <Wrapper>
       <Card>
-        <Header>
-          <Title>Payment Method</Title>
-        </Header>
-        <Form onSubmit={handlePaymentSubmit}>
+        <Header>Payment Method</Header>
+        <Form onSubmit={handleSubmit}>
           <OptionWrapper>
             <RadioLabel>
               <input
@@ -61,7 +62,6 @@ const PaymentForm: React.FC = () => {
               />
               Cash
             </RadioLabel>
-
             <RadioLabel>
               <input
                 type="radio"
@@ -73,7 +73,6 @@ const PaymentForm: React.FC = () => {
               Online Payment
             </RadioLabel>
           </OptionWrapper>
-
           <Button type="submit">Proceed</Button>
         </Form>
       </Card>
@@ -100,23 +99,13 @@ const Card = styled.div`
   width: 100%;
   max-width: 400px;
   overflow: hidden;
-  animation: slideIn 0.5s ease;
-  @keyframes slideIn {
-    from { opacity: 0; transform: translateY(30px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
 `;
 
-const Header = styled.div`
-  background: linear-gradient(90deg, #ff5e62, #ff9966);
-  padding: 25px 20px;
+const Header = styled.h2`
   text-align: center;
-`;
-
-const Title = styled.h2`
-  color: white;
-  font-size: 28px;
-  font-weight: 700;
+  color: #ffffff;
+  background: linear-gradient(90deg, #ff5e62, #ff9966);
+  padding: 25px 0;
 `;
 
 const Form = styled.form``;
@@ -153,7 +142,6 @@ const Button = styled.button`
   font-weight: 600;
   font-size: 16px;
   cursor: pointer;
-  transition: all 0.3s ease;
   &:hover {
     opacity: 0.85;
   }

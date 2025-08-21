@@ -1,11 +1,11 @@
 import Petregister from "@/rlclinic/petregistration";
+import React, { Suspense } from 'react';
 
 export default function Home() {
   return (
-    <div  >
-      
+    <Suspense fallback={<div>Loading...</div>}>
       <Petregister/>
           
-      </div>
+       </Suspense>
   );
 }

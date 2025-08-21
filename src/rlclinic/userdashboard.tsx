@@ -37,18 +37,21 @@ const UserDashboard: React.FC = () => {
 
   // 🔹 Fetch user appointments in real-time
   useEffect(() => {
-    if (!userEmail) return;
-    const q = query(collection(db, "appointments"), where("petOwner", "==", userEmail));
-    const unsub = onSnapshot(q, (snapshot) => {
-      const data: AppointmentType[] = [];
-      snapshot.forEach((doc) => {
-        data.push({ id: doc.id, ...(doc.data() as any) });
-      });
-      data.sort((a, b) => a.date.localeCompare(b.date));
-      setAppointments(data);
+  if (!userEmail) return;
+
+  const q = query(collection(db, "appointments"), where("petOwner", "==", userEmail));
+  const unsub = onSnapshot(q, (snapshot) => {
+    const data: AppointmentType[] = [];
+    snapshot.forEach((docSnap) => {
+      const docData = docSnap.data() as Omit<AppointmentType, "id">; // id excluded
+      data.push({ id: docSnap.id, ...docData });
     });
-    return () => unsub();
-  }, [userEmail]);
+    data.sort((a, b) => a.date.localeCompare(b.date));
+    setAppointments(data);
+  });
+
+  return () => unsub();
+}, [userEmail]);
 
   const handleLogout = async () => {
     await signOut(auth);
