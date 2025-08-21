@@ -1,12 +1,10 @@
-import { Register } from "@/rlclinic/register";
-
+import Payment from "@/rlclinic/payment";
 
 export default function Home() {
   return (
     <div  >
       
-      <Register/>
+      <Payment/>
     </div>
-    
   );
 }

@@ -1,11 +1,10 @@
-import Dashboard from "@/rlclinic/dashboard";
-
+import Userdashboard from "@/rlclinic/userdashboard";
 
 export default function Home() {
   return (
     <div  >
       
-      <Dashboard/>
+      <Userdashboard/>  
     </div>
   );
 }

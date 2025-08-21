@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import styled, { createGlobalStyle } from "styled-components";
 import { useRouter } from "next/navigation";
-import { auth } from "../firebaseConfig";
-import { signInWithEmailAndPassword, onAuthStateChanged } from "firebase/auth";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth, db } from "../firebaseConfig";
+import { doc, getDoc } from "firebase/firestore";
 
+// 🌍 Global style
 const GlobalStyle = createGlobalStyle`
   @import url('https://fonts.googleapis.com/css2?family=Rozha+One&display=swap');
   body {
@@ -13,16 +15,17 @@ const GlobalStyle = createGlobalStyle`
     padding: 0;
     box-sizing: border-box;
     font-family: 'Rozha One', serif;
+    background-color: #f9f9f9;
   }
 `;
 
+// 🎨 Styled Components
 const Container = styled.div`
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   height: 100vh;
-  background-color: #f9f9f9;
 `;
 
 const Logo = styled.h1`
@@ -48,7 +51,7 @@ const Label = styled.label`
 
   .input {
     width: 100%;
-    padding: 14px 14px 14px 14px;
+    padding: 14px;
     border: 2px solid #34B89C;
     border-radius: 10px;
     outline: none;
@@ -104,32 +107,67 @@ const Button = styled.button`
   }
 `;
 
+const ErrorText = styled.p`
+  color: #ff3333;
+  font-size: 14px;
+  margin-top: -10px;
+  margin-bottom: 10px;
+`;
+
+// 🛠️ Login Component
 const LoginPage: React.FC = () => {
   const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [formData, setFormData] = useState({
+    email: "",
+    password: "",
+  });
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        router.push("/dashboard");  
-      }
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData({
+      ...formData,
+      [e.target.name]: e.target.value,
     });
-    return () => unsubscribe();
-  }, [router]);
+  };
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
     setLoading(true);
+
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      router.push("/dashboard"); // redirect sa dashboard pag successful login
-    } catch (error) {
-      alert((error as Error).message);
+      // 🔑 Firebase Auth login
+      const userCredential = await signInWithEmailAndPassword(
+        auth,
+        formData.email,
+        formData.password
+      );
+      const user = userCredential.user;
+
+      // 🔍 Get role from Firestore
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+      let role = "user"; // default role
+
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        role = userData.role || "user"; // fallback to "user"
+      }
+
+      // 🚀 Route base sa role
+      if (role === "admin") {
+        router.push("/admindashboard");
+      } else if (role === "user") {
+        router.push("/userdashboard");
+      } else {
+        setError("No role assigned. Contact support.");
+      }
+    } catch (error: any) {
+      console.error("Login error:", error);
+      setError("Invalid email or password");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (
@@ -137,27 +175,36 @@ const LoginPage: React.FC = () => {
       <GlobalStyle />
       <Container>
         <Logo>FurSureCare</Logo>
-        <Form onSubmit={handleLogin}>
+        <Form onSubmit={handleSubmit}>
+          {error && <ErrorText>{error}</ErrorText>}
+
           <Label>
             <input
               type="email"
+              name="email"
               className="input"
               placeholder=" "
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={formData.email}
+              onChange={handleChange}
+              required
             />
             <span>Email</span>
           </Label>
+
           <Label>
             <input
               type="password"
+              name="password"
               className="input"
               placeholder=" "
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              value={formData.password}
+              onChange={handleChange}
+              required
+              minLength={6}
             />
             <span>Password</span>
           </Label>
+
           <Button type="submit" disabled={loading}>
             {loading ? "Logging in..." : "Login"}
           </Button>
@@ -168,4 +215,3 @@ const LoginPage: React.FC = () => {
 };
 
 export default LoginPage;
-  

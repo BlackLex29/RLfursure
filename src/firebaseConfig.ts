@@ -9,11 +9,9 @@ import { getFirestore } from "firebase/firestore";
      storageBucket: "fursure-9e796.appspot.com",
      messagingSenderId: "8114966521",
      appId: "1:8114966521:web:058af6fdd6111c8c776c68",
-     measurementId: "G-YQKHQQSGSL"
+     measurementId: "G-YQKHQ90SGL"
    };
 
  const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-export { auth, db };
+export const auth = getAuth(app);
+export const db = getFirestore(app);  

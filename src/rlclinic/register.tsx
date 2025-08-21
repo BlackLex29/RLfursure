@@ -3,11 +3,10 @@
 import React, { useState } from "react";
 import styled, { createGlobalStyle } from "styled-components";
 import { useRouter } from "next/navigation";
-import { createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
-import { auth, db } from "../firebaseConfig"; // Adjust path if needed
+import { createUserWithEmailAndPassword } from "firebase/auth";
+import { db, auth } from "../firebaseConfig";
 
-// Global styles: reset & background
 const GlobalStyle = createGlobalStyle`
   *, *::before, *::after { box-sizing: border-box; }
   body {
@@ -17,134 +16,106 @@ const GlobalStyle = createGlobalStyle`
   }
 `;
 
-// Wrapper to center content
 const Wrapper = styled.div`
   min-height: 100vh;
   display: flex;
   justify-content: center;
   align-items: center;
+  padding: 20px;
 `;
 
-// Main container card
-const Container = styled.div`
-  background: #fff;
+const Card = styled.div`
+  background: white;
   border-radius: 12px;
-  padding: 30px;
-  max-width: 400px;
+  padding: 40px 30px;
+  max-width: 420px;
   width: 100%;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
-  text-align: center;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 `;
 
-// Form styling
+const Title = styled.h1`
+  text-align: center;
+  margin-bottom: 25px;
+  color: #1a1a1a;
+  font-weight: 700;
+  font-size: 28px;
+`;
+
 const Form = styled.form`
   display: flex;
   flex-direction: column;
-  gap: 15px;
+  gap: 18px;
 `;
 
-// Name fields in a row
-const NameRow = styled.div`
+const InputGroup = styled.div`
   display: flex;
-  gap: 10px;
-  label {
-    flex: 1;
-  }
+  flex-direction: column;
 `;
 
-// Label with floating label effect
 const Label = styled.label`
-  position: relative;
-  display: block;
-  .input {
-    width: 100%;
-    padding: 12px;
-    border: 2px solid #bbb;
-    border-radius: 8px;
-    outline: none;
-    font-size: 14px;
-    background: transparent;
-    transition: border-color 0.2s;
-  }
+  margin-bottom: 6px;
+  font-weight: 600;
+  font-size: 14px;
+  color: #555;
+`;
 
-  .input:focus {
-    border-color: #34B89C;
-  }
+const Input = styled.input`
+  padding: 12px 14px;
+  font-size: 15px;
+  border: 2px solid #bbb;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.25s ease;
 
-  span {
-    position: absolute;
-    left: 12px;
-    top: 12px;
-    font-size: 14px;
-    color: #888;
-    transition: 0.2s;
-    pointer-events: none;
-  }
-
-  /* Animate label to float when input is focused or has text */
-  .input:focus + span,
-  .input:not(:placeholder-shown) + span {
-    top: -8px;
-    left: 8px;
-    font-size: 12px;
-    color: #34B89C;
-    background: #fff;
-    padding: 0 4px;
+  &:focus {
+    border-color: #34b89c;
+    box-shadow: 0 0 6px #34b89caa;
   }
 `;
 
-// Submit button
-const Button = styled.button`
-  padding: 12px;
-  background-color: #34B89C;
-  color: #fff;
-  font-weight: bold;
-  border: 2px solid #34B89C;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 16px;
-  transition: background-color 0.3s ease, border-color 0.3s ease;
-  margin-top: 10px;
+const ErrorMessage = styled.p`
+  color: #c0392b;
+  font-size: 13px;
+  margin: -10px 0 8px 0;
+  font-weight: 600;
+`;
 
-  &:hover:enabled {
-    background-color: #2e9a80;
-    border-color: #2e9a80;
+const Button = styled.button`
+  background-color: #34b89c;
+  color: white;
+  font-weight: 700;
+  font-size: 17px;
+  padding: 14px;
+  border: none;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+
+  &:hover:not(:disabled) {
+    background-color: #2a8a7d;
   }
 
   &:disabled {
     background-color: #95a5a6;
-    border-color: #95a5a6;
     cursor: not-allowed;
   }
 `;
 
-// Message text
-const Message = styled.p`
+const RedirectText = styled.p`
+  text-align: center;
+  margin-top: 16px;
   font-size: 14px;
   color: #555;
-  margin-bottom: 5px;
-`;
 
-// Error message
-const ErrorText = styled.p`
-  color: #c0392b;
-  font-size: 14px;
-  margin: -8px 0 8px;
-`;
-
-// Sign-in prompt
-const Signin = styled.p`
-  font-size: 14px;
-  margin-top: 10px;
-
-  .link {
-    color: #34B89C;
+  span {
+    color: #34b89c;
+    font-weight: 700;
     cursor: pointer;
-    font-weight: bold;
+    user-select: none;
+  }
 
-    &:hover {
-      text-decoration: underline;
-    }
+  span:hover {
+    text-decoration: underline;
   }
 `;
 
@@ -159,17 +130,17 @@ export const Register = () => {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Handle form input change
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
-  // Handle form submit
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
+
     try {
+      // ✅ Firebase Auth create user
       const userCredential = await createUserWithEmailAndPassword(
         auth,
         formData.email,
@@ -177,34 +148,19 @@ export const Register = () => {
       );
       const user = userCredential.user;
 
+      // ✅ Firestore user document with role = 'user' by default
       await setDoc(doc(db, "users", user.uid), {
         firstname: formData.firstname,
         lastname: formData.lastname,
         email: formData.email,
+        role: "user", // automatic role
         createdAt: new Date().toISOString(),
       });
 
       router.push("/login");
-    } catch (error) {
-      console.error("Register error:", error);
-      if ((error as Error).message) {
-        const errMsg = (error as Error).message;
-        switch (errMsg) {
-          case "auth/email-already-in-use":
-            setError("Email is already in use. Try logging in.");
-            break;
-          case "auth/invalid-email":
-            setError("Invalid email address.");
-            break;
-          case "auth/weak-password":
-            setError("Password too weak. Use at least 6 chars + special character.");
-            break;
-          default:
-            setError(errMsg || "Registration failed.");
-        }
-      } else {
-        setError("Registration failed.");
-      }
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Failed to register. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -214,78 +170,71 @@ export const Register = () => {
     <>
       <GlobalStyle />
       <Wrapper>
-        <Container>
-          <h1>Register</h1>
+        <Card>
+          <Title>Create an Account</Title>
           <Form onSubmit={handleSubmit}>
-            <Message>Signup now and get full access to our app.</Message>
-            {error && <ErrorText>{error}</ErrorText>}
-
-            <NameRow>
-              <Label>
-                <input
-                  required
-                  type="text"
-                  name="firstname"
-                  value={formData.firstname}
-                  onChange={handleChange}
-                  className="input"
-                  placeholder=" "
-                />
-                <span>Firstname</span>
-              </Label>
-              <Label>
-                <input
-                  required
-                  type="text"
-                  name="lastname"
-                  value={formData.lastname}
-                  onChange={handleChange}
-                  className="input"
-                  placeholder=" "
-                />
-                <span>Lastname</span>
-              </Label>
-            </NameRow>
-
-            <Label>
-              <input
+            <InputGroup>
+              <Label htmlFor="firstname">First Name</Label>
+              <Input
+                id="firstname"
+                name="firstname"
+                type="text"
                 required
-                type="email"
+                value={formData.firstname}
+                onChange={handleChange}
+              />
+            </InputGroup>
+
+            <InputGroup>
+              <Label htmlFor="lastname">Last Name</Label>
+              <Input
+                id="lastname"
+                name="lastname"
+                type="text"
+                required
+                value={formData.lastname}
+                onChange={handleChange}
+              />
+            </InputGroup>
+
+            <InputGroup>
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
                 name="email"
+                type="email"
+                required
                 value={formData.email}
                 onChange={handleChange}
-                className="input"
-                placeholder=" "
               />
-              <span>Email</span>
-            </Label>
+            </InputGroup>
 
-            <Label>
-              <input
-                required
-                type="password"
+            <InputGroup>
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
                 name="password"
+                type="password"
+                required
+                minLength={6}
                 value={formData.password}
                 onChange={handleChange}
-                className="input"
-                placeholder=" "
-                pattern={`^(?=.*[!@#$%^&*(),.?":{}|<>]).{6,}$`}
-                title="Password must contain at least 6 characters and one special character."
               />
-              <span>Password</span>
-            </Label>
+            </InputGroup>
+
+            {error && <ErrorMessage>{error}</ErrorMessage>}
 
             <Button type="submit" disabled={loading}>
-              {loading ? "Loading..." : "Register"}
+              {loading ? "Creating Account..." : "Register"}
             </Button>
-
-            <Signin>
-              Already have an account?{" "}
-              <span className="link" onClick={() => router.push("/login")}>Signin</span>
-            </Signin>
           </Form>
-        </Container>
+
+          <RedirectText>
+            Already have an account?{" "}
+            <span onClick={() => router.push("/login")}>Sign in here</span>
+          </RedirectText>
+        </Card>
       </Wrapper>
     </>
   );
-};  
+};

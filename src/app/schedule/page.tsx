@@ -1,11 +1,11 @@
-import Schedule from "@/rlclinic/schedule";
+import Appointment from "@/rlclinic/Appointment";
 
 
 export default function Home() {
   return (
     <div  >
       
-      <Schedule/>
+      <Appointment />
     </div>
   );
 }
