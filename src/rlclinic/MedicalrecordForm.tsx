@@ -59,7 +59,7 @@ const sanitizeFirestoreData = (data: Record<string, unknown>) => {
   return sanitized;
 };
 
-const MedicalRecord: React.FC = () => {
+const MedicalRecordForm: React.FC = () => {
   const router = useRouter();
   const auth = getAuth();
 
@@ -493,7 +493,7 @@ const MedicalRecord: React.FC = () => {
     </>
   );
 };
-export default MedicalRecord;
+export default MedicalRecordForm;
 
 // Styled Components (ng buong code na ito ay hindi binago, so ito ay nandito lang sa huli)
 const LoadingContainer = styled.div`
