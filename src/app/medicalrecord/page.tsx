@@ -1,5 +1,6 @@
 import MedicalRecordForm from "@/rlclinic/MedicalRecord";
 
+
 export default function Home() {
   return (
     <div  >
@@ -8,4 +9,4 @@ export default function Home() {
     </div>
     
   );
-} 
+}   
