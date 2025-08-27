@@ -1,24 +1,22 @@
-// src/firebaseConfig.ts
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getFunctions } from "firebase/functions";
 
-// Firebase config gamit ang environment variables para sa security
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
-};
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
 
-// Export Firebase services
+
+   const firebaseConfig = {
+     apiKey: " AIzaSyBIFU50U-IJ_v9PaN3u1oii5PxQ3p9JBAg",
+     authDomain: "fursure-9e796.firebaseapp.com",
+     projectId: "fursure-9e796",
+     storageBucket: "fursure-9e796.appspot.com",
+     messagingSenderId: "8114966521",
+     appId: "1:8114966521:web:058af6fdd6111c8c776c68",
+     measurementId: "G-YQKHQ90SGL"
+   };
+
+ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const functions = getFunctions(app);

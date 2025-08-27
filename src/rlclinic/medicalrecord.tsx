@@ -493,7 +493,7 @@ const MedicalRecordForm: React.FC = () => {
     </>
   );
 };
-export { MedicalRecordForm as default };
+export default MedicalRecordForm;
 
 // Styled Components (ng buong code na ito ay hindi binago, so ito ay nandito lang sa huli)
 const LoadingContainer = styled.div`
