@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import styled, { createGlobalStyle } from "styled-components";
 import { useRouter } from "next/navigation";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { auth, db } from "../firebaseConfig";
 import { doc, getDoc } from "firebase/firestore";
 
@@ -114,6 +114,18 @@ const ErrorText = styled.p`
   margin-bottom: 10px;
 `;
 
+const ForgotPassword = styled.p`
+  font-size: 14px;
+  color: #34B89C;
+  text-align: right;
+  margin-top: 10px;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+`;
+
 // 🛠️ Login Component
 const LoginPage: React.FC = () => {
   const router = useRouter();
@@ -123,6 +135,7 @@ const LoginPage: React.FC = () => {
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
@@ -134,6 +147,7 @@ const LoginPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setMessage("");
     setLoading(true);
 
     try {
@@ -151,7 +165,7 @@ const LoginPage: React.FC = () => {
 
       if (userDoc.exists()) {
         const userData = userDoc.data();
-        role = userData.role || "user"; // fallback to "user"
+        role = (userData.role as string) || "user"; // fallback to "user"
       }
 
       // 🚀 Route base sa role
@@ -162,15 +176,33 @@ const LoginPage: React.FC = () => {
       } else {
         setError("No role assigned. Contact support.");
       }
-    } catch (error: unknown) {
-      console.error("Login error:", error);
-      if (error instanceof Error) {
-        setError(error.message);
+    } catch (err: unknown) {
+      console.error("Login error:", err);
+      if (err instanceof Error) {
+        setError(err.message);
       } else {
         setError("Invalid email or password");
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!formData.email) {
+      setError("Please enter your email first.");
+      return;
+    }
+    try {
+      await sendPasswordResetEmail(auth, formData.email);
+      setMessage("Password reset email sent! Please check your inbox.");
+      setError("");
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("An unexpected error occurred.");
+      }
     }
   };
 
@@ -181,6 +213,7 @@ const LoginPage: React.FC = () => {
         <Logo>FurSureCare</Logo>
         <Form onSubmit={handleSubmit}>
           {error && <ErrorText>{error}</ErrorText>}
+          {message && <p style={{ color: "green", fontSize: "14px" }}>{message}</p>}
 
           <Label>
             <input
@@ -212,6 +245,10 @@ const LoginPage: React.FC = () => {
           <Button type="submit" disabled={loading}>
             {loading ? "Logging in..." : "Login"}
           </Button>
+
+          <ForgotPassword onClick={handleForgotPassword}>
+            Forgot Password?
+          </ForgotPassword>
         </Form>
       </Container>
     </>

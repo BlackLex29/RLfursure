@@ -47,7 +47,8 @@ const PaymentForm: React.FC = () => {
     <Wrapper>
       <Card>
         <Header>
-          <Title>Payment Method</Title>
+          <Title>Choose Payment Method</Title>
+          <Subtitle>Please select your preferred option</Subtitle>
         </Header>
         <Form onSubmit={handlePaymentSubmit}>
           <OptionWrapper>
@@ -83,40 +84,47 @@ const PaymentForm: React.FC = () => {
 
 export default PaymentForm;
 
-// Styled Components
+// 🌈 Styled Components – pang USER design
 const Wrapper = styled.div`
   min-height: 100vh;
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  background: linear-gradient(160deg, #ff5e62 0%, #ff9966 100%);
+  background: linear-gradient(160deg, #36d1dc 0%, #5b86e5 100%);
   padding: 60px 20px;
 `;
 
 const Card = styled.div`
   background: #ffffff;
-  border-radius: 20px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+  border-radius: 22px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
   width: 100%;
-  max-width: 400px;
+  max-width: 420px;
   overflow: hidden;
-  animation: slideIn 0.5s ease;
-  @keyframes slideIn {
-    from { opacity: 0; transform: translateY(30px); }
+  animation: fadeIn 0.5s ease;
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
     to { opacity: 1; transform: translateY(0); }
   }
 `;
 
 const Header = styled.div`
-  background: linear-gradient(90deg, #ff5e62, #ff9966);
+  background: linear-gradient(90deg, #36d1dc, #5b86e5);
   padding: 25px 20px;
   text-align: center;
 `;
 
 const Title = styled.h2`
   color: white;
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 700;
+  margin: 0;
+`;
+
+const Subtitle = styled.p`
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 14px;
+  margin-top: 6px;
 `;
 
 const Form = styled.form``;
@@ -124,7 +132,7 @@ const Form = styled.form``;
 const OptionWrapper = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 18px;
   margin: 40px 20px;
 `;
 
@@ -134,9 +142,19 @@ const RadioLabel = styled.label`
   gap: 12px;
   font-size: 16px;
   font-weight: 500;
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: 1px solid #dfe6f0;
+  transition: all 0.3s ease;
+  cursor: pointer;
+
+  &:hover {
+    background: #f3f7fc;
+  }
+
   input {
     transform: scale(1.4);
-    accent-color: #ff5e62;
+    accent-color: #5b86e5;
     cursor: pointer;
   }
 `;
@@ -148,13 +166,14 @@ const Button = styled.button`
   padding: 14px;
   border-radius: 14px;
   border: none;
-  background: linear-gradient(90deg, #ff5e62, #ff9966);
+  background: linear-gradient(90deg, #36d1dc, #5b86e5);
   color: white;
   font-weight: 600;
   font-size: 16px;
   cursor: pointer;
   transition: all 0.3s ease;
   &:hover {
-    opacity: 0.85;
+    opacity: 0.9;
+    transform: translateY(-2px);
   }
 `;

@@ -1,10 +1,10 @@
-import MedicalRecordEdit from "@/rlclinic/editmed";
+import HomePage from "@/rlclinic/Homepage";
 
 export default function Home() {
   return (
     <div  >
       
-      <MedicalRecordEdit/>
+      <HomePage/>
     </div>
   );
 }

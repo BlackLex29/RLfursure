@@ -2,25 +2,35 @@
 import React, { useState } from "react";
 import styled from "styled-components";
 import { useRouter } from "next/navigation";
+import { sendPasswordResetEmail } from "firebase/auth";
+import { auth } from "../firebaseConfig"; // siguraduhin tama yung import mo
 
 const ForgotPassword: React.FC = () => {
   const router = useRouter();
   const [email, setEmail] = useState("");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState<{ text: string; success: boolean } | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!email) {
-      setMessage("Please enter your email.");
+      setMessage({ text: "Please enter your email.", success: false });
       return;
     }
 
-    
-    setMessage(`Password reset link sent to ${email}`);
-    setTimeout(() => {
-      router.push("/login");
-    }, 2000);
+    try {
+      await sendPasswordResetEmail(auth, email);
+      setMessage({ text: `Password reset link sent to ${email}`, success: true });
+      setTimeout(() => {
+        router.push("/login");
+      }, 2500);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setMessage({ text: err.message, success: false });
+      } else {
+        setMessage({ text: "Something went wrong.", success: false });
+      }
+    }
   };
 
   return (
@@ -33,10 +43,11 @@ const ForgotPassword: React.FC = () => {
             placeholder="Enter your email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            required
           />
           <Button type="submit">Send Reset Link</Button>
         </form>
-        {message && <Message>{message}</Message>}
+        {message && <Message success={message.success}>{message.text}</Message>}
         <Back onClick={() => router.push("/login")}>Back to Login</Back>
       </Card>
     </Wrapper>
@@ -97,8 +108,8 @@ const Back = styled.p`
   font-size: 14px;
 `;
 
-const Message = styled.p`
+const Message = styled.p<{ success?: boolean }>`
   margin-top: 10px;
-  color: green;
+  color: ${(props) => (props.success ? "green" : "red")};
   font-size: 14px;
 `;

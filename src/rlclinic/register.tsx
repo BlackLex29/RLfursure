@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import React, { useState } from "react";
 import styled, { createGlobalStyle } from "styled-components";
@@ -126,6 +126,7 @@ export const Register = () => {
     lastname: "",
     email: "",
     password: "",
+    confirmPassword: "",
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -138,6 +139,12 @@ export const Register = () => {
     e.preventDefault();
     setError("");
     setLoading(true);
+
+    if (formData.password !== formData.confirmPassword) {
+      setError("Passwords do not match!");
+      setLoading(false);
+      return;
+    }
 
     try {
       // ✅ Firebase Auth create user
@@ -157,7 +164,8 @@ export const Register = () => {
         createdAt: new Date().toISOString(),
       });
 
-      router.push("/login");
+      // ✅ Redirect to pet registration with user data as query params
+      router.push(`/petregister?firstname=${encodeURIComponent(formData.firstname)}&lastname=${encodeURIComponent(formData.lastname)}&email=${encodeURIComponent(formData.email)}`);
     } catch (err: unknown) {
       if (err instanceof Error) {
         console.error(err);
@@ -223,6 +231,19 @@ export const Register = () => {
                 required
                 minLength={6}
                 value={formData.password}
+                onChange={handleChange}
+              />
+            </InputGroup>
+
+            <InputGroup>
+              <Label htmlFor="confirmPassword">Confirm Password</Label>
+              <Input
+                id="confirmPassword"
+                name="confirmPassword"
+                type="password"
+                required
+                minLength={6}
+                value={formData.confirmPassword}
                 onChange={handleChange}
               />
             </InputGroup>

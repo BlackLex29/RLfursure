@@ -1,10 +1,11 @@
-import MedicalRecord from "@/rlclinic/medicalrecord";
+import MedicalRecordForm from "@/rlclinic/MedicalRecord";
 
 export default function Home() {
   return (
     <div  >
       
-      <MedicalRecord/>
+      <MedicalRecordForm/>
     </div>
+    
   );
-}
+} 

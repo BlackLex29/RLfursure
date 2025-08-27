@@ -1,3 +1,5 @@
+"use client";
+
 import Petregister from "@/rlclinic/petregistration";
 import React, { Suspense } from 'react';
 
