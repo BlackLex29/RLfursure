@@ -289,7 +289,7 @@ const MedicalRecordForm: React.FC = () => {
             <FormCard>
               <Title>
                 {editingRecord ? "Edit Medical Record" : "Add New Medical Record"}
-                <FormHelpText>Please fill in all required fields marked with *</FormHelpText>
+                <FormHelpText>{"Please fill in all required fields marked with *"}</FormHelpText>
               </Title>
               <Form onSubmit={handleSubmit}>
                 <FormRow>
@@ -330,7 +330,7 @@ const MedicalRecordForm: React.FC = () => {
                   <FormGroup>
                     <Label>Diagnosis *</Label>
                     <Select name="diagnosis" value={formData.diagnosis} onChange={handleChange} required>
-                      <option value="">Select Diagnosis</option>
+                      <option value="">{"Select Diagnosis"}</option>
                       {(DIAGNOSIS_OPTIONS[formData.petType as keyof typeof DIAGNOSIS_OPTIONS] || []).map(opt => (
                         <option key={opt} value={opt}>{opt}</option>
                       ))}
@@ -339,7 +339,7 @@ const MedicalRecordForm: React.FC = () => {
                   <FormGroup>
                     <Label>Treatment *</Label>
                     <Select name="treatment" value={formData.treatment} onChange={handleChange} required>
-                      <option value="">Select Treatment</option>
+                      <option value="">{"Select Treatment"}</option>
                       {(TREATMENT_OPTIONS[formData.petType as keyof typeof TREATMENT_OPTIONS] || []).map(opt => (
                         <option key={opt} value={opt}>{opt}</option>
                       ))}
@@ -384,10 +384,10 @@ const MedicalRecordForm: React.FC = () => {
                 <SectionTitle>Medical Records</SectionTitle>
                 <FilterSection>
                   <SearchContainer>
-                    <SearchIcon className="material-icons">Search</SearchIcon>
+                    <SearchIcon className="material-icons">search</SearchIcon>
                     <SearchInput 
                       type="text" 
-                      placeholder="" 
+                      placeholder="Search by pet or owner name" 
                       value={searchTerm} 
                       onChange={(e) => setSearchTerm(e.target.value)}
                     />
@@ -398,7 +398,7 @@ const MedicalRecordForm: React.FC = () => {
                     <option value="cat">Cats Only</option>
                   </FilterSelect>
                   <RefreshButton onClick={fetchMedicalRecords}>
-                    <Icon className="material-icons"></Icon>
+                    <Icon className="material-icons">refresh</Icon>
                     Refresh
                   </RefreshButton>
                 </FilterSection>
@@ -426,7 +426,7 @@ const MedicalRecordForm: React.FC = () => {
                     <EmptyText>No medical records found</EmptyText>
                     <EmptySubtext>{searchTerm || filterPetType !== "all" ? "Try adjusting your search or filter" : "Add your first medical record to get started"}</EmptySubtext>
                     <AddButton onClick={() => setShowForm(true)}>
-                      <Icon className="material-icons"></Icon>
+                      <Icon className="material-icons">add</Icon>
                       Add Your First Record
                     </AddButton>
                   </EmptyState>
@@ -474,11 +474,11 @@ const MedicalRecordForm: React.FC = () => {
                       
                       <CardActions>
                         <ActionButton onClick={() => handleEdit(record)}>
-                          <Icon className="material-icons"></Icon>
+                          <Icon className="material-icons">edit</Icon>
                           Edit
                         </ActionButton>
                         <DeleteButton onClick={() => handleDelete(record.id)}>
-                          <Icon className="material-icons"></Icon>
+                          <Icon className="material-icons">delete</Icon>
                           Delete
                         </DeleteButton>
                       </CardActions>

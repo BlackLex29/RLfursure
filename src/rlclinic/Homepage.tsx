@@ -50,7 +50,7 @@ const HomePage: React.FC = () => {
             <FeatureCard>
               <FeatureIcon>🔔</FeatureIcon>
               <h3>Pet Wellness</h3>
-              <p>Stay updated on your pet's health and care reminders.</p>
+              <p>Stay updated on your pet&apos;s health and care reminders.</p>
             </FeatureCard>
           </FeaturesGrid>
         </FeaturesSection>
@@ -60,13 +60,13 @@ const HomePage: React.FC = () => {
           <TestimonialGrid>
             <TestimonialCard>
               <TestimonialText>
-                "FurSureCare made managing my dog's medical records so much easier. The reminder system is a lifesaver!"
+                &quot;FurSureCare made managing my dog&apos;s medical records so much easier. The reminder system is a lifesaver!&quot;
               </TestimonialText>
               <TestimonialAuthor>- Maria S.</TestimonialAuthor>
             </TestimonialCard>
             <TestimonialCard>
               <TestimonialText>
-                "I love how I can access my cat's vaccination history from my phone during vet visits. Highly recommend!"
+                &quot;I love how I can access my cat&apos;s vaccination history from my phone during vet visits. Highly recommend!&quot;
               </TestimonialText>
               <TestimonialAuthor>- James T.</TestimonialAuthor>
             </TestimonialCard>
