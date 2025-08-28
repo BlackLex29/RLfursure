@@ -269,7 +269,7 @@ const MedicalRecordForm: React.FC = () => {
             </div>
           </BrandSection>
           <ButtonGroup>
-            <BackButton onClick={() => router.push("/userdashboard")}>
+            <BackButton onClick={() => router.push("/admindashboard")}>
               <Icon className="material-icons"></Icon>
               Back
             </BackButton>

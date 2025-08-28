@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from "react";
-import styled, { createGlobalStyle } from "styled-components";
+import styled, { createGlobalStyle, keyframes } from "styled-components";
 import { useRouter, useSearchParams } from "next/navigation";
 import { db, auth } from "../firebaseConfig";
 import { collection, doc, setDoc, getDoc } from "firebase/firestore";
@@ -15,6 +15,15 @@ const GlobalStyle = createGlobalStyle`
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     background-color: #E6F4F1;
   }
+  
+  * {
+    box-sizing: border-box;
+  }
+`;
+
+const fadeIn = keyframes`
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
 `;
 
 const Petregister: React.FC = () => {
@@ -170,24 +179,44 @@ const Petregister: React.FC = () => {
             <Form onSubmit={handleSubmit}>
               <FormGroup>
                 <Label>
-                  <Input type="text" value={petOwnerEmail} readOnly disabled />
+                  <Input 
+                    type="text" 
+                    value={petOwnerEmail} 
+                    readOnly 
+                    disabled 
+                    className="disabled-input"
+                  />
                   <Span>Pet Owner Email</Span>
                 </Label>
               </FormGroup>
 
-              <FormGroup>
-                <Label>
-                  <Input type="text" value={ownerFirstName} readOnly disabled />
-                  <Span>First Name</Span>
-                </Label>
-              </FormGroup>
+              <FormRow>
+                <FormGroup style={{flex: 1}}>
+                  <Label>
+                    <Input 
+                      type="text" 
+                      value={ownerFirstName} 
+                      readOnly 
+                      disabled 
+                      className="disabled-input"
+                    />
+                    <Span>First Name</Span>
+                  </Label>
+                </FormGroup>
 
-              <FormGroup>
-                <Label>
-                  <Input type="text" value={ownerLastName} readOnly disabled />
-                  <Span>Last Name</Span>
-                </Label>
-              </FormGroup>
+                <FormGroup style={{flex: 1}}>
+                  <Label>
+                    <Input 
+                      type="text" 
+                      value={ownerLastName} 
+                      readOnly 
+                      disabled 
+                      className="disabled-input"
+                    />
+                    <Span>Last Name</Span>
+                  </Label>
+                </FormGroup>
+              </FormRow>
 
               {/* Pet Info */}
               <FormGroup>
@@ -204,62 +233,66 @@ const Petregister: React.FC = () => {
                 </Label>
               </FormGroup>
 
-              <FormGroup>
-                <Label>
-                  <Input 
-                    type="date" 
-                    value={birthday} 
-                    onChange={(e) => setBirthday(e.target.value)} 
-                    max={new Date().toISOString().split('T')[0]}
-                    disabled={isLoading}
-                  />
-                  <Span>Date of Birth</Span>
-                </Label>
-              </FormGroup>
+              <FormRow>
+                <FormGroup style={{flex: 1}}>
+                  <Label>
+                    <Input 
+                      type="date" 
+                      value={birthday} 
+                      onChange={(e) => setBirthday(e.target.value)} 
+                      max={new Date().toISOString().split('T')[0]}
+                      disabled={isLoading}
+                    />
+                    <Span>Date of Birth</Span>
+                  </Label>
+                </FormGroup>
 
-              <FormGroup>
-                <Label>
-                  <Input 
-                    type="text" 
-                    value={color} 
-                    onChange={(e) => setColor(e.target.value)} 
-                    placeholder=" " 
-                    disabled={isLoading}
-                  />
-                  <Span>Color/Markings</Span>
-                </Label>
-              </FormGroup>
+                <FormGroup style={{flex: 1}}>
+                  <Label>
+                    <Input 
+                      type="text" 
+                      value={color} 
+                      onChange={(e) => setColor(e.target.value)} 
+                      placeholder=" " 
+                      disabled={isLoading}
+                    />
+                    <Span>Color/Markings</Span>
+                  </Label>
+                </FormGroup>
+              </FormRow>
 
-              <FormGroup>
-                <Label>
-                  <Input 
-                    type="text" 
-                    value={petType} 
-                    onChange={(e) => setPetType(e.target.value)} 
-                    placeholder=" " 
-                    disabled={isLoading}
-                  />
-                  <Span>Pet Type</Span>
-                </Label>
-              </FormGroup>
+              <FormRow>
+                <FormGroup style={{flex: 1}}>
+                  <Label>
+                    <Input 
+                      type="text" 
+                      value={petType} 
+                      onChange={(e) => setPetType(e.target.value)} 
+                      placeholder=" " 
+                      disabled={isLoading}
+                    />
+                    <Span>Pet Type</Span>
+                  </Label>
+                </FormGroup>
 
-              <FormGroup>
-                <Label>
-                  <Input 
-                    type="text" 
-                    value={petBreed} 
-                    onChange={(e) => setPetBreed(e.target.value)} 
-                    placeholder=" " 
-                    disabled={isLoading}
-                  />
-                  <Span>Breed</Span>
-                </Label>
-              </FormGroup>
+                <FormGroup style={{flex: 1}}>
+                  <Label>
+                    <Input 
+                      type="text" 
+                      value={petBreed} 
+                      onChange={(e) => setPetBreed(e.target.value)} 
+                      placeholder=" " 
+                      disabled={isLoading}
+                    />
+                    <Span>Breed</Span>
+                  </Label>
+                </FormGroup>
+              </FormRow>
 
               <FormGroup>
                 <GenderTitle>Gender *</GenderTitle>
                 <GenderWrapper>
-                  <RadioLabelStyled selected={gender==="Male"}>
+                  <RadioLabelStyled selected={gender==="Male"} disabled={isLoading}>
                     <RadioInput 
                       type="radio" 
                       name="gender" 
@@ -270,7 +303,7 @@ const Petregister: React.FC = () => {
                     Male
                   </RadioLabelStyled>
 
-                  <RadioLabelStyled selected={gender==="Female"}>
+                  <RadioLabelStyled selected={gender==="Female"} disabled={isLoading}>
                     <RadioInput 
                       type="radio" 
                       name="gender" 
@@ -285,7 +318,12 @@ const Petregister: React.FC = () => {
 
               <ButtonGroup>
                 <Button type="submit" disabled={isLoading || !petName.trim()}>
-                  {isLoading ? "Registering..." : "Register Pet"}
+                  {isLoading ? (
+                    <>
+                      <Spinner />
+                      Registering...
+                    </>
+                  ) : "Register Pet"}
                 </Button>
                 <CancelButton 
                   type="button" 
@@ -305,7 +343,6 @@ const Petregister: React.FC = () => {
 
 export default Petregister;
 
-
 /* ===== STYLED COMPONENTS ===== */
 const PageContainer = styled.div`
   display: flex;
@@ -321,6 +358,10 @@ const HeaderBar = styled.header`
   background: linear-gradient(135deg, #6bc1e1 0%, #34b89c 100%);
   color: white;
   box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.1);
+  
+  @media (max-width: 768px) {
+    padding: 15px 20px;
+  }
 `;
 
 const BrandSection = styled.div`
@@ -334,6 +375,10 @@ const ClinicName = styled.h1`
   font-weight: bold;
   font-family: "Rozha One", serif;
   margin: 0;
+  
+  @media (max-width: 768px) {
+    font-size: 24px;
+  }
 `;
 
 const Tagline = styled.p`
@@ -341,6 +386,10 @@ const Tagline = styled.p`
   font-weight: 500;
   margin: 0;
   opacity: 0.9;
+  
+  @media (max-width: 768px) {
+    font-size: 14px;
+  }
 `;
 
 const Content = styled.div`
@@ -349,15 +398,25 @@ const Content = styled.div`
   justify-content: center;
   align-items: flex-start;
   padding: 40px 20px;
+  
+  @media (max-width: 768px) {
+    padding: 20px 15px;
+  }
 `;
 
 const Card = styled.div`
   background: #fff;
   padding: 40px;
   border-radius: 20px;
-  max-width: 500px;
+  max-width: 600px;
   width: 100%;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+  animation: ${fadeIn} 0.5s ease;
+  
+  @media (max-width: 768px) {
+    padding: 25px 20px;
+    border-radius: 15px;
+  }
 `;
 
 const Header = styled.h2`
@@ -370,10 +429,19 @@ const Header = styled.h2`
   flex-direction: column;
   align-items: center;
   gap: 10px;
+  
+  @media (max-width: 768px) {
+    font-size: 24px;
+    margin-bottom: 20px;
+  }
 `;
 
 const PetIcon = styled.span`
   font-size: 40px;
+  
+  @media (max-width: 768px) {
+    font-size: 32px;
+  }
 `;
 
 const Form = styled.form`
@@ -381,8 +449,19 @@ const Form = styled.form`
   flex-direction: column;
 `;
 
+const FormRow = styled.div`
+  display: flex;
+  gap: 15px;
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+    gap: 0;
+  }
+`;
+
 const FormGroup = styled.div`
   margin-bottom: 20px;
+  width: 100%;
 `;
 
 const Label = styled.label`
@@ -414,6 +493,11 @@ const Input = styled.input`
     padding: 0 5px;
     color: #34b89c;
   }
+  
+  @media (max-width: 768px) {
+    padding: 12px;
+    font-size: 14px;
+  }
 `;
 
 const Span = styled.span`
@@ -424,40 +508,68 @@ const Span = styled.span`
   color: #888;
   pointer-events: none;
   transition: all 0.2s ease;
+  
+  @media (max-width: 768px) {
+    font-size: 14px;
+    top: 12px;
+  }
 `;
 
 const GenderTitle = styled.p`
   margin-bottom: 10px;
   font-weight: 600;
   color: #2c3e50;
+  
+  @media (max-width: 768px) {
+    font-size: 14px;
+  }
 `;
 
 const GenderWrapper = styled.div`
   display: flex;
   gap: 20px;
+  
+  @media (max-width: 768px) {
+    gap: 10px;
+  }
 `;
 
-const RadioLabelStyled = styled.label<{selected?: boolean}>`
+const RadioLabelStyled = styled.label<{selected?: boolean, disabled?: boolean}>`
   display: flex;
   align-items: center;
   gap: 8px;
-  cursor: pointer;
+  cursor: ${props => props.disabled ? 'not-allowed' : 'pointer'};
   padding: 10px 15px;
   border-radius: 8px;
-  background: ${props => props.selected ? 'linear-gradient(90deg, #6bc1e1, #34b89c)' : '#f8f9fa'};
-  color: ${props => props.selected ? 'white' : '#2c3e50'};
+  background: ${props => {
+    if (props.disabled) return '#f8f9fa';
+    return props.selected ? 'linear-gradient(90deg, #6bc1e1, #34b89c)' : '#f8f9fa';
+  }};
+  color: ${props => {
+    if (props.disabled) return '#aaa';
+    return props.selected ? 'white' : '#2c3e50';
+  }};
   transition: all 0.2s;
+  flex: 1;
+  justify-content: center;
 
   &:hover {
-    background: ${props => props.selected ? 'linear-gradient(90deg, #5aa7c8, #2f9b85)' : '#e9ecef'};
+    background: ${props => {
+      if (props.disabled) return '#f8f9fa';
+      return props.selected 
+        ? 'linear-gradient(90deg, #5aa7c8, #2f9b85)' 
+        : '#e9ecef';
+    }};
+  }
+  
+  @media (max-width: 768px) {
+    padding: 8px 12px;
+    font-size: 14px;
   }
 `;
 
 const RadioInput = styled.input`
-  cursor: pointer;
-  &:disabled {
-    cursor: not-allowed;
-  }
+  cursor: ${props => props.disabled ? 'not-allowed' : 'pointer'};
 `;
 
 const ButtonGroup = styled.div`
@@ -478,11 +590,20 @@ const Button = styled.button`
   font-weight: 600;
   cursor: ${props => props.disabled ? 'not-allowed' : 'pointer'};
   transition: all 0.2s ease;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
   
   &:hover:not(:disabled) {
     opacity: 0.9;
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(52,184,156,0.3);
+  }
+  
+  @media (max-width: 768px) {
+    padding: 12px;
+    font-size: 14px;
   }
 `;
 
@@ -505,5 +626,24 @@ const CancelButton = styled.button`
   &:disabled {
     cursor: not-allowed;
     opacity: 0.7;
+  }
+  
+  @media (max-width: 768px) {
+    padding: 12px;
+    font-size: 14px;
+  }
+`;
+
+const Spinner = styled.div`
+  width: 16px;
+  height: 16px;
+  border: 2px solid transparent;
+  border-top: 2px solid white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
   }
 `;

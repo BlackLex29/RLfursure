@@ -28,16 +28,8 @@ interface MedicalRecord {
   treatment: string;
   date: string;
   notes: string;
-  createdAt?: Timestamp | string; // Use specific type instead of any
+  createdAt?: Timestamp | string;
   updateType?: string;
-}
-
-interface MedicalHistory {
-  id: string;
-  date: string;
-  procedure: string;
-  description: string;
-  veterinarian: string;
 }
 
 const UserMedicalRecords: React.FC = () => {
@@ -45,10 +37,8 @@ const UserMedicalRecords: React.FC = () => {
   const auth = getAuth();
 
   const [records, setRecords] = useState<MedicalRecord[]>([]);
-  const [medicalHistory, setMedicalHistory] = useState<MedicalHistory[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [activeTab, setActiveTab] = useState<'records' | 'history'>('records');
   const [openRecordId, setOpenRecordId] = useState<string | null>(null);
 
   // Fetch user medical records safely
@@ -76,30 +66,6 @@ const UserMedicalRecords: React.FC = () => {
       alert("Failed to load medical records.");
     } finally {
       setLoading(false);
-    }
-  }, []);
-
-  // Fetch medical history
-  const fetchMedicalHistory = useCallback(async (userEmail?: string | null) => {
-    if (!userEmail) {
-      setMedicalHistory([]);
-      return;
-    }
-
-    try {
-      const q = query(
-        collection(db, "medicalHistory"),
-        where("ownerEmail", "==", userEmail),
-        orderBy("date", "desc")
-      );
-      const snapshot = await getDocs(q);
-      const historyData: MedicalHistory[] = [];
-      snapshot.forEach((doc) => {
-        historyData.push({ id: doc.id, ...(doc.data() as Omit<MedicalHistory, 'id'>) });
-      });
-      setMedicalHistory(historyData);
-    } catch (error) {
-      console.error("Error fetching medical history:", error);
     }
   }, []);
 
@@ -142,19 +108,17 @@ const UserMedicalRecords: React.FC = () => {
       const email = user?.email ?? null;
       if (email) {
         await fetchUserMedicalRecords(email);
-        await fetchMedicalHistory(email);
         const unsubscribeSnapshot = subscribeToMedicalRecordUpdates(email);
         // Cleanup on unmount or email change
         return () => unsubscribeSnapshot?.();
       } else {
         setRecords([]);
-        setMedicalHistory([]);
         setLoading(false);
       }
     });
 
     return () => unsubscribeAuth();
-  }, [auth, fetchUserMedicalRecords, fetchMedicalHistory, subscribeToMedicalRecordUpdates]);
+  }, [auth, fetchUserMedicalRecords, subscribeToMedicalRecordUpdates]);
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -205,109 +169,64 @@ const UserMedicalRecords: React.FC = () => {
         <Content>
           <WelcomeMessage>Welcome, {currentUser.displayName || currentUser.email}!</WelcomeMessage>
 
-          <TabsContainer>
-            <TabButton $active={activeTab === 'records'} onClick={() => setActiveTab('records')}>
-              Medical Records
-            </TabButton>
-            <TabButton $active={activeTab === 'history'} onClick={() => setActiveTab('history')}>
-              Medical History
-            </TabButton>
-          </TabsContainer>
-
-          {activeTab === 'records' ? (
-            <>
-              <SectionTitle>My Pet Medical Records</SectionTitle>
-              {records.length === 0 ? (
-                <EmptyState>
-                  <EmptyIcon>📋</EmptyIcon>
-                  <EmptyText>No medical records found</EmptyText>
-                  <EmptySubtext>&#39;You don&apos;t have any medical records yet.</EmptySubtext>
-                </EmptyState>
-              ) : (
-                <RecordsGrid>
-                  {records.map((record) => (
-                    <RecordCard key={record.id} onClick={() => setOpenRecordId(openRecordId === record.id ? null : record.id)}>
-                      <RecordHeader>
-                        <div>
-                          <PetName>{record.petName}</PetName>
-                          <PetType>{record.petType === 'dog' ? 'Dog' : 'Cat'}</PetType>
-                        </div>
-                        <RecordDate>{formatDate(record.date)}</RecordDate>
-                      </RecordHeader>
-
-                      <UpdateBadge>
-                        {record.updateType === 'record_updated' ? 'Updated' : 'New Record'}
-                      </UpdateBadge>
-
-                      <RecordDetails $open={openRecordId === record.id}>
-                        <DetailItem>
-                          <DetailLabel>Owner:</DetailLabel>
-                          <DetailValue>{record.ownerName}</DetailValue>
-                        </DetailItem>
-
-                        <DetailItem>
-                          <DetailLabel>Diagnosis:</DetailLabel>
-                          <DetailValue>{record.diagnosis}</DetailValue>
-                        </DetailItem>
-
-                        <DetailItem>
-                          <DetailLabel>Treatment:</DetailLabel>
-                          <DetailValue>{record.treatment}</DetailValue>
-                        </DetailItem>
-
-                        {record.notes && (
-                          <DetailItem>
-                            <DetailLabel>Notes:</DetailLabel>
-                            <DetailValue>{record.notes}</DetailValue>
-                          </DetailItem>
-                        )}
-
-                        <DetailItem>
-                          <DetailLabel>Status:</DetailLabel>
-                          <DetailValue>
-                            {record.updateType === 'record_updated'
-                              ? 'Record was updated by clinic'
-                              : 'New record created by clinic'}
-                          </DetailValue>
-                        </DetailItem>
-                      </RecordDetails>
-                    </RecordCard>
-                  ))}
-                </RecordsGrid>
-              )}
-            </>
+          <SectionTitle>My Pet Medical Records</SectionTitle>
+          {records.length === 0 ? (
+            <EmptyState>
+              <EmptyIcon>📋</EmptyIcon>
+              <EmptyText>No medical records found</EmptyText>
+              <EmptySubtext>You don&apos;t have any medical records yet.</EmptySubtext>
+            </EmptyState>
           ) : (
-            <>
-              <SectionTitle>Medical History</SectionTitle>
-              {medicalHistory.length === 0 ? (
-                <EmptyState>
-                  <EmptyIcon>🩺</EmptyIcon>
-                  <EmptyText>No medical history found</EmptyText>
-                  <EmptySubtext>&#39;You don&apos;t have any medical history yet.</EmptySubtext>
-                </EmptyState>
-              ) : (
-                <HistoryTable>
-                  <thead>
-                    <tr>
-                      <TableHeader>Date</TableHeader>
-                      <TableHeader>Procedure</TableHeader>
-                      <TableHeader>Description</TableHeader>
-                      <TableHeader>Veterinarian</TableHeader>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {medicalHistory.map((history) => (
-                      <TableRow key={history.id}>
-                        <TableCell>{formatDate(history.date)}</TableCell>
-                        <TableCell>{history.procedure}</TableCell>
-                        <TableCell>{history.description}</TableCell>
-                        <TableCell>{history.veterinarian}</TableCell>
-                      </TableRow>
-                    ))}
-                  </tbody>
-                </HistoryTable>
-              )}
-            </>
+            <RecordsGrid>
+              {records.map((record) => (
+                <RecordCard key={record.id} onClick={() => setOpenRecordId(openRecordId === record.id ? null : record.id)}>
+                  <RecordHeader>
+                    <div>
+                      <PetName>{record.petName}</PetName>
+                      <PetType>{record.petType === 'dog' ? 'Dog' : 'Cat'}</PetType>
+                    </div>
+                    <RecordDate>{formatDate(record.date)}</RecordDate>
+                  </RecordHeader>
+
+                  <UpdateBadge>
+                    {record.updateType === 'record_updated' ? 'Updated' : 'New Record'}
+                  </UpdateBadge>
+
+                  <RecordDetails $open={openRecordId === record.id}>
+                    <DetailItem>
+                      <DetailLabel>Owner:</DetailLabel>
+                      <DetailValue>{record.ownerName}</DetailValue>
+                    </DetailItem>
+
+                    <DetailItem>
+                      <DetailLabel>Diagnosis:</DetailLabel>
+                      <DetailValue>{record.diagnosis}</DetailValue>
+                    </DetailItem>
+
+                    <DetailItem>
+                      <DetailLabel>Treatment:</DetailLabel>
+                      <DetailValue>{record.treatment}</DetailValue>
+                    </DetailItem>
+
+                    {record.notes && (
+                      <DetailItem>
+                        <DetailLabel>Notes:</DetailLabel>
+                        <DetailValue>{record.notes}</DetailValue>
+                      </DetailItem>
+                    )}
+
+                    <DetailItem>
+                      <DetailLabel>Status:</DetailLabel>
+                      <DetailValue>
+                        {record.updateType === 'record_updated'
+                          ? 'Record was updated by clinic'
+                          : 'New record created by clinic'}
+                      </DetailValue>
+                    </DetailItem>
+                  </RecordDetails>
+                </RecordCard>
+              ))}
+            </RecordsGrid>
           )}
         </Content>
       </PageContainer>
@@ -317,8 +236,6 @@ const UserMedicalRecords: React.FC = () => {
 
 export default UserMedicalRecords;
 
-/* ===== STYLED COMPONENTS ===== */
-// ... (keep your styles as is) ...
 /* ===== STYLED COMPONENTS ===== */
 const PageContainer = styled.div`
   display: flex;
@@ -360,6 +277,10 @@ const ClinicName = styled.h1`
   @media (max-width: 768px) {
     font-size: 28px;
   }
+  
+  @media (max-width: 480px) {
+    font-size: 24px;
+  }
 `;
 
 const Tagline = styled.p`
@@ -368,6 +289,10 @@ const Tagline = styled.p`
   margin: 0;
   opacity: 0.9;
   letter-spacing: 1px;
+  
+  @media (max-width: 480px) {
+    font-size: 14px;
+  }
 `;
 
 const ButtonGroup = styled.div`
@@ -395,6 +320,11 @@ const BackButton = styled.button`
   &:hover {
     background: rgba(255, 255, 255, 0.3);
   }
+  
+  @media (max-width: 480px) {
+    padding: 8px 16px;
+    font-size: 13px;
+  }
 `;
 
 const Content = styled.div`
@@ -404,6 +334,10 @@ const Content = styled.div`
 
   @media (max-width: 768px) {
     padding: 20px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 15px;
   }
 `;
 
@@ -424,26 +358,9 @@ const WelcomeMessage = styled.h2`
   color: #2c3e50;
   margin-bottom: 20px;
   font-weight: 500;
-`;
-
-const TabsContainer = styled.div`
-  display: flex;
-  margin-bottom: 25px;
-  border-bottom: 1px solid #ddd;
-`;
-
-const TabButton = styled.button<{ $active: boolean }>`
-  padding: 12px 24px;
-  background: ${(props) => (props.$active ? '#6bc1e1' : 'transparent')};
-  color: ${(props) => (props.$active ? 'white' : '#666')};
-  border: none;
-  border-radius: 8px 8px 0 0;
-  cursor: pointer;
-  font-weight: ${(props) => (props.$active ? '600' : 'normal')};
-  transition: all 0.2s;
-
-  &:hover {
-    background: ${(props) => (props.$active ? '#6bc1e1' : '#f0f7ff')};
+  
+  @media (max-width: 480px) {
+    font-size: 18px;
   }
 `;
 
@@ -452,6 +369,10 @@ const SectionTitle = styled.h3`
   font-weight: 600;
   color: #2c3e50;
   margin-bottom: 25px;
+  
+  @media (max-width: 480px) {
+    font-size: 20px;
+  }
 `;
 
 const EmptyState = styled.div`
@@ -460,6 +381,10 @@ const EmptyState = styled.div`
   background: white;
   border-radius: 16px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  
+  @media (max-width: 480px) {
+    padding: 40px 15px;
+  }
 `;
 
 const EmptyIcon = styled.div`
@@ -472,11 +397,19 @@ const EmptyText = styled.p`
   color: #2c3e50;
   font-weight: 600;
   margin-bottom: 10px;
+  
+  @media (max-width: 480px) {
+    font-size: 18px;
+  }
 `;
 
 const EmptySubtext = styled.p`
   color: #666;
   font-size: 16px;
+  
+  @media (max-width: 480px) {
+    font-size: 14px;
+  }
 `;
 
 const RecordsGrid = styled.div`
@@ -503,6 +436,10 @@ const RecordCard = styled.div`
     transform: translateY(-4px);
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
   }
+  
+  @media (max-width: 480px) {
+    padding: 20px;
+  }
 `;
 
 const RecordHeader = styled.div`
@@ -512,6 +449,11 @@ const RecordHeader = styled.div`
   margin-bottom: 15px;
   padding-bottom: 15px;
   border-bottom: 1px solid #eee;
+  
+  @media (max-width: 480px) {
+    flex-direction: column;
+    gap: 10px;
+  }
 `;
 
 const PetName = styled.h4`
@@ -544,6 +486,14 @@ const UpdateBadge = styled.span`
   border-radius: 6px;
   font-size: 12px;
   font-weight: 600;
+  
+  @media (max-width: 480px) {
+    position: relative;
+    top: 0;
+    right: 0;
+    display: inline-block;
+    margin-top: 10px;
+  }
 `;
 
 const RecordDetails = styled.div<{ $open: boolean }>`
@@ -557,45 +507,24 @@ const RecordDetails = styled.div<{ $open: boolean }>`
 const DetailItem = styled.div`
   display: flex;
   gap: 10px;
+  
+  @media (max-width: 480px) {
+    flex-direction: column;
+    gap: 5px;
+  }
 `;
 
 const DetailLabel = styled.span`
   font-weight: 600;
   color: #2c3e50;
   min-width: 80px;
+  
+  @media (max-width: 480px) {
+    min-width: auto;
+  }
 `;
 
 const DetailValue = styled.span`
   color: #666;
   flex: 1;
-`;
-
-const HistoryTable = styled.table`
-  width: 100%;
-  border-collapse: collapse;
-  background: white;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-`;
-
-const TableHeader = styled.th`
-  background: #6bc1e1;
-  color: white;
-  padding: 15px;
-  text-align: left;
-  font-weight: 600;
-`;
-
-const TableRow = styled.tr`
-  border-bottom: 1px solid #eee;
-
-  &:last-child {
-    border-bottom: none;
-  }
-`;
-
-const TableCell = styled.td`
-  padding: 15px;
-  color: #666;
 `;

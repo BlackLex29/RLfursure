@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useEffect, useState } from "react";
 import styled, { createGlobalStyle } from "styled-components";
 import { useRouter } from "next/navigation";
@@ -11,7 +13,7 @@ const GlobalStyle = createGlobalStyle`
     padding: 0;
     box-sizing: border-box;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background-color: #E6F4F1;
+    background-color: #f8fafc;
     scroll-behavior: smooth;
   }
   
@@ -57,6 +59,12 @@ const UserDashboard: React.FC = () => {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isClient, setIsClient] = useState(false);
+
+  // Fix for hydration: Wait for component to mount on client
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   // Fix for hydration: Use the same initial value on server and client
   const [today, setToday] = useState("");
@@ -161,6 +169,24 @@ const UserDashboard: React.FC = () => {
 
   const cancelEdit = () => setEditingId(null);
 
+  // Prevent rendering until client-side to avoid hydration mismatch
+  if (!isClient) {
+    return (
+      <>
+        <GlobalStyle />
+        <PageContainer>
+          <HeaderBar>
+            <HeaderLeft>
+              <WelcomeSection>
+                <WelcomeTitle>Loading...</WelcomeTitle>
+              </WelcomeSection>
+            </HeaderLeft>
+          </HeaderBar>
+        </PageContainer>
+      </>
+    );
+  }
+
   return (
     <>
       <GlobalStyle />
@@ -169,7 +195,11 @@ const UserDashboard: React.FC = () => {
         <HeaderBar>
           <HeaderLeft>
             <MobileMenuButton onClick={() => setIsMenuOpen(!isMenuOpen)}>
-              ☰
+              <HamburgerIcon className={isMenuOpen ? "open" : ""}>
+                <span></span>
+                <span></span>
+                <span></span>
+              </HamburgerIcon>
             </MobileMenuButton>
             <WelcomeSection>
               {loading ? (
@@ -243,80 +273,82 @@ const UserDashboard: React.FC = () => {
                 </ScheduleButton>
               </NoAppointments>
             ) : (
-              appointments
-                .filter(a => a.petName)
-                .map((appt) => (
-                  <AppointmentCard key={appt.id}>
-                    {editingId === appt.id ? (
-                      <EditForm>
-                        <EditTitle>Edit Appointment</EditTitle>
-                        <FormGroup>
-                          <Label>Date:</Label>
-                          <DateInput
-                            type="date"
-                            value={editDate}
-                            onChange={(e) => setEditDate(e.target.value)}
-                            min={today}
-                          />
-                        </FormGroup>
-                        <FormGroup>
-                          <Label>Time Slot:</Label>
-                          <SelectInput
-                            value={editSlot}
-                            onChange={(e) => setEditSlot(e.target.value)}
-                          >
-                            <option value="">Select a time slot</option>
-                            {timeSlots.map(slot => {
-                              const isTaken = appointments.some(a =>
-                                a.id !== appt.id &&
-                                a.date === editDate &&
-                                a.timeSlot === slot &&
-                                a.status !== "Cancelled"
-                              );
-                              return (
-                                <option key={slot} value={slot} disabled={isTaken}>
-                                  {slot} {isTaken ? "(Taken)" : ""}
-                                </option>
-                              );
-                            })}
-                          </SelectInput>
-                        </FormGroup>
-                        <EditButtonRow>
-                          <SaveButton onClick={() => saveEdit(appt.id)}>Save Changes</SaveButton>
-                          <CancelEditButton onClick={cancelEdit}>Cancel</CancelEditButton>
-                        </EditButtonRow>
-                      </EditForm>
-                    ) : (
-                      <>
-                        <AppointmentHeader>
-                          <AppointmentInfo>
-                            <AppointmentDate>{appt.date || today}</AppointmentDate>
-                            <AppointmentTime>{appt.timeSlot}</AppointmentTime>
-                          </AppointmentInfo>
-                          <StatusBadge status={appt.status || "Pending"}>
-                            {appt.status || "Pending"}
-                          </StatusBadge>
-                        </AppointmentHeader>
+              <AppointmentsList>
+                {appointments
+                  .filter(a => a.petName)
+                  .map((appt) => (
+                    <AppointmentCard key={appt.id}>
+                      {editingId === appt.id ? (
+                        <EditForm>
+                          <EditTitle>Edit Appointment</EditTitle>
+                          <FormGroup>
+                            <Label>Date:</Label>
+                            <DateInput
+                              type="date"
+                              value={editDate}
+                              onChange={(e) => setEditDate(e.target.value)}
+                              min={today}
+                            />
+                          </FormGroup>
+                          <FormGroup>
+                            <Label>Time Slot:</Label>
+                            <SelectInput
+                              value={editSlot}
+                              onChange={(e) => setEditSlot(e.target.value)}
+                            >
+                              <option value="">Select a time slot</option>
+                              {timeSlots.map(slot => {
+                                const isTaken = appointments.some(a =>
+                                  a.id !== appt.id &&
+                                  a.date === editDate &&
+                                  a.timeSlot === slot &&
+                                  a.status !== "Cancelled"
+                                );
+                                return (
+                                  <option key={slot} value={slot} disabled={isTaken}>
+                                    {slot} {isTaken ? "(Taken)" : ""}
+                                  </option>
+                                );
+                              })}
+                            </SelectInput>
+                          </FormGroup>
+                          <EditButtonRow>
+                            <SaveButton onClick={() => saveEdit(appt.id)}>Save Changes</SaveButton>
+                            <CancelEditButton onClick={cancelEdit}>Cancel</CancelEditButton>
+                          </EditButtonRow>
+                        </EditForm>
+                      ) : (
+                        <>
+                          <AppointmentHeader>
+                            <AppointmentInfo>
+                              <AppointmentDate>{appt.date || today}</AppointmentDate>
+                              <AppointmentTime>{appt.timeSlot}</AppointmentTime>
+                            </AppointmentInfo>
+                            <StatusBadge status={appt.status || "Pending"}>
+                              {appt.status || "Pending"}
+                            </StatusBadge>
+                          </AppointmentHeader>
 
-                        <AppointmentDetails>
-                          <DetailItem>
-                            <DetailLabel>Pet:</DetailLabel>
-                            <DetailValue>{appt.petName}</DetailValue>
-                          </DetailItem>
-                          <DetailItem>
-                            <DetailLabel>Payment:</DetailLabel>
-                            <DetailValue>{appt.paymentMethod || "Not specified"}</DetailValue>
-                          </DetailItem>
-                        </AppointmentDetails>
+                          <AppointmentDetails>
+                            <DetailItem>
+                              <DetailLabel>Pet:</DetailLabel>
+                              <DetailValue>{appt.petName}</DetailValue>
+                            </DetailItem>
+                            <DetailItem>
+                              <DetailLabel>Payment:</DetailLabel>
+                              <DetailValue>{appt.paymentMethod || "Not specified"}</DetailValue>
+                            </DetailItem>
+                          </AppointmentDetails>
 
-                        <ButtonRow>
-                          <EditButton onClick={() => startEditing(appt)}>Reschedule</EditButton>
-                          <CancelButton onClick={() => handleDelete(appt.id)}>Cancel</CancelButton>
-                        </ButtonRow>
-                      </>
-                    )}
-                  </AppointmentCard>
-                ))
+                          <ButtonRow>
+                            <EditButton onClick={() => startEditing(appt)}>Reschedule</EditButton>
+                            <CancelButton onClick={() => handleDelete(appt.id)}>Cancel</CancelButton>
+                          </ButtonRow>
+                        </>
+                      )}
+                    </AppointmentCard>
+                  ))}
+              </AppointmentsList>
             )}
           </AppointmentsSection>
         </Content>
@@ -327,19 +359,19 @@ const UserDashboard: React.FC = () => {
 
 export default UserDashboard;
 
-
 /* ================== RESPONSIVE STYLES ================== */
 const PageContainer = styled.div`
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  width: 100%;
 `;
 
 const HeaderBar = styled.header`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1.2rem 1.5rem;
+  padding: 1.2rem 2rem;
   background: #ffffff;
   box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.08);
   position: sticky;
@@ -348,22 +380,38 @@ const HeaderBar = styled.header`
   flex-wrap: wrap;
   gap: 1rem;
 
+  @media (max-width: 1024px) {
+    padding: 1.2rem 1.5rem;
+  }
+
   @media (max-width: 768px) {
     padding: 1rem;
     position: relative;
+  }
+
+  @media (max-width: 480px) {
+    padding: 0.8rem;
   }
 `;
 
 const HeaderLeft = styled.div`
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 1.5rem;
+
+  @media (max-width: 768px) {
+    gap: 1rem;
+  }
 `;
 
 const HeaderRight = styled.div`
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 1.5rem;
+
+  @media (max-width: 1024px) {
+    gap: 1.2rem;
+  }
 
   @media (max-width: 768px) {
     display: none;
@@ -382,11 +430,39 @@ const MobileMenuButton = styled.button`
   display: none;
   background: none;
   border: none;
-  font-size: 1.5rem;
   cursor: pointer;
+  padding: 0.5rem;
   
   @media (max-width: 768px) {
     display: block;
+  }
+`;
+
+const HamburgerIcon = styled.div`
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 24px;
+  height: 18px;
+  
+  span {
+    height: 2px;
+    width: 100%;
+    background-color: #2c3e50;
+    border-radius: 2px;
+    transition: all 0.3s ease;
+  }
+  
+  &.open span:nth-child(1) {
+    transform: rotate(45deg) translate(6px, 6px);
+  }
+  
+  &.open span:nth-child(2) {
+    opacity: 0;
+  }
+  
+  &.open span:nth-child(3) {
+    transform: rotate(-45deg) translate(6px, -6px);
   }
 `;
 
@@ -396,71 +472,114 @@ const WelcomeSection = styled.div`
 `;
 
 const WelcomeTitle = styled.h2`
-  font-size: clamp(1.5rem, 4vw, 1.8rem);
+  font-size: 1.8rem;
   font-weight: bold;
-  font-family: "Rozha One", serif;
   background: linear-gradient(to right, #6bc1e1, #34b89c);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   margin: 0 0 0.3rem 0;
+  line-height: 1.2;
+
+  @media (max-width: 1024px) {
+    font-size: 1.6rem;
+  }
+
+  @media (max-width: 768px) {
+    font-size: 1.4rem;
+  }
+
+  @media (max-width: 480px) {
+    font-size: 1.2rem;
+  }
 `;
 
 const WelcomeSubtitle = styled.p`
-  font-size: clamp(0.8rem, 2.5vw, 1rem);
+  font-size: 1rem;
   color: #666;
   margin: 0;
+
+  @media (max-width: 768px) {
+    font-size: 0.9rem;
+  }
+
+  @media (max-width: 480px) {
+    font-size: 0.8rem;
+  }
 `;
 
 const ProfileSection = styled.div`
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.8rem;
+
+  @media (max-width: 768px) {
+    justify-content: center;
+  }
 `;
 
 const ProfileIcon = styled.div`
-  font-size: 1.3rem;
-  width: 2.5rem;
-  height: 2.5rem;
+  font-size: 1.5rem;
+  width: 2.8rem;
+  height: 2.8rem;
   border-radius: 50%;
   background: #f0f9ff;
   display: flex;
   align-items: center;
   justify-content: center;
 
+  @media (max-width: 1024px) {
+    width: 2.5rem;
+    height: 2.5rem;
+    font-size: 1.3rem;
+  }
+
   @media (max-width: 768px) {
-    width: 2rem;
-    height: 2rem;
-    font-size: 1rem;
+    width: 2.2rem;
+    height: 2.2rem;
+    font-size: 1.1rem;
   }
 `;
 
 const ProfileName = styled.span`
   font-weight: 600;
   color: #2c3e50;
+  font-size: 1rem;
   
+  @media (max-width: 1024px) {
+    font-size: 0.95rem;
+  }
+
   @media (max-width: 768px) {
     font-size: 0.9rem;
   }
 `;
 
 const LogoutButton = styled.button`
-  background: #34b89c;
+  background: linear-gradient(90deg, #34B89C, #6BC1E1);
   color: #fff;
   border: none;
-  padding: 0.6rem 1.2rem;
+  padding: 0.7rem 1.5rem;
   border-radius: 0.75rem;
-  font-size: 0.9rem;
+  font-size: 1rem;
   cursor: pointer;
   font-weight: 500;
-  transition: background 0.2s;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 6px rgba(52, 184, 156, 0.2);
 
   &:hover {
-    background: #2a8f78;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 10px rgba(52, 184, 156, 0.3);
   }
   
+  @media (max-width: 1024px) {
+    padding: 0.6rem 1.2rem;
+    font-size: 0.9rem;
+  }
+
   @media (max-width: 768px) {
     width: 100%;
     padding: 0.8rem;
+    margin-top: 0.5rem;
   }
 `;
 
@@ -468,104 +587,154 @@ const Content = styled.div`
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2rem;
-  padding: 2rem;
+  gap: 2.5rem;
+  padding: 2.5rem;
   overflow-y: auto;
 
+  @media (max-width: 1024px) {
+    padding: 2rem;
+    gap: 2rem;
+  }
+
   @media (max-width: 768px) {
-    padding: 1rem;
+    padding: 1.5rem;
     gap: 1.5rem;
+  }
+
+  @media (max-width: 480px) {
+    padding: 1rem;
+    gap: 1.2rem;
   }
 `;
 
 const CardsGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 1.2rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
   margin-bottom: 1rem;
 
-  @media (max-width: 640px) {
+  @media (max-width: 1200px) {
     grid-template-columns: repeat(2, 1fr);
   }
+
+  @media (max-width: 768px) {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.2rem;
+  }
   
-  @media (max-width: 480px) {
+  @media (max-width: 580px) {
     grid-template-columns: 1fr;
   }
 `;
 
 const Card = styled.div`
   background: #ffffff;
-  border-radius: 1.1rem;
-  padding: 1.5rem;
-  box-shadow: 0px 6px 20px rgba(0, 0, 0, 0.1);
+  border-radius: 1.2rem;
+  padding: 2rem;
+  box-shadow: 0px 6px 20px rgba(0, 0, 0, 0.08);
   text-align: center;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: all 0.3s ease;
   cursor: pointer;
+  border: 1px solid #eaeaea;
 
   &:hover {
-    transform: translateY(-0.4rem);
-    box-shadow: 0px 8px 25px rgba(0, 0, 0, 0.15);
+    transform: translateY(-5px);
+    box-shadow: 0px 12px 30px rgba(0, 0, 0, 0.15);
   }
   
+  @media (max-width: 1024px) {
+    padding: 1.8rem;
+  }
+
   @media (max-width: 768px) {
+    padding: 1.5rem;
+    border-radius: 1rem;
+  }
+
+  @media (max-width: 480px) {
     padding: 1.2rem;
   }
 `;
 
 const CardIcon = styled.div`
-  font-size: 2.5rem;
-  margin-bottom: 1rem;
+  font-size: 3rem;
+  margin-bottom: 1.2rem;
   
+  @media (max-width: 1024px) {
+    font-size: 2.8rem;
+    margin-bottom: 1rem;
+  }
+
   @media (max-width: 768px) {
-    font-size: 2rem;
+    font-size: 2.5rem;
     margin-bottom: 0.8rem;
   }
 `;
 
 const CardTitle = styled.h3`
-  font-size: 1.1rem;
+  font-size: 1.3rem;
   font-weight: 600;
-  color: #34b89c;
-  margin-bottom: 0.6rem;
+  color: #2c3e50;
+  margin-bottom: 0.8rem;
   
+  @media (max-width: 1024px) {
+    font-size: 1.2rem;
+  }
+
   @media (max-width: 768px) {
-    font-size: 1rem;
+    font-size: 1.1rem;
   }
 `;
 
 const CardText = styled.p`
-  font-size: 0.9rem;
+  font-size: 1rem;
   color: #666;
-  line-height: 1.4;
+  line-height: 1.5;
   
+  @media (max-width: 1024px) {
+    font-size: 0.95rem;
+  }
+
   @media (max-width: 768px) {
-    font-size: 0.8rem;
+    font-size: 0.9rem;
   }
 `;
 
 const AppointmentsSection = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 1.2rem;
+  gap: 1.5rem;
   margin-top: 1rem;
+
+  @media (max-width: 768px) {
+    gap: 1.2rem;
+  }
 `;
 
 const SectionHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.8rem;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.8rem;
 `;
 
 const SectionTitle = styled.h3`
-  font-size: 1.4rem;
+  font-size: 1.6rem;
   font-weight: 600;
   color: #2c3e50;
   margin: 0;
   
+  @media (max-width: 1024px) {
+    font-size: 1.5rem;
+  }
+
   @media (max-width: 768px) {
+    font-size: 1.3rem;
+  }
+
+  @media (max-width: 480px) {
     font-size: 1.2rem;
   }
 `;
@@ -573,23 +742,54 @@ const SectionTitle = styled.h3`
 const AppointmentCount = styled.span`
   background: #e8f4ff;
   color: #0077ff;
-  padding: 0.3rem 0.8rem;
+  padding: 0.4rem 1rem;
   border-radius: 1.2rem;
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   font-weight: 500;
+
+  @media (max-width: 480px) {
+    font-size: 0.8rem;
+    padding: 0.3rem 0.8rem;
+  }
+`;
+
+const AppointmentsList = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  gap: 1.5rem;
+
+  @media (max-width: 1024px) {
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  }
+
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+    gap: 1.2rem;
+  }
 `;
 
 const AppointmentCard = styled.div`
   background: #ffffff;
-  padding: 1.5rem;
-  border-radius: 1rem;
+  padding: 2rem;
+  border-radius: 1.2rem;
   box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.08);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.2rem;
+  border: 1px solid #f0f0f0;
   
+  @media (max-width: 1024px) {
+    padding: 1.8rem;
+  }
+
   @media (max-width: 768px) {
+    padding: 1.5rem;
+    border-radius: 1rem;
+  }
+
+  @media (max-width: 480px) {
     padding: 1.2rem;
+    gap: 1rem;
   }
 `;
 
@@ -598,41 +798,49 @@ const AppointmentHeader = styled.div`
   justify-content: space-between;
   align-items: flex-start;
   flex-wrap: wrap;
-  gap: 0.6rem;
+  gap: 0.8rem;
 `;
 
 const AppointmentInfo = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.5rem;
 `;
 
 const AppointmentDate = styled.span`
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   font-weight: 600;
   color: #2c3e50;
   
+  @media (max-width: 1024px) {
+    font-size: 1.1rem;
+  }
+
   @media (max-width: 768px) {
     font-size: 1rem;
   }
 `;
 
 const AppointmentTime = styled.span`
-  font-size: 0.9rem;
+  font-size: 1rem;
   color: #666;
   background: #f7f9fc;
-  padding: 0.3rem 0.8rem;
+  padding: 0.4rem 0.9rem;
   border-radius: 0.75rem;
   
+  @media (max-width: 1024px) {
+    font-size: 0.95rem;
+  }
+
   @media (max-width: 768px) {
-    font-size: 0.8rem;
+    font-size: 0.9rem;
   }
 `;
 
 const StatusBadge = styled.span<{ status: string }>`
-  padding: 0.3rem 0.8rem;
+  padding: 0.4rem 0.9rem;
   border-radius: 0.75rem;
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   font-weight: 500;
   background: ${props => {
     switch (props.status) {
@@ -650,27 +858,38 @@ const StatusBadge = styled.span<{ status: string }>`
       default: return "#ffc107";
     }
   }};
+
+  @media (max-width: 480px) {
+    font-size: 0.8rem;
+    padding: 0.3rem 0.8rem;
+  }
 `;
 
 const AppointmentDetails = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.8rem;
 `;
 
 const DetailItem = styled.div`
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.8rem;
   flex-wrap: wrap;
 `;
 
 const DetailLabel = styled.span`
   font-weight: 600;
   color: #2c3e50;
-  min-width: 3.8rem;
+  min-width: 4rem;
+  font-size: 1rem;
   
   @media (max-width: 768px) {
+    min-width: 3.5rem;
+    font-size: 0.95rem;
+  }
+
+  @media (max-width: 480px) {
     min-width: 3rem;
     font-size: 0.9rem;
   }
@@ -678,19 +897,25 @@ const DetailLabel = styled.span`
 
 const DetailValue = styled.span`
   color: #666;
+  font-size: 1rem;
   
   @media (max-width: 768px) {
+    font-size: 0.95rem;
+  }
+
+  @media (max-width: 480px) {
     font-size: 0.9rem;
   }
 `;
 
 const ButtonRow = styled.div`
   display: flex;
-  gap: 0.8rem;
+  gap: 1rem;
   margin-top: 0.5rem;
   
   @media (max-width: 480px) {
     flex-direction: column;
+    gap: 0.8rem;
   }
 `;
 
@@ -698,20 +923,27 @@ const EditButton = styled.button`
   background: #2563eb;
   color: white;
   border: none;
-  padding: 0.6rem 1rem;
-  border-radius: 0.5rem;
+  padding: 0.8rem 1.2rem;
+  border-radius: 0.6rem;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: 0.95rem;
   font-weight: 500;
-  transition: background 0.2s;
+  transition: all 0.2s ease;
   flex: 1;
 
   &:hover {
     background: #1d4ed8;
+    transform: translateY(-2px);
   }
   
+  @media (max-width: 1024px) {
+    padding: 0.7rem 1rem;
+    font-size: 0.9rem;
+  }
+
   @media (max-width: 480px) {
     width: 100%;
+    padding: 0.8rem;
   }
 `;
 
@@ -719,39 +951,62 @@ const CancelButton = styled.button`
   background: #dc3545;
   color: white;
   border: none;
-  padding: 0.6rem 1rem;
-  border-radius: 0.5rem;
+  padding: 0.8rem 1.2rem;
+  border-radius: 0.6rem;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: 0.95rem;
   font-weight: 500;
-  transition: background 0.2s;
+  transition: all 0.2s ease;
   flex: 1;
 
   &:hover {
     background: #b02a37;
+    transform: translateY(-2px);
   }
   
+  @media (max-width: 1024px) {
+    padding: 0.7rem 1rem;
+    font-size: 0.9rem;
+  }
+
   @media (max-width: 480px) {
     width: 100%;
+    padding: 0.8rem;
   }
 `;
 
 const NoAppointments = styled.div`
   text-align: center;
-  padding: 2.5rem 1.5rem;
+  padding: 3.5rem 2rem;
   background: #ffffff;
-  border-radius: 1rem;
+  border-radius: 1.2rem;
   box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.08);
+  border: 1px solid #f0f0f0;
   
+  @media (max-width: 1024px) {
+    padding: 3rem 1.5rem;
+  }
+
   @media (max-width: 768px) {
+    padding: 2.5rem 1.2rem;
+    border-radius: 1rem;
+  }
+
+  @media (max-width: 480px) {
     padding: 2rem 1rem;
   }
 `;
 
 const NoAppointmentsIcon = styled.div`
-  font-size: 3.8rem;
-  margin-bottom: 1.2rem;
+  font-size: 4rem;
+  margin-bottom: 1.5rem;
+  opacity: 0.7;
   
+  @media (max-width: 1024px) {
+    font-size: 3.5rem;
+    margin-bottom: 1.2rem;
+  }
+
   @media (max-width: 768px) {
     font-size: 3rem;
     margin-bottom: 1rem;
@@ -759,13 +1014,18 @@ const NoAppointmentsIcon = styled.div`
 `;
 
 const NoAppointmentsText = styled.p`
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   color: #666;
-  margin-bottom: 1.5rem;
+  margin-bottom: 2rem;
   
+  @media (max-width: 1024px) {
+    font-size: 1.1rem;
+    margin-bottom: 1.8rem;
+  }
+
   @media (max-width: 768px) {
     font-size: 1rem;
-    margin-bottom: 1.2rem;
+    margin-bottom: 1.5rem;
   }
 `;
 
@@ -773,36 +1033,47 @@ const ScheduleButton = styled.button`
   background: linear-gradient(90deg, #34B89C, #6BC1E1);
   color: white;
   border: none;
-  padding: 0.8rem 1.5rem;
+  padding: 1rem 2rem;
   border-radius: 0.75rem;
-  font-size: 1rem;
+  font-size: 1.1rem;
   font-weight: 500;
   cursor: pointer;
-  transition: opacity 0.2s;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 6px rgba(52, 184, 156, 0.2);
 
   &:hover {
-    opacity: 0.9;
+    transform: translateY(-3px);
+    box-shadow: 0 6px 12px rgba(52, 184, 156, 0.3);
   }
   
+  @media (max-width: 1024px) {
+    padding: 0.9rem 1.8rem;
+    font-size: 1rem;
+  }
+
   @media (max-width: 768px) {
-    padding: 0.7rem 1.2rem;
-    font-size: 0.9rem;
+    padding: 0.8rem 1.5rem;
+    font-size: 0.95rem;
   }
 `;
 
 const EditForm = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.2rem;
 `;
 
 const EditTitle = styled.h4`
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   font-weight: 600;
   color: #2c3e50;
   margin: 0 0 0.5rem 0;
   
   @media (max-width: 768px) {
+    font-size: 1.1rem;
+  }
+
+  @media (max-width: 480px) {
     font-size: 1rem;
   }
 `;
@@ -816,38 +1087,54 @@ const FormGroup = styled.div`
 const Label = styled.label`
   font-weight: 600;
   color: #2c3e50;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
+
+  @media (max-width: 480px) {
+    font-size: 0.9rem;
+  }
 `;
 
 const DateInput = styled.input`
-  padding: 0.8rem 0.8rem;
-  border-radius: 0.5rem;
+  padding: 0.9rem 1rem;
+  border-radius: 0.6rem;
   border: 1px solid #ddd;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
   
   &:focus {
     outline: none;
     border-color: #6BC1E1;
-    box-shadow: 0 0 0 2px rgba(107, 193, 225, 0.2);
+    box-shadow: 0 0 0 3px rgba(107, 193, 225, 0.2);
   }
   
+  @media (max-width: 1024px) {
+    padding: 0.8rem;
+    font-size: 0.9rem;
+  }
+
   @media (max-width: 768px) {
     padding: 0.7rem;
   }
 `;
 
 const SelectInput = styled.select`
-  padding: 0.8rem 0.8rem;
-  border-radius: 0.5rem;
+  padding: 0.9rem 1rem;
+  border-radius: 0.6rem;
   border: 1px solid #ddd;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
   
   &:focus {
     outline: none;
     border-color: #6BC1E1;
-    box-shadow: 0 0 0 2px rgba(107, 193, 225, 0.2);
+    box-shadow: 0 0 0 3px rgba(107, 193, 225, 0.2);
   }
   
+  @media (max-width: 1024px) {
+    padding: 0.8rem;
+    font-size: 0.9rem;
+  }
+
   @media (max-width: 768px) {
     padding: 0.7rem;
   }
@@ -855,11 +1142,12 @@ const SelectInput = styled.select`
 
 const EditButtonRow = styled.div`
   display: flex;
-  gap: 0.8rem;
-  margin-top: 0.6rem;
+  gap: 1rem;
+  margin-top: 0.8rem;
   
   @media (max-width: 480px) {
     flex-direction: column;
+    gap: 0.8rem;
   }
 `;
 
@@ -868,14 +1156,20 @@ const SaveButton = styled.button`
   background: linear-gradient(90deg, #34B89C, #6BC1E1);
   color: white;
   border: none;
-  border-radius: 0.5rem;
+  border-radius: 0.6rem;
   font-weight: 500;
   cursor: pointer;
-  padding: 0.8rem 0;
-  transition: opacity 0.2s;
+  padding: 0.9rem 0;
+  transition: all 0.2s ease;
+  font-size: 0.95rem;
 
   &:hover {
-    opacity: 0.9;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(52, 184, 156, 0.3);
+  }
+
+  @media (max-width: 480px) {
+    width: 100%;
   }
 `;
 
@@ -884,13 +1178,19 @@ const CancelEditButton = styled.button`
   background: #f1f1f1;
   color: #666;
   border: none;
-  border-radius: 0.5rem;
+  border-radius: 0.6rem;
   font-weight: 500;
   cursor: pointer;
-  padding: 0.8rem 0;
-  transition: background 0.2s;
+  padding: 0.9rem 0;
+  transition: all 0.2s ease;
+  font-size: 0.95rem;
 
   &:hover {
     background: #e5e5e5;
+    transform: translateY(-2px);
+  }
+
+  @media (max-width: 480px) {
+    width: 100%;
   }
 `;
