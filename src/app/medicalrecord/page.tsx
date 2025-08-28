@@ -1,5 +1,4 @@
 import MedicalRecordForm from "@/rlclinic/MedicalrecordForm";
-import MedicalRecord from "@/rlclinic/MedicalrecordForm";
 
 
 
