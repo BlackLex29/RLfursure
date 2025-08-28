@@ -1,5 +1,4 @@
-import { Register } from "@/rlclinic/register";
-
+import Register from "@/rlclinic/registration";
 
 export default function Home() {
   return (

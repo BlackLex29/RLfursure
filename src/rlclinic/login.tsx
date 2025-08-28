@@ -14,8 +14,14 @@ const GlobalStyle = createGlobalStyle`
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-    font-family: 'Rozha One', serif;
-    background-color: #f9f9f9;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: linear-gradient(135deg, #f9f9f9 0%, #e3f2fd 100%);
+    overflow-x: hidden;
+    min-height: 100vh;
+  }
+
+  * {
+    box-sizing: border-box;
   }
 `;
 
@@ -25,106 +31,209 @@ const Container = styled.div`
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100vh;
+  min-height: 100vh;
+  padding: 20px;
+  width: 100%;
+`;
+
+const LogoContainer = styled.div`
+  text-align: center;
+  margin-bottom: 30px;
 `;
 
 const Logo = styled.h1`
   font-family: 'Rozha One', serif;
-  font-size: 40px;
+  font-size: 42px;
   color: #34B89C;
-  margin-bottom: 20px;
+  margin-bottom: 10px;
+  text-shadow: 1px 1px 3px rgba(0,0,0,0.1);
+
+  @media (max-width: 480px) {
+    font-size: 36px;
+  }
+`;
+
+const Tagline = styled.p`
+  color: #666;
+  font-size: 16px;
+  margin: 0;
 `;
 
 const Form = styled.form`
   background: #fff;
   padding: 30px;
   border-radius: 15px;
-  box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.1);
-  width: 320px;
-  max-width: 90%;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+  width: 100%;
+  max-width: 400px;
+  transition: transform 0.3s ease;
+
+  &:hover {
+    transform: translateY(-5px);
+  }
 `;
 
 const Label = styled.label`
   position: relative;
   display: block;
-  margin-bottom: 20px;
+  margin-bottom: 25px;
 
   .input {
     width: 100%;
-    padding: 14px;
-    border: 2px solid #34B89C;
+    padding: 16px;
+    border: 2px solid #e0e0e0;
     border-radius: 10px;
     outline: none;
-    font-size: 15px;
+    font-size: 16px;
     background: transparent;
-    transition: border-color 0.2s ease;
+    transition: all 0.3s ease;
   }
 
   .input:focus {
-    border-color: #2a8f78;
+    border-color: #34B89C;
+    box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.2);
   }
 
   span {
     position: absolute;
-    left: 14px;
-    top: 14px;
-    font-size: 14px;
+    left: 16px;
+    top: 16px;
+    font-size: 16px;
     color: #888;
     background: #fff;
-    padding: 0 4px;
-    transition: 0.2s;
+    padding: 0 6px;
+    transition: 0.3s;
+    pointer-events: none;
   }
 
   .input:focus + span,
   .input:not(:placeholder-shown) + span {
-    top: -8px;
-    left: 10px;
-    font-size: 12px;
+    top: -10px;
+    left: 12px;
+    font-size: 14px;
     color: #34B89C;
+    font-weight: 500;
   }
 `;
 
 const Button = styled.button`
   width: 100%;
-  padding: 14px;
-  background-color: #34B89C;
+  padding: 16px;
+  background: linear-gradient(to right, #34B89C, #2a8f78);
   color: #fff;
-  font-weight: bold;
+  font-weight: 600;
   border: none;
   border-radius: 10px;
   cursor: pointer;
   font-size: 16px;
-  transition: background-color 0.2s ease;
+  transition: all 0.3s ease;
   margin-top: 10px;
+  box-shadow: 0 4px 10px rgba(52, 184, 156, 0.3);
 
   &:hover {
-    background-color: #2a8f78;
+    background: linear-gradient(to right, #2a8f78, #217a65);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 15px rgba(52, 184, 156, 0.4);
+  }
+
+  &:active {
+    transform: translateY(0);
   }
 
   &:disabled {
-    background-color: #ccc;
+    background: #ccc;
     cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
   }
 `;
 
 const ErrorText = styled.p`
-  color: #ff3333;
+  color: #e74c3c;
   font-size: 14px;
-  margin-top: -10px;
-  margin-bottom: 10px;
+  margin: -10px 0 15px 0;
+  text-align: center;
+  padding: 8px 12px;
+  background: rgba(231, 76, 60, 0.1);
+  border-radius: 6px;
+  border-left: 3px solid #e74c3c;
+`;
+
+const SuccessText = styled.p`
+  color: #27ae60;
+  font-size: 14px;
+  margin: -10px 0 15px 0;
+  text-align: center;
+  padding: 8px 12px;
+  background: rgba(39, 174, 96, 0.1);
+  border-radius: 6px;
+  border-left: 3px solid #27ae60;
 `;
 
 const ForgotPassword = styled.p`
   font-size: 14px;
   color: #34B89C;
-  text-align: right;
-  margin-top: 10px;
+  text-align: center;
+  margin-top: 20px;
   cursor: pointer;
+  transition: all 0.2s ease;
 
   &:hover {
+    color: #2a8f78;
     text-decoration: underline;
   }
 `;
+
+const AdditionalOptions = styled.div`
+  margin-top: 30px;
+  text-align: center;
+  width: 100%;
+  max-width: 400px;
+`;
+
+const SignUpPrompt = styled.p`
+  font-size: 15px;
+  color: #555;
+
+  a {
+    color: #34B89C;
+    text-decoration: none;
+    font-weight: 600;
+    transition: all 0.2s ease;
+
+    &:hover {
+      color: #2a8f78;
+      text-decoration: underline;
+    }
+  }
+`;
+
+const LoadingSpinner = styled.div`
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(255,255,255,0.3);
+  border-radius: 50%;
+  border-top-color: #fff;
+  animation: spin 1s ease-in-out infinite;
+  margin-right: 10px;
+  vertical-align: middle;
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+`;
+
+// Firebase error interface
+interface FirebaseError extends Error {
+  code: string;
+  message: string;
+}
+
+// Type guard to check if error is FirebaseError
+function isFirebaseError(error: unknown): error is FirebaseError {
+  return typeof error === 'object' && error !== null && 'code' in error;
+}
 
 // 🛠️ Login Component
 const LoginPage: React.FC = () => {
@@ -142,6 +251,8 @@ const LoginPage: React.FC = () => {
       ...formData,
       [e.target.name]: e.target.value,
     });
+    // Clear error when user starts typing
+    if (error) setError("");
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -178,10 +289,22 @@ const LoginPage: React.FC = () => {
       }
     } catch (err: unknown) {
       console.error("Login error:", err);
-      if (err instanceof Error) {
-        setError(err.message);
+      
+      // Handle specific error cases
+      if (isFirebaseError(err)) {
+        if (err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
+          setError("Wrong password. Please try again.");
+        } else if (err.code === "auth/user-not-found") {
+          setError("No account found with this email.");
+        } else if (err.code === "auth/invalid-email") {
+          setError("Invalid email address format.");
+        } else if (err.code === "auth/too-many-requests") {
+          setError("Too many failed attempts. Please try again later.");
+        } else {
+          setError("An error occurred during login. Please try again.");
+        }
       } else {
-        setError("Invalid email or password");
+        setError("An unexpected error occurred. Please try again.");
       }
     } finally {
       setLoading(false);
@@ -193,15 +316,23 @@ const LoginPage: React.FC = () => {
       setError("Please enter your email first.");
       return;
     }
+    
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(formData.email)) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+    
     try {
       await sendPasswordResetEmail(auth, formData.email);
       setMessage("Password reset email sent! Please check your inbox.");
       setError("");
     } catch (err: unknown) {
-      if (err instanceof Error) {
-        setError(err.message);
+      if (isFirebaseError(err) && err.code === "auth/user-not-found") {
+        setError("No account found with this email.");
       } else {
-        setError("An unexpected error occurred.");
+        setError("Failed to send reset email. Please try again.");
       }
     }
   };
@@ -210,10 +341,14 @@ const LoginPage: React.FC = () => {
     <>
       <GlobalStyle />
       <Container>
-        <Logo>FurSureCare</Logo>
+        <LogoContainer>
+          <Logo>FurSureCare</Logo>
+          <Tagline>Pet care made simple and reliable</Tagline>
+        </LogoContainer>
+        
         <Form onSubmit={handleSubmit}>
           {error && <ErrorText>{error}</ErrorText>}
-          {message && <p style={{ color: "green", fontSize: "14px" }}>{message}</p>}
+          {message && <SuccessText>{message}</SuccessText>}
 
           <Label>
             <input
@@ -224,6 +359,7 @@ const LoginPage: React.FC = () => {
               value={formData.email}
               onChange={handleChange}
               required
+              disabled={loading}
             />
             <span>Email</span>
           </Label>
@@ -238,18 +374,31 @@ const LoginPage: React.FC = () => {
               onChange={handleChange}
               required
               minLength={6}
+              disabled={loading}
             />
             <span>Password</span>
           </Label>
 
           <Button type="submit" disabled={loading}>
-            {loading ? "Logging in..." : "Login"}
+            {loading ? (
+              <>
+                <LoadingSpinner /> Logging in...
+              </>
+            ) : (
+              "Login"
+            )}
           </Button>
 
-          <ForgotPassword onClick={handleForgotPassword}>
+          <ForgotPassword onClick={handleForgotPassword} role="button">
             Forgot Password?
           </ForgotPassword>
         </Form>
+        
+        <AdditionalOptions>
+          <SignUpPrompt>
+            Don&apos;t have an account? <a href="/signup">Sign up</a>
+          </SignUpPrompt>
+        </AdditionalOptions>
       </Container>
     </>
   );
