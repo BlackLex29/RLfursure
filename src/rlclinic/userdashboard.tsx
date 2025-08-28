@@ -250,7 +250,7 @@ const UserDashboard: React.FC = () => {
               <CardText>View your pet&apos;s health history</CardText>
             </Card>
 
-            <Card onClick={() => router.push("/vaccination")}>
+            <Card onClick={() => router.push("/uservaccination")}>
               <CardIcon>💉</CardIcon>
               <CardTitle>Vaccinations</CardTitle>
               <CardText>Track vaccination history and reminders</CardText>
