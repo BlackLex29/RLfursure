@@ -6,8 +6,26 @@ import { useRouter } from "next/navigation";
 import { db } from "../firebaseConfig";
 import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
 
+// Define interfaces for our data structures
+interface VaccineSuggestion {
+  vaccineId: string;
+  vaccineName: string;
+  reason: string;
+  recommendedDate: string;
+}
+
+interface PetRecord {
+  id: string;
+  email: string;
+  petName?: string;
+  ownerName?: string;
+  // Add other known properties that might exist in your records
+  date?: string;
+  // Add more properties as needed based on your actual data structure
+}
+
 // 🔹 Default Vaccination Suggestions
-const VACCINE_SUGGESTIONS = [
+const VACCINE_SUGGESTIONS: VaccineSuggestion[] = [
   {
     vaccineId: "dhpp1",
     vaccineName: "DHPP (Distemper, Hepatitis, Parvovirus, Parainfluenza)",
@@ -324,8 +342,7 @@ const NoDataText = styled.p`
 const Page = () => {
   const router = useRouter();
 
-  const [records, setRecords] = useState<any[]>([]);
-  const [suggestions, setSuggestions] = useState<any[]>(VACCINE_SUGGESTIONS);
+  const [records, setRecords] = useState<PetRecord[]>([]);
   const [selectedSuggestions, setSelectedSuggestions] = useState<string[]>([]);
   const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
   const [emailMessage, setEmailMessage] = useState("");
@@ -348,7 +365,11 @@ const Page = () => {
       orderBy("date", "desc")
     );
     const unsubscribe = onSnapshot(recordsQuery, (snapshot) => {
-      setRecords(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+      const recordsData: PetRecord[] = [];
+      snapshot.forEach((doc) => {
+        recordsData.push({ id: doc.id, ...doc.data() } as PetRecord);
+      });
+      setRecords(recordsData);
       setIsLoading(false);
     }, (error) => {
       console.error("Error loading records:", error);
@@ -395,7 +416,7 @@ const Page = () => {
         return;
       }
 
-      const suggestionText = suggestions
+      const suggestionText = VACCINE_SUGGESTIONS
         .filter((s) => selectedSuggestions.includes(s.vaccineId))
         .map(
           (s) =>
@@ -425,7 +446,7 @@ const Page = () => {
       setError("❌ Failed to send suggestions");
       console.error(err);
     }
-  }, [selectedEmails, selectedSuggestions, suggestions, emailMessage]);
+  }, [selectedEmails, selectedSuggestions, emailMessage]);
 
   // Don't render anything until we're on the client to prevent hydration mismatch
   if (!isClient) {
@@ -450,7 +471,7 @@ const Page = () => {
     <Container>
       <Header>
         <BackButton onClick={() => router.push("/admindashboard")}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="only" xmlns="http://www.w3.org/2000/svg">
             <path d="M19 12H5M5 12L12 19M5 12L12 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
           Back to Dashboard
@@ -500,7 +521,7 @@ const Page = () => {
       <Section>
         <SectionTitle>Available Vaccinations:</SectionTitle>
         <VaccineGrid>
-          {suggestions.map((s) => (
+          {VACCINE_SUGGESTIONS.map((s) => (
             <VaccineCard
               key={s.vaccineId}
               selected={selectedSuggestions.includes(s.vaccineId)}
