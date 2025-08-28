@@ -396,7 +396,7 @@ const LoginPage: React.FC = () => {
         
         <AdditionalOptions>
           <SignUpPrompt>
-            Don&apos;t have an account? <a href="/signup">Sign up</a>
+            Don&apos;t have an account? <a href="/createaccount">Sign up</a>
           </SignUpPrompt>
         </AdditionalOptions>
       </Container>

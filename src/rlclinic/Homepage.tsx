@@ -14,7 +14,7 @@ const HomePage: React.FC = () => {
         <Logo>🐾 FurSureCare</Logo>
         <Nav>
           <NavItem onClick={() => router.push("/login")}>Login</NavItem>
-          <NavItem onClick={() => router.push("/register")}>Register</NavItem>
+          <NavItem onClick={() => router.push("/createaccount")}>Create Account</NavItem>
         </Nav>
         <MobileMenuIcon>☰</MobileMenuIcon>
       </Header>
@@ -27,7 +27,7 @@ const HomePage: React.FC = () => {
             FurSureCare helps you manage pet records, appointments, and health
             with ease. Because your pets deserve the best. 🐶🐱
           </p>
-          <HeroButton onClick={() => router.push("/register")}>
+          <HeroButton onClick={() => router.push("/createaccount")}>
             Get Started   
           </HeroButton>
         </HeroContent>
