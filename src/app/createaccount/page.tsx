@@ -1,10 +1,10 @@
-import Register from "@/rlclinic/registration";
+import Create from '../../rlclinic/create-account';
 
 export default function Home() {
   return (
     <div  >
       
-      <Register/>
+      <Create/>
     </div>
     
   );
