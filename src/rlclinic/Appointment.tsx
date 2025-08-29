@@ -17,6 +17,7 @@ interface Appointment {
   timeSlot: string;
   status: string;
   petId: string;
+  clientName: string;
 }
 
 const GlobalStyle = createGlobalStyle`
@@ -83,6 +84,7 @@ const AppointmentPage: React.FC = () => {
             timeSlot: d.timeSlot,
             status: d.status,
             petId: d.petId,
+            clientName: d.clientName || ""
           });
         });
         setBookedSlots(appointmentsData);
@@ -101,14 +103,15 @@ const AppointmentPage: React.FC = () => {
     e.preventDefault();
     if (!selectedPet || !selectedSlot) return alert("Please select a pet and time slot");
 
+    // Check if the slot is already taken by ANY user (not just the current user)
     const isTaken = bookedSlots.some(
       (s) =>
         s.date === selectedDate &&
         s.timeSlot === selectedSlot &&
-        s.petId === selectedPet &&
         s.status !== "Cancelled"
     );
-    if (isTaken) return alert("This time slot is already taken for your pet");
+    
+    if (isTaken) return alert("This time slot is already booked by another user");
 
     try {
       const newDoc = await addDoc(collection(db, "appointments"), {
@@ -159,7 +162,7 @@ const AppointmentPage: React.FC = () => {
                 <SectionTitle>
                   <SectionIcon>
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-                      <path fillRule="evenodd" d="M12 6.75a5.25 5.25 0 016.775-5.025.75.75 0 01.313 1.248l-3.32 3.319c.063.475.276.934.627 1.33.35.389.82.729 1.382.963.56.235 1.217.389 1.925.389a.75.75 0 010 1.5c-.898 0-1.7-.192-2.375-.509A5.221 5.221 0 0115.75 8.25c0-.65-.126-1.275-.356-1.85l-2.57 2.57a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06l2.57-2.57a5.25 5.25 0 00-1.834 2.606A5.25 5.25 0 0112 6.75zM4.118 9.835a.75.75 0 01.897-.636 5.25 5.25 0 011.788.121c.857.194 1.64.582 2.302 1.128.66.544 1.187 1.233 1.536 2.028.348.795.516 1.67.491 2.544a.75.75 0 01-1.495-.1c.02-.68-.11-1.33-.38-1.93a3.75 3.75 0 00-.98-1.51 3.742 3.742 0 00-1.52-.98c-.6-.27-1.25-.4-1.93-.38a.75.75 0 01-.636-.897zM3.75 12a.75.75 0 01.75-.75c2.663 0 5.086.943 6.984 2.497a.75.75 0 01-.968 1.153A9.495 9.495 0 004.5 12.75a.75.75 0 01-.75-.75zm3.75 0a.75.75 0 01.75-.75c.763 0 1.458.216 2.055.57a.75.75 0 01-.765 1.29A3.752 3.752 0 008.25 12.75a.75.75 0 01-.75-.75z" clipRule="evenodd" />
+                      <path fillRule="evenodd" d="M12 6.75a5.25 5.25 0 016.775-5.025.75.75 0 01.313 1.248l-3.32 3.319c.063.475.276.934.627 1.33.35.389.820.729 1.382.963.56.235 1.217.389 1.925.389a.75.75 0 010 1.5c-.898 0-1.7-.192-2.375-.509A5.221 5.221 0 0115.75 8.25c0-.65-.126-1.275-.356-1.85l-2.57 2.57a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06l2.57-2.57a5.25 5.25 0 00-1.834 2.606A5.25 5.25 0 0112 6.75zM4.118 9.835a.75.75 0 01.897-.636 5.25 5.25 0 011.788.121c.857.194 1.64.582 2.302 1.128.66.544 1.187 1.233 1.536 2.028.348.795.516 1.67.491 2.544a.75.75 0 01-1.495-.1c.02-.68-.11-1.33-.38-1.93a3.75 3.75 0 00-.98-1.51 3.742 3.742 0 00-1.52-.98c-.6-.27-1.25-.4-1.93-.38a.75.75 0 01-.636-.897zM3.75 12a.75.75 0 01.75-.75c2.663 0 5.086.943 6.984 2.497a.75.75 0 01-.968 1.153A9.495 9.495 0 004.5 12.75a.75.75 0 01-.75-.75zm3.75 0a.75.75 0 01.75-.75c.763 0 1.458.216 2.055.57a.75.75 0 01-.765 1.29A3.752 3.752 0 008.25 12.75a.75.75 0 01-.75-.75z" clipRule="evenodd" />
                     </svg>
                   </SectionIcon>
                   Select Your Pet
@@ -210,13 +213,14 @@ const AppointmentPage: React.FC = () => {
                 </SectionTitle>
                 <SlotGrid>
                   {timeSlots.map((slot) => {
+                    // Check if slot is taken by ANY user (not just current user)
                     const taken = bookedSlots.some(
                       (s) =>
                         s.date === selectedDate &&
                         s.timeSlot === slot &&
-                        s.petId === selectedPet &&
                         s.status !== "Cancelled"
                     );
+                    
                     return (
                       <SlotButton
                         key={slot}
@@ -226,7 +230,7 @@ const AppointmentPage: React.FC = () => {
                         onClick={() => setSelectedSlot(slot)}
                       >
                         {slot}
-                        {taken && <TakenIndicator>Taken</TakenIndicator>}
+                        {taken && <TakenIndicator>Booked</TakenIndicator>}
                       </SlotButton>
                     );
                   })}

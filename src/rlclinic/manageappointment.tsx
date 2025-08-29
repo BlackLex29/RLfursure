@@ -1,6 +1,5 @@
-"use client";
-
-import React, { useEffect, useState } from "react";
+'use client';
+ import React, { useEffect, useState } from "react";
 import styled, { createGlobalStyle, keyframes } from "styled-components";
 import { useRouter } from "next/navigation";
 import { collection, doc, updateDoc, deleteDoc, onSnapshot } from "firebase/firestore";
@@ -25,6 +24,7 @@ interface AppointmentType {
   timeSlot: string;
   status?: string;
   paymentMethod?: string;
+  paymentAmount?: number;
 }
 
 const fadeIn = keyframes`
@@ -57,13 +57,25 @@ const ManageAppointments: React.FC = () => {
       data.sort((a, b) => a.date.localeCompare(b.date));
       setAppointments(data);
       
-      // Set the first date as selected by default
-      if (data.length > 0 && !selectedDate) {
+      // Set today's date as selected by default
+      const today = new Date().toISOString().split('T')[0];
+      const todayAppointments = data.filter(appt => appt.date === today);
+      
+      if (todayAppointments.length > 0) {
+        setSelectedDate(today);
+        // Find index of today in sorted dates
+        const sortedDates = [...new Set(data.map(appt => appt.date))].sort();
+        const todayIndex = sortedDates.indexOf(today);
+        if (todayIndex !== -1) {
+          setDateIndex(todayIndex);
+        }
+      } else if (data.length > 0 && !selectedDate) {
+        // If no appointments today, show the first available date
         setSelectedDate(data[0].date);
       }
     });
     return () => unsub();
-  }, [selectedDate]); // Added selectedDate to dependency array
+  }, [selectedDate]);
 
   const handleStatusUpdate = async (id: string, status: string) => {
     try {
@@ -124,6 +136,19 @@ const ManageAppointments: React.FC = () => {
   const handleNextDate = () => {
     if (dateIndex < sortedDates.length - 1) {
       setDateIndex(dateIndex + 1);
+    }
+  };
+
+  // Function to format payment method display
+  const formatPaymentMethod = (method?: string) => {
+    if (!method) return "Not Paid";
+    
+    switch(method.toLowerCase()) {
+      case 'gcash': return 'GCash';
+      case 'debitcard': return 'Debit Card';
+      case 'paymaya': return 'PayMaya';
+      case 'cash': return 'Cash';
+      default: return method;
     }
   };
 
@@ -192,7 +217,8 @@ const ManageAppointments: React.FC = () => {
                       <InfoItem>
                         <Icon>💳</Icon>
                         <InfoText style={{ color: paymentColor }}>
-                          {appt.paymentMethod || "Not Paid"}
+                          {formatPaymentMethod(appt.paymentMethod)}
+                          {appt.paymentAmount && ` - ₱${appt.paymentAmount}`}
                         </InfoText>
                       </InfoItem>
                     </CardContent>
@@ -226,6 +252,7 @@ const ManageAppointments: React.FC = () => {
     </>
   );
 };
+
 
 // === Styled Components ===
 const MainWrapper = styled.div`
