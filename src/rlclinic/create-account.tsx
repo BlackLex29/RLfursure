@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import styled, { createGlobalStyle } from "styled-components";
 import { useRouter } from "next/navigation";
 import { doc, setDoc, getDoc } from "firebase/firestore";
@@ -13,13 +13,22 @@ import {
   updateProfile
 } from "firebase/auth";
 import { db, auth } from "../firebaseConfig";
+import Link from "next/link";
 
 const GlobalStyle = createGlobalStyle`
-  *, *::before, *::after { box-sizing: border-box; }
+  *, *::before, *::after { 
+    box-sizing: border-box; 
+  }
+  
   body {
     margin: 0;
     font-family: "Poppins", sans-serif;
     background-color: #dff7f1;
+  }
+
+  /* Prevent FOUC */
+  :not(style) + style {
+    display: none;
   }
 `;
 
@@ -75,9 +84,9 @@ const InputContainer = styled.div`
   width: 100%;
 `;
 
-const Input = styled.input`
+const Input = styled.input<{ $hasError?: boolean }>`
   padding: 14px;
-  border: 2px solid #ddd;
+  border: 2px solid ${props => props.$hasError ? '#c0392b' : '#ddd'};
   border-radius: 9px;
   font-size: 16px;
   transition: all 0.3s ease;
@@ -85,8 +94,8 @@ const Input = styled.input`
   
   &:focus {
     outline: none;
-    border-color: #34b89c;
-    box-shadow: 0 2px 8px rgba(52, 184, 156, 0.3);
+    border-color: ${props => props.$hasError ? '#c0392b' : '#34b89c'};
+    box-shadow: 0 2px 8px ${props => props.$hasError ? 'rgba(192, 57, 43, 0.3)' : 'rgba(52, 184, 156, 0.3)'};
   }
 `;
 
@@ -157,7 +166,7 @@ const GoogleButton = styled.button`
 const GoogleIcon = styled.div`
   width: 20px;
   height: 20px;
-  background: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTgiIGhlaWdodD0iMTgiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGcgZmlsbD0ibm9uZSIgZ�lsbC1ydWxlPSJldmVub2RkIj48cGF0aCBkPSJNMTcuNiA5LjJsLS4xLTEuOEg5djMuNGg0LjhDMTMuNiAxMiAxMyAxMyAxMiAxMy42djIuMmgtM2E4LjggOC44IDAgMCAwIDIuNi02LjZ6IiBmaWxsPSIjNDI4NUY0IiBmaWxsLXJ1bGU9Im5vbnplcm8iLz48cGF0aCBkPSJNOSAxOGMyLjQgMCA0LjUtLjggNi0yLjJsLTMtMi4yYTUuNCA1LjQgMCAwIDEtOC0yLjlIMVYxM2E5IDkgMCAwIDAgOCA1eiIgZmlsbD0iIzM0QTg1MyIgZmlsbC1ydWxlPSJub256ZXJvIi8+PHBhdGggZD0iTTQgMTAuN2E1LjQgNS40IDAgMCAxIDAtMy40VjVIMWE5IDkgMCAwIDAgMCA4bDMtMi4zeiIgZmlsbD0iI0ZCQkMwNSIgZmlsbC1ydWxlPSJub256ZXJvIi8+PHBhdGggZD0iTTkgMy42YzEuMyAwIDIuNS40IDMuNCAxLjNMMTUgMi4zQTkgOSAwIDAgMCAxIDVsMyAyLjRhNS40IDUuNCAwIDAgMSA1LTMuN3oiIGZpbGw9IiNFQTQzMzUiIGZpbGwtcnVsZT0ibm9uemVybyIvPjxwYXRoIGQ9Ik0wIDBoMTh2MThIMHoiLz48L2c+PC9zdmc+') center no-repeat;
+  background: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTgiIGhlaWdodD0iMTgiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGcgZmlsbD0ibm9uZSIgZmlsbC1ydWxlPSJldmVub2RkIj48cGF0aCBkPSJNMTcuNiA5LjJsLS4xLTEuOEg5djMuNGg0LjhDMTMuNiAxMiAxMyAxMyAxMiAxMy42djIuMmgtM2E4LjggOC44IDAgMCAwIDIuNi02LjZ6IiBmaWxsPSIjNDI4NUY0IiBmaWxsLXJ1bGU9Im5vbnplcm8iLz48cGF0aCBkPSJNOSAxOGMyLjQgMCA0LjUtLjggNi0yLjJsLTMtMi4yYTUuNCA1LjQgMCAwIDEtOC0yLjlIMVYxM2E5IDkgMCAwIDAgOCA1eiIgZmlsbD0iIzM0QTg1MyIgZmlsbC1ydWxlPSJub256ZXJvIi8+PHBhdGggZD0iTTQgMTAuN2E1LjQgNS40IDAgMCAxIDAtMy40VjVIMWE5IDkgMCAwIDAgMCA4bDMtMi4zeiIgZmlsbD0iI0ZCQkMwNSIgZmlsbC1ydWxlPSJub256ZXJvIi8+PHBhdGggZD0iTTkgMy42YzEuMyAwIDIuNS40IDMuNCAxLjNMMTUgMi4zQTkgOSAwIDAgMCAxIDVsMyAyLjRhNS40IDUuNCAwIDAgMSA1LTMuN3oiIGZpbGw9IiVFQTQzMzUiIGZpbGwtcnVsZT0ibm9uemVybyIvPjxwYXRoIGQ9Ik0wIDBoMTh2MThIMHoiLz48L2c+PC9zdmc+') center no-repeat;
 `;
 
 const ErrorMessage = styled.p`
@@ -185,15 +194,15 @@ const RedirectText = styled.p`
   margin-top: 16px;
   font-size: 14px;
   color: #555;
+`;
 
-  span {
-    color: #34b89c;
-    font-weight: 700;
-    cursor: pointer;
-    user-select: none;
-  }
+const RedirectLink = styled.span`
+  color: #34b89c;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
 
-  span:hover {
+  &:hover {
     text-decoration: underline;
   }
 `;
@@ -231,10 +240,35 @@ const LoadingSpinner = styled.div`
   }
 `;
 
+const PasswordRules = styled.div`
+  text-align: left;
+  margin-bottom: 10px;
+  padding: 10px;
+  background-color: #f9f9f9;
+  border-radius: 6px;
+  font-size: 12px;
+`;
+
+const RuleItem = styled.div<{ $isValid?: boolean }>`
+  color: ${props => props.$isValid ? '#27ae60' : '#555'};
+  margin: 4px 0;
+  display: flex;
+  align-items: center;
+  
+  &:before {
+    content: '${props => props.$isValid ? '✓' : '•'}';
+    margin-right: 6px;
+    font-weight: bold;
+  }
+`;
+
 // Type guard to check if an error is an AuthError
 function isAuthError(error: unknown): error is AuthError {
   return typeof error === 'object' && error !== null && 'code' in error;
 }
+
+// Password validation regex
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
 
 export const Create = () => {
   const router = useRouter();
@@ -243,6 +277,7 @@ export const Create = () => {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isClient, setIsClient] = useState(false);
   const [formData, setFormData] = useState({
     firstname: "",
     lastname: "",
@@ -250,6 +285,30 @@ export const Create = () => {
     password: "",
     confirmPassword: ""
   });
+  const [passwordErrors, setPasswordErrors] = useState({
+    hasMinLength: false,
+    hasUpperCase: false,
+    hasLowerCase: false,
+    hasNumber: false,
+    hasSpecialChar: false
+  });
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  const validatePassword = (password: string) => {
+    const errors = {
+      hasMinLength: password.length >= 8,
+      hasUpperCase: /[A-Z]/.test(password),
+      hasLowerCase: /[a-z]/.test(password),
+      hasNumber: /\d/.test(password),
+      hasSpecialChar: /[@$!%*?&]/.test(password)
+    };
+    
+    setPasswordErrors(errors);
+    return PASSWORD_REGEX.test(password);
+  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -257,6 +316,11 @@ export const Create = () => {
       ...prev,
       [name]: value
     }));
+    
+    // Validate password in real-time
+    if (name === 'password') {
+      validatePassword(value);
+    }
   };
 
   const togglePasswordVisibility = () => {
@@ -283,8 +347,8 @@ export const Create = () => {
       return;
     }
     
-    if (formData.password.length < 6) {
-      setError("Password should be at least 6 characters");
+    if (!PASSWORD_REGEX.test(formData.password)) {
+      setError("Password does not meet the requirements");
       return;
     }
     
@@ -424,6 +488,18 @@ export const Create = () => {
     }
   };
 
+  if (!isClient) {
+    return (
+      <Wrapper>
+        <Card>
+          <Title>Create an Account</Title>
+          <Subtitle>Sign up to get started with our services</Subtitle>
+          <div>Loading...</div>
+        </Card>
+      </Wrapper>
+    );
+  }
+
   return (
     <>
       <GlobalStyle />
@@ -467,6 +543,15 @@ export const Create = () => {
               />
             </InputContainer>
             
+            <PasswordRules>
+              <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>Password must contain:</div>
+              <RuleItem $isValid={passwordErrors.hasMinLength}>At least 8 characters</RuleItem>
+              <RuleItem $isValid={passwordErrors.hasUpperCase}>One uppercase letter</RuleItem>
+              <RuleItem $isValid={passwordErrors.hasLowerCase}>One lowercase letter</RuleItem>
+              <RuleItem $isValid={passwordErrors.hasNumber}>One number</RuleItem>
+              <RuleItem $isValid={passwordErrors.hasSpecialChar}>One special character (@$!%*?&)</RuleItem>
+            </PasswordRules>
+            
             <InputContainer>
               <Input
                 type={showPassword ? "text" : "password"}
@@ -475,6 +560,7 @@ export const Create = () => {
                 value={formData.password}
                 onChange={handleInputChange}
                 required
+                $hasError={formData.password.length > 0 && !PASSWORD_REGEX.test(formData.password)}
               />
               <PasswordToggle type="button" onClick={togglePasswordVisibility}>
                 {showPassword ? "Hide" : "Show"}
@@ -489,6 +575,7 @@ export const Create = () => {
                 value={formData.confirmPassword}
                 onChange={handleInputChange}
                 required
+                $hasError={formData.confirmPassword.length > 0 && formData.password !== formData.confirmPassword}
               />
               <PasswordToggle type="button" onClick={toggleConfirmPasswordVisibility}>
                 {showConfirmPassword ? "Hide" : "Show"}
@@ -516,7 +603,9 @@ export const Create = () => {
 
           <RedirectText>
             Already have an account?{" "}
-            <span onClick={() => router.push("/login")}>Sign in here</span>
+            <Link href="/login" passHref>
+              <RedirectLink>Sign in here</RedirectLink>
+            </Link>
           </RedirectText>
         </Card>
       </Wrapper>

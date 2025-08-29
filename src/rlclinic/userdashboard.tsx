@@ -61,19 +61,20 @@ const UserDashboard: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isClient, setIsClient] = useState(false);
 
-  // Fix for hydration: Wait for component to mount on client
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
-
-  // Fix for hydration: Use the same initial value on server and client
-  const [today, setToday] = useState("");
-  useEffect(() => {
-    setToday(new Date().toISOString().split("T")[0]);
-  }, []);
+  // Get today's date in a consistent format (YYYY-MM-DD)
+  const getTodayDate = () => new Date().toISOString().split("T")[0];
+  
+  // Initialize with the same value on server and client
+  const [today, setToday] = useState(getTodayDate());
 
   const userEmail = auth.currentUser?.email;
   const userId = auth.currentUser?.uid;
+
+  useEffect(() => {
+    setIsClient(true);
+    // Ensure date is consistent after hydration
+    setToday(getTodayDate());
+  }, []);
 
   useEffect(() => {
     if (!userEmail || !userId) return;
@@ -120,7 +121,6 @@ const UserDashboard: React.FC = () => {
 
     return () => unsub();
   }, [userEmail, userId]);
-
   const handleLogout = async () => {
     await signOut(auth);
     router.push("/");
@@ -170,7 +170,7 @@ const UserDashboard: React.FC = () => {
   const cancelEdit = () => setEditingId(null);
 
   // Prevent rendering until client-side to avoid hydration mismatch
-  if (!isClient) {
+ if (!isClient) {
     return (
       <>
         <GlobalStyle />
@@ -261,7 +261,7 @@ const UserDashboard: React.FC = () => {
           <AppointmentsSection>
             <SectionHeader>
               <SectionTitle>Your Appointments</SectionTitle>
-              <AppointmentCount>{appointments.length} scheduled</AppointmentCount>
+              {isClient && <AppointmentCount>{appointments.length} scheduled</AppointmentCount>}
             </SectionHeader>
 
             {appointments.length === 0 ? (

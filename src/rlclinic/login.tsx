@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import React, { useState } from "react";
 import styled, { createGlobalStyle } from "styled-components";
@@ -73,7 +73,7 @@ const Form = styled.form`
   }
 `;
 
-const Label = styled.label`
+const Label = styled.label<{ $hasError?: boolean }>`
   position: relative;
   display: block;
   margin-bottom: 25px;
@@ -81,7 +81,7 @@ const Label = styled.label`
   .input {
     width: 100%;
     padding: 16px;
-    border: 2px solid #e0e0e0;
+    border: 2px solid ${props => props.$hasError ? '#e74c3c' : '#e0e0e0'};
     border-radius: 10px;
     outline: none;
     font-size: 16px;
@@ -90,8 +90,8 @@ const Label = styled.label`
   }
 
   .input:focus {
-    border-color: #34B89C;
-    box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.2);
+    border-color: ${props => props.$hasError ? '#e74c3c' : '#34B89C'};
+    box-shadow: 0 0 0 3px ${props => props.$hasError ? 'rgba(231, 76, 60, 0.2)' : 'rgba(52, 184, 156, 0.2)'};
   }
 
   span {
@@ -99,7 +99,7 @@ const Label = styled.label`
     left: 16px;
     top: 16px;
     font-size: 16px;
-    color: #888;
+    color: ${props => props.$hasError ? '#e74c3c' : '#888'};
     background: #fff;
     padding: 0 6px;
     transition: 0.3s;
@@ -111,7 +111,7 @@ const Label = styled.label`
     top: -10px;
     left: 12px;
     font-size: 14px;
-    color: #34B89C;
+    color: ${props => props.$hasError ? '#e74c3c' : '#34B89C'};
     font-weight: 500;
   }
 `;
@@ -235,6 +235,9 @@ function isFirebaseError(error: unknown): error is FirebaseError {
   return typeof error === 'object' && error !== null && 'code' in error;
 }
 
+// Email validation regex
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 // 🛠️ Login Component
 const LoginPage: React.FC = () => {
   const router = useRouter();
@@ -245,13 +248,57 @@ const LoginPage: React.FC = () => {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({
+    email: "",
+    password: ""
+  });
+
+  const validateForm = () => {
+    const errors = {
+      email: "",
+      password: ""
+    };
+    
+    let isValid = true;
+    
+    // Email validation
+    if (!formData.email) {
+      errors.email = "Email is required";
+      isValid = false;
+    } else if (!EMAIL_REGEX.test(formData.email)) {
+      errors.email = "Please enter a valid email address";
+      isValid = false;
+    }
+    
+    // Password validation
+    if (!formData.password) {
+      errors.password = "Password is required";
+      isValid = false;
+    } else if (formData.password.length < 6) {
+      errors.password = "Password must be at least 6 characters";
+      isValid = false;
+    }
+    
+    setFieldErrors(errors);
+    return isValid;
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
     setFormData({
       ...formData,
-      [e.target.name]: e.target.value,
+      [name]: value,
     });
-    // Clear error when user starts typing
+    
+    // Clear specific field error when user starts typing
+    if (fieldErrors[name as keyof typeof fieldErrors]) {
+      setFieldErrors({
+        ...fieldErrors,
+        [name]: ""
+      });
+    }
+    
+    // Clear general error when user starts typing
     if (error) setError("");
   };
 
@@ -259,6 +306,12 @@ const LoginPage: React.FC = () => {
     e.preventDefault();
     setError("");
     setMessage("");
+    
+    // Validate form before submission
+    if (!validateForm()) {
+      return;
+    }
+    
     setLoading(true);
 
     try {
@@ -294,10 +347,22 @@ const LoginPage: React.FC = () => {
       if (isFirebaseError(err)) {
         if (err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
           setError("Wrong password. Please try again.");
+          setFieldErrors({
+            ...fieldErrors,
+            password: "Incorrect password"
+          });
         } else if (err.code === "auth/user-not-found") {
           setError("No account found with this email.");
+          setFieldErrors({
+            ...fieldErrors,
+            email: "Email not found"
+          });
         } else if (err.code === "auth/invalid-email") {
           setError("Invalid email address format.");
+          setFieldErrors({
+            ...fieldErrors,
+            email: "Invalid email format"
+          });
         } else if (err.code === "auth/too-many-requests") {
           setError("Too many failed attempts. Please try again later.");
         } else {
@@ -314,13 +379,20 @@ const LoginPage: React.FC = () => {
   const handleForgotPassword = async () => {
     if (!formData.email) {
       setError("Please enter your email first.");
+      setFieldErrors({
+        ...fieldErrors,
+        email: "Email is required to reset password"
+      });
       return;
     }
     
     // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(formData.email)) {
+    if (!EMAIL_REGEX.test(formData.email)) {
       setError("Please enter a valid email address.");
+      setFieldErrors({
+        ...fieldErrors,
+        email: "Invalid email format"
+      });
       return;
     }
     
@@ -328,9 +400,17 @@ const LoginPage: React.FC = () => {
       await sendPasswordResetEmail(auth, formData.email);
       setMessage("Password reset email sent! Please check your inbox.");
       setError("");
+      setFieldErrors({
+        email: "",
+        password: ""
+      });
     } catch (err: unknown) {
       if (isFirebaseError(err) && err.code === "auth/user-not-found") {
         setError("No account found with this email.");
+        setFieldErrors({
+          ...fieldErrors,
+          email: "Email not found"
+        });
       } else {
         setError("Failed to send reset email. Please try again.");
       }
@@ -350,7 +430,7 @@ const LoginPage: React.FC = () => {
           {error && <ErrorText>{error}</ErrorText>}
           {message && <SuccessText>{message}</SuccessText>}
 
-          <Label>
+          <Label $hasError={!!fieldErrors.email}>
             <input
               type="email"
               name="email"
@@ -362,9 +442,14 @@ const LoginPage: React.FC = () => {
               disabled={loading}
             />
             <span>Email</span>
+            {fieldErrors.email && (
+              <div style={{ color: '#e74c3c', fontSize: '12px', marginTop: '5px' }}>
+                {fieldErrors.email}
+              </div>
+            )}
           </Label>
 
-          <Label>
+          <Label $hasError={!!fieldErrors.password}>
             <input
               type="password"
               name="password"
@@ -377,6 +462,11 @@ const LoginPage: React.FC = () => {
               disabled={loading}
             />
             <span>Password</span>
+            {fieldErrors.password && (
+              <div style={{ color: '#e74c3c', fontSize: '12px', marginTop: '5px' }}>
+                {fieldErrors.password}
+              </div>
+            )}
           </Label>
 
           <Button type="submit" disabled={loading}>
