@@ -1,4 +1,4 @@
-import Create from '../../rlclinic/create-account';
+import Create from "@/rlclinic/create-account";
 
 export default function Home() {
   return (

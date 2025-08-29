@@ -166,7 +166,7 @@ const GoogleButton = styled.button`
 const GoogleIcon = styled.div`
   width: 20px;
   height: 20px;
-  background: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTgiIGhlaWdodD0iMTgiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGcgZmlsbD0ibm9uZSIgZmlsbC1ydWxlPSJldmVub2RkIj48cGF0aCBkPSJNMTcuNiA5LjJsLS4xLTEuOEg5djMuNGg0LjhDMTMuNiAxMiAxMyAxMyAxMiAxMy42djIuMmgtM2E4LjggOC44IDAgMCAwIDIuNi02LjZ6IiBmaWxsPSIjNDI4NUY0IiBmaWxsLXJ1bGU9Im5vbnplcm8iLz48cGF0aCBkPSJNOSAxOGMyLjQgMCA0LjUtLjggNi0yLjJsLTMtMi4yYTUuNCA1LjQgMCAwIDEtOC0yLjlIMVYxM2E5IDkgMCAwIDAgOCA1eiIgZmlsbD0iIzM0QTg1MyIgZmlsbC1ydWxlPSJub256ZXJvIi8+PHBhdGggZD0iTTQgMTAuN2E1LjQgNS40IDAgMCAxIDAtMy40VjVIMWE5IDkgMCAwIDAgMCA4bDMtMi4zeiIgZmlsbD0iI0ZCQkMwNSIgZmlsbC1ydWxlPSJub256ZXJvIi8+PHBhdGggZD0iTTkgMy42YzEuMyAwIDIuNS40IDMuNCAxLjNMMTUgMi4zQTkgOSAwIDAgMCAxIDVsMyAyLjRhNS40IDUuNCAwIDAgMSA1LTMuN3oiIGZpbGw9IiVFQTQzMzUiIGZpbGwtcnVsZT0ibm9uemVybyIvPjxwYXRoIGQ9Ik0wIDBoMTh2MThIMHoiLz48L2c+PC9zdmc+') center no-repeat;
+  background: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTgiIGhlaWdodD0iMTgiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGcgZmlsbD0ibm9uZUiIGZpbGwtcnVsZT0iZXZlbm9kZCI+PHBhdGggZD0iTTE3LjYgOS4ybC4xLTEuOEg5djMuNGg0LjhDMTMuNiAxMiAxMyAxMyAxMiAxMy42djIuMmgtM2E4LjggOC44IDAgMCAwIDIuNi02LjZ6IiBmaWxsPSIjNDI4NUY0IiBmaWxsLXJ1bGU9Im5vbnplcm8iLz48cGF0aCBkPSJNOSAxOGMyLjQgMCA0LjUtLjggNi0yLjJsLTMtMi4yYTUuNCA1LjQgMCAwIDEtOC0yLjlIMVYxM2E5IDkgMCAwIDAgOCA1eiIgZmlsbD0iIzM0QTg1MyIgZmlsbC1ydWxlPSJub256ZXJvIi8+PHBhdGggZD0iTTQgMTAuN2E1LjQgNS40IDAgMCAxIDAtMy40VjVIMWE5IDkgMCAwIDAgMCA4bDMtMi40eiIgZmlsbD0iI0ZCQkUwNSIgZmlsbC1ydWxlPSJub256ZXJvIi8+PHBhdGggZD0iTTkgMy42YzEuMyAwIDIuNS40IDMuNCAxLjNMMTUgMi4zQTkgOSAwIDAgMCAxIDVsMyAyLjRhNS40IDUuNCAwIDAgMSA1LTMuN3oiIGZpbGw9IiNFQTQzMzUiIGZpbGwtcnVsZT0ibm9uemVybyIvPjxwYXRoIGQ9Ik0wIDBoMTh2MThIMHoiLz48L2c+PC9zdmc+') center no-repeat;
 `;
 
 const ErrorMessage = styled.p`
@@ -388,7 +388,9 @@ export const Create = () => {
       setSuccess("Account created successfully!");
       
       // Redirect to pet registration with user data as query params
-      router.push(`/petregister?firstname=${encodeURIComponent(formData.firstname)}&lastname=${encodeURIComponent(formData.lastname)}&email=${encodeURIComponent(formData.email)}`);
+      setTimeout(() => {
+        router.push(`/login?firstname=${encodeURIComponent(formData.firstname)}&lastname=${encodeURIComponent(formData.lastname)}&email=${encodeURIComponent(formData.email)}`);
+      }, 1500);
     } catch (err: unknown) {
       console.error("Email sign up error:", err);
       
@@ -396,6 +398,10 @@ export const Create = () => {
       if (isAuthError(err)) {
         if (err.code === 'auth/email-already-in-use') {
           setError("This email is already registered. Please sign in instead.");
+          // Redirect to login page after a short delay
+          setTimeout(() => {
+            router.push("/login");
+          }, 2000);
         } else if (err.code === 'auth/invalid-email') {
           setError("Invalid email address format.");
         } else if (err.code === 'auth/weak-password') {
@@ -451,11 +457,15 @@ export const Create = () => {
         setSuccess("Account created successfully!");
         
         // Redirect to pet registration with user data as query params
-        router.push(`/petregister?firstname=${encodeURIComponent(firstname)}&lastname=${encodeURIComponent(lastname)}&email=${encodeURIComponent(user.email || "")}`);
+        setTimeout(() => {
+          router.push(`/petregister?firstname=${encodeURIComponent(firstname)}&lastname=${encodeURIComponent(lastname)}&email=${encodeURIComponent(user.email || "")}`);
+        }, 1500);
       } else {
         // User already exists, redirect to dashboard
         setSuccess("Signed in successfully!");
-        router.push("/userdashboard");
+        setTimeout(() => {
+          router.push("/dashboard");
+        }, 1500);
       }
     } catch (err: unknown) {
       console.error("Google sign up error:", err);
@@ -466,6 +476,10 @@ export const Create = () => {
           setError("Sign up was canceled. Please try again.");
         } else if (err.code === 'auth/account-exists-with-different-credential') {
           setError("An account already exists with the same email address but different sign-in credentials.");
+          // Redirect to login page after a short delay
+          setTimeout(() => {
+            router.push("/login");
+          }, 2000);
         } else if (err.code === 'auth/popup-blocked') {
           setError("Popup was blocked by your browser. Please allow popups for this site.");
         } else {
@@ -486,6 +500,11 @@ export const Create = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Add function to handle redirect to login
+  const handleRedirectToLogin = () => {
+    router.push("/login");
   };
 
   if (!isClient) {
@@ -604,7 +623,7 @@ export const Create = () => {
           <RedirectText>
             Already have an account?{" "}
             <Link href="/login" passHref>
-              <RedirectLink>Sign in here</RedirectLink>
+              <RedirectLink onClick={handleRedirectToLogin}>Sign in here</RedirectLink>
             </Link>
           </RedirectText>
         </Card>
