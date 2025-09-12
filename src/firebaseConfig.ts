@@ -15,6 +15,7 @@ import { getFunctions } from "firebase/functions";
      appId: "1:8114966521:web:058af6fdd6111c8c776c68",
      measurementId: "G-YQKHQ90SGL"
    };
+   
 
  const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);

@@ -2,9 +2,9 @@
 
 import React, { useState, useEffect } from "react";
 import styled, { createGlobalStyle, keyframes } from "styled-components";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { db, auth } from "../firebaseConfig";
-import { collection, doc, setDoc, getDoc } from "firebase/firestore";
+import { collection, doc, setDoc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
 const GlobalStyle = createGlobalStyle`
@@ -26,53 +26,73 @@ const fadeIn = keyframes`
   to { opacity: 1; transform: translateY(0); }
 `;
 
+// Listahan ng mga breed para sa Pilipinas
+const dogBreeds = [
+  "Aspin (Asong Pinoy)",
+  "Shih Tzu",
+  "Siberian Husky",
+  "Chihuahua",
+  "Labrador Retriever",
+  "Beagle",
+  "Golden Retriever",
+  "Poodle",
+  "Dachshund",
+  "Rottweiler",
+  "Philippine Forest Dog (Asong Gubat)"
+];
+
+const catBreeds = [
+  "British Shorthair",
+  "Burmese",
+  "Abyssinian",
+  "Scottish Fold",
+  "Siamese",
+  "Sphynx",
+  "Ragdoll",
+  "American Shorthair",
+  "Maine Coon",
+  "Persian",
+  "Putot Cat (Pusang Putot)"
+];
+
 const Petregister: React.FC = () => {
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   const [petOwnerEmail, setPetOwnerEmail] = useState<string>("");
-  const [ownerFirstName, setOwnerFirstName] = useState<string>("");
-  const [ownerLastName, setOwnerLastName] = useState<string>("");
-
   const [petName, setPetName] = useState("");
   const [birthday, setBirthday] = useState("");
   const [color, setColor] = useState("");
   const [petType, setPetType] = useState("");
   const [petBreed, setPetBreed] = useState("");
+  const [breedOptions, setBreedOptions] = useState<string[]>([]);
   const [gender, setGender] = useState<"Male" | "Female">("Male");
   const [isLoading, setIsLoading] = useState(false);
 
-  // Get current user info and check URL params
+  // I-update ang breed options kapag nagbago ang pet type
+  useEffect(() => {
+    if (petType === "Dog") {
+      setBreedOptions(dogBreeds);
+    } else if (petType === "Cat") {
+      setBreedOptions(catBreeds);
+    } else {
+      setBreedOptions([]);
+    }
+    
+    // I-reset ang breed kapag nagbago ang pet type
+    setPetBreed("");
+  }, [petType]);
+
+  // Get current user info
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user?.email) {
         setPetOwnerEmail(user.email);
-
-        // ✅ Check if there are query parameters from registration
-        const urlFirstName = searchParams.get('firstname');
-        const urlLastName = searchParams.get('lastname');
-        const urlEmail = searchParams.get('email');
-        
-        if (urlFirstName && urlLastName && urlEmail) {
-          // Use data from URL parameters (from registration)
-          setOwnerFirstName(urlFirstName);
-          setOwnerLastName(urlLastName);
-          setPetOwnerEmail(urlEmail);
-        } else {
-          // ✅ Kunin ang pangalan mula sa `users` collection (for existing users)
-          const userDoc = await getDoc(doc(db, "users", user.uid));
-          if (userDoc.exists()) {
-            const userData = userDoc.data();
-            setOwnerFirstName(userData.firstname || "");
-            setOwnerLastName(userData.lastname || "");
-          }
-        }
       } else {
         router.push("/login");
       }
     });
     return () => unsubscribe();
-  }, [router, searchParams]);
+  }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,8 +116,6 @@ const Petregister: React.FC = () => {
         petBreed: petBreed.trim(),
         gender,
         ownerEmail: petOwnerEmail,
-        ownerFirstName,
-        ownerLastName,
         createdAt: new Date().toISOString(),
       });
 
@@ -106,8 +124,6 @@ const Petregister: React.FC = () => {
         petId,
         petName: petName.trim(),
         ownerEmail: petOwnerEmail,
-        ownerFirstName,
-        ownerLastName,
         petType: petType.trim(),
         petBreed: petBreed.trim(),
         age: birthday ? calculateAge(birthday) : "",
@@ -121,8 +137,6 @@ const Petregister: React.FC = () => {
         petId,
         petName: petName.trim(),
         ownerEmail: petOwnerEmail,
-        ownerFirstName,
-        ownerLastName,
         date: new Date().toISOString().split("T")[0],
         diagnosis: "",
         treatment: "",
@@ -190,34 +204,6 @@ const Petregister: React.FC = () => {
                 </Label>
               </FormGroup>
 
-              <FormRow>
-                <FormGroup style={{flex: 1}}>
-                  <Label>
-                    <Input 
-                      type="text" 
-                      value={ownerFirstName} 
-                      readOnly 
-                      disabled 
-                      className="disabled-input"
-                    />
-                    <Span>First Name</Span>
-                  </Label>
-                </FormGroup>
-
-                <FormGroup style={{flex: 1}}>
-                  <Label>
-                    <Input 
-                      type="text" 
-                      value={ownerLastName} 
-                      readOnly 
-                      disabled 
-                      className="disabled-input"
-                    />
-                    <Span>Last Name</Span>
-                  </Label>
-                </FormGroup>
-              </FormRow>
-
               {/* Pet Info */}
               <FormGroup>
                 <Label>
@@ -264,27 +250,36 @@ const Petregister: React.FC = () => {
               <FormRow>
                 <FormGroup style={{flex: 1}}>
                   <Label>
-                    <Input 
-                      type="text" 
+                    <Select 
                       value={petType} 
                       onChange={(e) => setPetType(e.target.value)} 
-                      placeholder=" " 
                       disabled={isLoading}
-                    />
-                    <Span>Pet Type</Span>
+                      required
+                    >
+                      <option value="">Select Pet Type</option>
+                      <option value="Dog">Dog</option>
+                      <option value="Cat">Cat</option>
+                    </Select>
+                    <Span>Pet Type *</Span>
                   </Label>
                 </FormGroup>
 
                 <FormGroup style={{flex: 1}}>
                   <Label>
-                    <Input 
-                      type="text" 
+                    <Select 
                       value={petBreed} 
                       onChange={(e) => setPetBreed(e.target.value)} 
-                      placeholder=" " 
-                      disabled={isLoading}
-                    />
-                    <Span>Breed</Span>
+                      disabled={isLoading || !petType}
+                      required
+                    >
+                      <option value="">Select Breed</option>
+                      {breedOptions.map((breed) => (
+                        <option key={breed} value={breed}>
+                          {breed}
+                        </option>
+                      ))}
+                    </Select>
+                    <Span>Breed *</Span>
                   </Label>
                 </FormGroup>
               </FormRow>
@@ -317,7 +312,7 @@ const Petregister: React.FC = () => {
               </FormGroup>
 
               <ButtonGroup>
-                <Button type="submit" disabled={isLoading || !petName.trim()}>
+                <Button type="submit" disabled={isLoading || !petName.trim() || !petType || !petBreed}>
                   {isLoading ? (
                     <>
                       <Spinner />
@@ -485,6 +480,38 @@ const Input = styled.input`
   }
   
   &:not(:placeholder-shown) + span,
+  &:focus + span {
+    top: -10px;
+    left: 10px;
+    font-size: 12px;
+    background: white;
+    padding: 0 5px;
+    color: #34b89c;
+  }
+  
+  @media (max-width: 768px) {
+    padding: 12px;
+    font-size: 14px;
+  }
+`;
+
+const Select = styled.select`
+  width: 100%;
+  padding: 15px;
+  border-radius: 10px;
+  border: 1px solid #ddd;
+  font-size: 16px;
+  background: ${props => props.disabled ? '#f5f5f5' : '#fff'};
+  color: ${props => props.disabled ? '#888' : '#333'};
+  appearance: none;
+  
+  &:focus {
+    outline: none;
+    border-color: #34b89c;
+    box-shadow: 0 0 0 2px rgba(52, 184, 156, 0.2);
+  }
+  
+  &:not([value=""]) + span,
   &:focus + span {
     top: -10px;
     left: 10px;
