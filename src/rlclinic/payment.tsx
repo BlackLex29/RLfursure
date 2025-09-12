@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
@@ -7,6 +7,9 @@ const PaymentForm = () => {
   const [paymentMethod, setPaymentMethod] = useState("Cash");
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState("");
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [modalMessage, setModalMessage] = useState("");
   const router = useRouter();
 
   // Check payment status for popup approach
@@ -16,18 +19,21 @@ const PaymentForm = () => {
       const data = await res.json();
       
       if (data.status === 'succeeded') {
-        alert("Payment successful! Thank you for your order.");
-        router.push('/userdashboard');
+        setModalMessage("Payment successful! Thank you for your order.");
+        setShowSuccessModal(true);
       } else if (data.status === 'failed') {
-        setError("Payment failed. Please try again.");
+        setModalMessage("Payment failed. Please try again.");
+        setShowErrorModal(true);
       }
       
       // Clear the payment intent ID from storage
       sessionStorage.removeItem('paymentIntentId');
     } catch (error) {
       console.error("Error checking payment status:", error);
+      setModalMessage("Error verifying payment status. Please contact support.");
+      setShowErrorModal(true);
     }
-  }, [router]);
+  }, []);
 
   // Handle payment status when returning from payment gateway
   useEffect(() => {
@@ -35,11 +41,12 @@ const PaymentForm = () => {
     const paymentStatus = urlParams.get('payment_status');
     
     if (paymentStatus === 'success') {
-      alert("Payment successful! Thank you for your order.");
-      router.push('/userdashboard');
+      setModalMessage("Payment successful! Thank you for your order.");
+      setShowSuccessModal(true);
       window.history.replaceState({}, document.title, window.location.pathname);
     } else if (paymentStatus === 'failed') {
-      setError("Payment failed. Please try again or choose another payment method.");
+      setModalMessage("Payment failed. Please try again or choose another payment method.");
+      setShowErrorModal(true);
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
@@ -58,8 +65,8 @@ const PaymentForm = () => {
     if (paymentMethod === "Cash") {
       // Simulate processing time
       setTimeout(() => {
-        alert("Cash payment selected. Redirecting to dashboard...");
-        router.push('/userdashboard');
+        setModalMessage("Cash payment selected. Your order has been confirmed!");
+        setShowSuccessModal(true);
         setIsProcessing(false);
       }, 1500);
     } else {
@@ -98,15 +105,22 @@ const PaymentForm = () => {
         const checkoutUrl = responseData?.data?.attributes?.checkout_url;
 
         if (checkoutUrl) {
+          // Store payment intent ID for status checking
+          if (responseData.data.id) {
+            sessionStorage.setItem('paymentIntentId', responseData.data.id);
+          }
+          
           // Redirect directly to payment gateway
           window.location.href = checkoutUrl;
         } else {
-          setError("Failed to initialize online payment. No checkout URL received.");
+          setModalMessage("Failed to initialize online payment. No checkout URL received.");
+          setShowErrorModal(true);
           console.error("PayMongo Response:", responseData);
         }
       } catch (err) {
         console.error("Payment error:", err);
-        setError((err as Error).message || "Error starting online payment. Please try again or use cash payment.");
+        setModalMessage((err as Error).message || "Error starting online payment. Please try again or use cash payment.");
+        setShowErrorModal(true);
       } finally {
         setIsProcessing(false);
       }
@@ -116,6 +130,14 @@ const PaymentForm = () => {
   const handlePaymentMethodChange = (method: string) => {
     setPaymentMethod(method);
     setError("");
+  };
+
+  const handleModalClose = () => {
+    setShowSuccessModal(false);
+    setShowErrorModal(false);
+    if (showSuccessModal) {
+      router.push('/userdashboard');
+    }
   };
 
   return (
@@ -239,6 +261,56 @@ const PaymentForm = () => {
           </div>
         </form>
       </div>
+
+      {/* Success Modal */}
+      {showSuccessModal && (
+        <div className="modal-overlay" onClick={handleModalClose}>
+          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-icon success">
+                <i className="fas fa-check-circle"></i>
+              </div>
+              <h3>Payment Successful</h3>
+              <button className="modal-close" onClick={handleModalClose}>
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            <div className="modal-content">
+              <p>{modalMessage}</p>
+            </div>
+            <div className="modal-actions">
+              <button className="modal-btn confirm" onClick={handleModalClose}>
+                Continue to Dashboard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error Modal */}
+      {showErrorModal && (
+        <div className="modal-overlay" onClick={handleModalClose}>
+          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-icon error">
+                <i className="fas fa-exclamation-circle"></i>
+              </div>
+              <h3>Payment Error</h3>
+              <button className="modal-close" onClick={handleModalClose}>
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            <div className="modal-content">
+              <p>{modalMessage}</p>
+            </div>
+            <div className="modal-actions">
+              <button className="modal-btn confirm" onClick={handleModalClose}>
+                Try Again
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         .payment-container {
@@ -435,6 +507,141 @@ const PaymentForm = () => {
           gap: 0.5rem;
         }
         
+        /* Modal Styles */
+        .modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: rgba(0, 0, 0, 0.6);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
+          padding: 1rem;
+          animation: fadeIn 0.3s ease-out;
+        }
+        
+        .modal-container {
+          background: white;
+          border-radius: 16px;
+          width: 100%;
+          max-width: 450px;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+          overflow: hidden;
+          animation: slideUp 0.3s ease-out;
+        }
+        
+        .modal-header {
+          display: flex;
+          align-items: center;
+          padding: 1.5rem;
+          border-bottom: 1px solid #eaeaea;
+          position: relative;
+        }
+        
+        .modal-icon {
+          width: 40px;
+          height: 40px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-right: 1rem;
+          font-size: 1.5rem;
+        }
+        
+        .modal-icon.success {
+          background-color: #e7f6e9;
+          color: #28a745;
+        }
+        
+        .modal-icon.error {
+          background-color: #feeceb;
+          color: #dc3545;
+        }
+        
+        .modal-header h3 {
+          margin: 0;
+          font-size: 1.5rem;
+          font-weight: 600;
+          color: #2c3e50;
+        }
+        
+        .modal-close {
+          position: absolute;
+          top: 1rem;
+          right: 1rem;
+          background: none;
+          border: none;
+          font-size: 1.2rem;
+          cursor: pointer;
+          color: #666;
+          padding: 0.2rem;
+          border-radius: 4px;
+        }
+        
+        .modal-close:hover {
+          background-color: #f5f5f5;
+        }
+        
+        .modal-content {
+          padding: 1.5rem;
+        }
+        
+        .modal-content p {
+          margin: 0;
+          font-size: 1.1rem;
+          line-height: 1.6;
+          color: #555;
+          text-align: center;
+        }
+        
+        .modal-actions {
+          padding: 0 1.5rem 1.5rem;
+          display: flex;
+          justify-content: center;
+        }
+        
+        .modal-btn {
+          padding: 0.8rem 2rem;
+          border: none;
+          border-radius: 8px;
+          font-size: 1rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        
+        .modal-btn.confirm {
+          background: #4a6cf7;
+          color: white;
+        }
+        
+        .modal-btn.confirm:hover {
+          background: #3a5cd8;
+          transform: translateY(-2px);
+          box-shadow: 0 4px 10px rgba(58, 92, 216, 0.3);
+        }
+        
+        /* Animations */
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        
+        @keyframes slideUp {
+          from { 
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to { 
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        
         /* Responsive adjustments */
         @media (max-width: 576px) {
           .payment-container {
@@ -457,6 +664,18 @@ const PaymentForm = () => {
           .payment-option {
             padding: 1rem;
           }
+          
+          .modal-container {
+            margin: 1rem;
+          }
+          
+          .modal-header {
+            padding: 1.2rem;
+          }
+          
+          .modal-content {
+            padding: 1.2rem;
+          }
         }
         
         @media (max-width: 400px) {
@@ -478,22 +697,18 @@ const PaymentForm = () => {
             padding: 0.8rem;
             font-size: 1rem;
           }
+          
+          .modal-header {
+            flex-direction: column;
+            text-align: center;
+            gap: 0.8rem;
+          }
+          
+          .modal-icon {
+            margin-right: 0;
+          }
         }
-        
-        /* Animation */
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .payment-option {
-          animation: fadeIn 0.5s ease-out;
-        }
-        
-        .payment-option:nth-child(2) {
-          animation-delay: 0.1s;
-        }
-     `}</style>
+      `}</style>
 
       <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     </div>

@@ -249,12 +249,6 @@ const UserDashboard: React.FC = () => {
               <CardTitle>Medical Records</CardTitle>
               <CardText>View your pet&apos;s health history</CardText>
             </Card>
-
-            <Card onClick={() => router.push("/uservaccination")}>
-              <CardIcon>💉</CardIcon>
-              <CardTitle>Vaccinations</CardTitle>
-              <CardText>Track vaccination history and reminders</CardText>
-            </Card>
           </CardsGrid>
 
           {/* Appointments section */}

@@ -4,7 +4,16 @@ import React, { useEffect, useState } from "react";
 import styled, { createGlobalStyle } from "styled-components";
 import { useRouter } from "next/navigation";
 import { db, auth } from "../firebaseConfig";
-import { collection, getDocs, addDoc, DocumentData } from "firebase/firestore";
+import { 
+  collection, 
+  getDocs, 
+  addDoc, 
+  DocumentData, 
+  query, 
+  where, 
+  onSnapshot,
+  serverTimestamp 
+} from "firebase/firestore";
 
 // 🔹 Types
 interface Pet {
@@ -19,6 +28,44 @@ interface Appointment {
   petId: string;
   clientName: string;
 }
+
+// 🔹 UPDATED: Unavailable Slots Type to match vet dashboard
+interface Unavailable {
+  id: string;
+  date: string; // This should be in YYYY-MM-DD format
+  veterinarian: string;
+  isAllDay: boolean;
+  startTime?: string;
+  endTime?: string;
+}
+
+// 🔹 NEW: Doctor Type
+interface Doctor {
+  id: string;
+  name: string;
+  email: string;
+}
+
+// 🔹 NEW: Appointment Data Type for Notification
+interface AppointmentNotificationData {
+  clientName: string | null | undefined;
+  petName: string | undefined;
+  date: string;
+  timeSlot: string | null;
+  appointmentType: string;
+  appointmentId?: string;
+}
+
+// 🔹 Appointment Types
+const appointmentTypes = [
+  { value: "vaccination", label: "Vaccination" },
+  { value: "checkup", label: "Check Up" },
+  { value: "antiRabies", label: "Anti Rabies" },
+  { value: "ultrasound", label: "Ultrasound" },
+  { value: "groom", label: "Grooming" },
+  { value: "spayNeuter", label: "Spay/Neuter (Kapon)" },
+  { value: "deworm", label: "Deworming (Purga)" }
+];
 
 const GlobalStyle = createGlobalStyle`
   body {
@@ -52,16 +99,78 @@ const AppointmentPage: React.FC = () => {
   const [selectedPet, setSelectedPet] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split("T")[0]);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [selectedAppointmentType, setSelectedAppointmentType] = useState<string>("");
   const [bookedSlots, setBookedSlots] = useState<Appointment[]>([]);
+  
+  // 🔹 UPDATED: States for doctor unavailability
+  const [unavailableSlots, setUnavailableSlots] = useState<Unavailable[]>([]);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  
   const [isLoading, setIsLoading] = useState(true);
+
+  // 🔹 NEW: Function to send notification to doctor
+  const sendNotificationToDoctor = async (appointmentData: AppointmentNotificationData) => {
+    try {
+      // Send notification to all doctors (you can modify this to send to specific doctor)
+      const doctorNotifications = doctors.map(async (doctor) => {
+        return addDoc(collection(db, "notifications"), {
+          recipientId: doctor.id,
+          recipientEmail: doctor.email,
+          type: "new_appointment",
+          title: "New Appointment Booked",
+          message: `New appointment booked by ${appointmentData.clientName} for ${appointmentData.petName} on ${appointmentData.date} at ${appointmentData.timeSlot}`,
+          appointmentId: appointmentData.appointmentId,
+          isRead: false,
+          createdAt: serverTimestamp()
+        });
+      });
+
+      await Promise.all(doctorNotifications);
+      console.log("Notifications sent to all doctors");
+    } catch (error) {
+      console.error("Error sending notifications:", error);
+    }
+  };
+
+  // 🔹 UPDATED: Check if date is unavailable - now properly compares dates
+  const isDateUnavailable = (date: string) => {
+    return unavailableSlots.some(slot => {
+      // Ensure both dates are in the same format for comparison
+      const slotDateFormatted = new Date(slot.date).toISOString().split('T')[0];
+      const selectedDateFormatted = new Date(date).toISOString().split('T')[0];
+      
+      return slotDateFormatted === selectedDateFormatted;
+    });
+  };
+
+  // 🔹 UPDATED: Get unavailable dates for calendar display
+  const getUnavailableDates = () => {
+    return unavailableSlots
+      .map(slot => {
+        // Format date consistently for display
+        return new Date(slot.date).toLocaleDateString('en-PH', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric'
+        });
+      });
+  };
 
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        const [petsSnapshot, appointmentsSnapshot] = await Promise.all([
+        // 🔹 Fetch all data in parallel
+        const [
+          petsSnapshot, 
+          appointmentsSnapshot, 
+          unavailableSnapshot,
+          doctorsSnapshot
+        ] = await Promise.all([
           getDocs(collection(db, "pets")),
-          getDocs(collection(db, "appointments"))
+          getDocs(collection(db, "appointments")),
+          getDocs(collection(db, "unavailableSlots")), // NEW
+          getDocs(query(collection(db, "users"), where("role", "==", "veterinarian"))) // NEW
         ]);
 
         // Process pets
@@ -88,6 +197,42 @@ const AppointmentPage: React.FC = () => {
           });
         });
         setBookedSlots(appointmentsData);
+
+        // 🔹 UPDATED: Process unavailable slots to ensure proper date format
+        const unavailableData: Unavailable[] = [];
+        unavailableSnapshot.forEach((doc) => {
+          const d = doc.data() as DocumentData;
+          
+          // Ensure date is stored in consistent format
+          let dateValue = d.date;
+          // If date is a timestamp, convert to YYYY-MM-DD format
+          if (dateValue && dateValue.toDate) {
+            dateValue = dateValue.toDate().toISOString().split('T')[0];
+          }
+          
+          unavailableData.push({
+            id: doc.id,
+            date: dateValue,
+            veterinarian: d.veterinarian,
+            isAllDay: d.isAllDay,
+            startTime: d.startTime,
+            endTime: d.endTime
+          });
+        });
+        setUnavailableSlots(unavailableData);
+
+        // 🔹 NEW: Process doctors
+        const doctorsData: Doctor[] = [];
+        doctorsSnapshot.forEach((doc) => {
+          const d = doc.data() as DocumentData;
+          doctorsData.push({
+            id: doc.id,
+            name: d.name,
+            email: d.email
+          });
+        });
+        setDoctors(doctorsData);
+
       } catch (error) {
         console.error("Error fetching data:", error);
         alert("Failed to load data");
@@ -97,11 +242,70 @@ const AppointmentPage: React.FC = () => {
     };
 
     fetchData();
+
+    // 🔹 UPDATED: Real-time listener for unavailable slots with proper date handling
+    const unsubscribeUnavailable = onSnapshot(
+      collection(db, "unavailableSlots"),
+      (snapshot) => {
+        const unavailableData: Unavailable[] = [];
+        snapshot.forEach((doc) => {
+          const d = doc.data() as DocumentData;
+          
+          // Ensure date is stored in consistent format
+          let dateValue = d.date;
+          // If date is a timestamp, convert to YYYY-MM-DD format
+          if (dateValue && dateValue.toDate) {
+            dateValue = dateValue.toDate().toISOString().split('T')[0];
+          }
+          
+          unavailableData.push({
+            id: doc.id,
+            date: dateValue,
+            veterinarian: d.veterinarian,
+            isAllDay: d.isAllDay,
+            startTime: d.startTime,
+            endTime: d.endTime
+          });
+        });
+        setUnavailableSlots(unavailableData);
+      }
+    );
+
+    // 🔹 NEW: Real-time listener for appointments (to update booked slots)
+    const unsubscribeAppointments = onSnapshot(
+      collection(db, "appointments"),
+      (snapshot) => {
+        const appointmentsData: Appointment[] = [];
+        snapshot.forEach((doc) => {
+          const d = doc.data() as DocumentData;
+          appointmentsData.push({
+            date: d.date,
+            timeSlot: d.timeSlot,
+            status: d.status,
+            petId: d.petId,
+            clientName: d.clientName || ""
+          });
+        });
+        setBookedSlots(appointmentsData);
+      }
+    );
+
+    // Cleanup listeners
+    return () => {
+      unsubscribeUnavailable();
+      unsubscribeAppointments();
+    };
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedPet || !selectedSlot) return alert("Please select a pet and time slot");
+    if (!selectedPet || !selectedSlot || !selectedAppointmentType) 
+      return alert("Please select a pet, appointment type, and time slot");
+
+    // 🔹 UPDATED: Check if date is unavailable
+    if (isDateUnavailable(selectedDate)) {
+      return alert("This date is unavailable. Please select another date.");
+    }
 
     // Check if the slot is already taken by ANY user (not just the current user)
     const isTaken = bookedSlots.some(
@@ -114,16 +318,29 @@ const AppointmentPage: React.FC = () => {
     if (isTaken) return alert("This time slot is already booked by another user");
 
     try {
-      const newDoc = await addDoc(collection(db, "appointments"), {
+      const selectedPetData = pets.find((p) => p.id === selectedPet);
+      
+      const appointmentData = {
         clientName: auth.currentUser?.email,
         petId: selectedPet,
-        petName: pets.find((p) => p.id === selectedPet)?.name,
+        petName: selectedPetData?.name,
         date: selectedDate,
         timeSlot: selectedSlot,
+        appointmentType: selectedAppointmentType,
         status: "Pending",
         paymentMethod: "",
+        createdAt: serverTimestamp()
+      };
+
+      const newDoc = await addDoc(collection(db, "appointments"), appointmentData);
+
+      // 🔹 NEW: Send notification to doctors
+      await sendNotificationToDoctor({
+        ...appointmentData,
+        appointmentId: newDoc.id
       });
 
+      alert("Appointment booked successfully! Doctor has been notified.");
       router.push(`/payment?appointmentId=${newDoc.id}`);
     } catch (err) {
       console.error(err);
@@ -136,11 +353,14 @@ const AppointmentPage: React.FC = () => {
       <>
         <GlobalStyle />
         <Wrapper>
-          <LoadingSpinner>Loading...</LoadingSpinner>
+          <LoadingSpinner>Loading appointment data...</LoadingSpinner>
         </Wrapper>
       </>
     );
   }
+
+  // 🔹 UPDATED: Get unavailable dates for display
+  const unavailableDates = getUnavailableDates();
 
   return (
     <>
@@ -188,6 +408,29 @@ const AppointmentPage: React.FC = () => {
                 <SectionTitle>
                   <SectionIcon>
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                      <path fillRule="evenodd" d="M12 6.75a5.25 5.25 0 016.775-5.025.75.75 0 01.313 1.248l-3.32 3.319c.063.475.276.934.627 1.33.35.389.820.729 1.382.963.56.235 1.217.389 1.925.389a.75.75 0 010 1.5c-.898 0-1.7-.192-2.375-.509A5.221 5.221 0 0115.75 8.25c0-.65-.126-1.275-.356-1.85l-2.57 2.57a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06l2.57-2.57a5.25 5.25 0 00-1.834 2.606A5.25 5.25 0 0112 6.75zM4.118 9.835a.75.75 0 01.897-.636 5.25 5.25 0 011.788.121c.857.194 1.64.582 2.302 1.128.66.544 1.187 1.233 1.536 2.028.348.795.516 1.67.491 2.544a.75.75 0 01-1.495-.1c.02-.68-.11-1.33-.38-1.93a3.75 3.75 0 00-.98-1.51 3.742 3.742 0 00-1.52-.98c-.6-.27-1.25-.4-1.93-.38a.75.75 0 01-.636-.897zM3.75 12a.75.75 0 01.75-.75c2.663 0 5.086.943 6.984 2.497a.75.75 0 01-.968 1.153A9.495 9.495 0 004.5 12.75a.75.75 0 01-.75-.75zm3.75 0a.75.75 0 01.75-.75c.763 0 1.458.216 2.055.57a.75.75 0 01-.765 1.29A3.752 3.752 0 008.25 12.75a.75.75 0 01-.75-.75z" clipRule="evenodd" />
+                    </svg>
+                  </SectionIcon>
+                  Select Appointment Type
+                </SectionTitle>
+                <AppointmentTypeGrid>
+                  {appointmentTypes.map((type) => (
+                    <AppointmentTypeButton
+                      key={type.value}
+                      type="button"
+                      className={selectedAppointmentType === type.value ? "selected" : ""}
+                      onClick={() => setSelectedAppointmentType(type.value)}
+                    >
+                      {type.label}
+                    </AppointmentTypeButton>
+                  ))}
+                </AppointmentTypeGrid>
+              </FormSection>
+
+              <FormSection>
+                <SectionTitle>
+                  <SectionIcon>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M12.75 12.75a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM7.5 15.75a.75.75 0 100-1.5.75.75 0 000 1.5zM8.25 17.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM9.75 15.75a.75.75 0 100-1.5.75.75 0 000 1.5zM10.5 17.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12 15.75a.75.75 0 100-1.5.75.75 0 000 1.5zM12.75 17.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM14.25 15.75a.75.75 0 100-1.5.75.75 0 000 1.5zM15 17.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM16.5 15.75a.75.75 0 100-1.5.75.75 0 000 1.5zM15 12.75a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM16.5 13.5a.75.75 0 100-1.5.75.75 0 000 1.5z" />
                       <path fillRule="evenodd" d="M6.75 2.25A.75.75 0 017.5 3v1.5h9V3A.75.75 0 0118 3v1.5h.75a3 3 0 013 3v11.25a3 3 0 01-3 3H5.25a3 3 0 01-3-3V7.5a3 3 0 013-3H6V3a.75.75 0 01.75-.75zm13.5 9a1.5 1.5 0 00-1.5-1.5H5.25a1.5 1.5 0 00-1.5 1.5v7.5a1.5 1.5 0 001.5 1.5h13.5a1.5 1.5 0 001.5-1.5v-7.5z" clipRule="evenodd" />
                     </svg>
@@ -200,6 +443,18 @@ const AppointmentPage: React.FC = () => {
                   min={new Date().toISOString().split("T")[0]}
                   onChange={(e) => setSelectedDate(e.target.value)}
                 />
+                {/* 🔹 UPDATED: Show unavailable dates warning */}
+                {isDateUnavailable(selectedDate) && (
+                  <UnavailableWarning>
+                    ⚠️ This date is unavailable. Please select another date.
+                  </UnavailableWarning>
+                )}
+                {unavailableDates.length > 0 && (
+                  <UnavailableDatesInfo>
+                    <strong>Upcoming Unavailable Dates:</strong> {unavailableDates.slice(0, 5).join(", ")}
+                    {unavailableDates.length > 5 && ` and ${unavailableDates.length - 5} more...`}
+                  </UnavailableDatesInfo>
+                )}
               </FormSection>
 
               <FormSection>
@@ -221,16 +476,20 @@ const AppointmentPage: React.FC = () => {
                         s.status !== "Cancelled"
                     );
                     
+                    // 🔹 UPDATED: Disable slots if date is unavailable
+                    const dateUnavailable = isDateUnavailable(selectedDate);
+                    
                     return (
                       <SlotButton
                         key={slot}
                         type="button"
-                        disabled={taken}
+                        disabled={taken || dateUnavailable}
                         className={selectedSlot === slot ? "selected" : ""}
-                        onClick={() => setSelectedSlot(slot)}
+                        onClick={() => !dateUnavailable && !taken && setSelectedSlot(slot)}
                       >
                         {slot}
                         {taken && <TakenIndicator>Booked</TakenIndicator>}
+                        {dateUnavailable && <TakenIndicator>Unavailable</TakenIndicator>}
                       </SlotButton>
                     );
                   })}
@@ -246,7 +505,13 @@ const AppointmentPage: React.FC = () => {
                 </Cancel>
                 <Next 
                   type="submit" 
-                  disabled={!selectedPet || !selectedSlot || pets.length === 0}
+                  disabled={
+                    !selectedPet || 
+                    !selectedSlot || 
+                    !selectedAppointmentType || 
+                    pets.length === 0 || 
+                    isDateUnavailable(selectedDate)
+                  }
                 >
                   Proceed to Payment
                 </Next>
@@ -260,302 +525,373 @@ const AppointmentPage: React.FC = () => {
 };
 
 export default AppointmentPage;
+// (Keep all your existing styled components as they are)
 
-/* ===== STYLED COMPONENTS ===== */
-const Wrapper = styled.div`
-  min-height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  background: #e6f7f4;
-  padding: 40px 20px;
+  /* ===== STYLED COMPONENTS ===== */
+  const Wrapper = styled.div`
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    background: #e6f7f4;
+    padding: 40px 20px;
 
-  @media (max-width: 768px) {
-    padding: 20px 16px;
-    align-items: center;
-  }
-`;
+    @media (max-width: 768px) {
+      padding: 20px 16px;
+      align-items: center;
+    }
+  `;
 
-const Card = styled.div`
-  background: #ffffff;
-  border-radius: 24px;
-  width: 100%;
-  max-width: 800px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
-  overflow: hidden;
-  margin: 0 auto;
+  const Card = styled.div`
+    background: #ffffff;
+    border-radius: 24px;
+    width: 100%;
+    max-width: 800px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    margin: 0 auto;
 
-  @media (max-width: 768px) {
-    border-radius: 16px;
-  }
-`;
+    @media (max-width: 768px) {
+      border-radius: 16px;
+    }
+  `;
 
-const Header = styled.h2`
-  text-align: center;
-  color: white;
-  background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
-  padding: 28px 0;
-  margin: 0;
-  font-size: 32px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-
-  @media (max-width: 768px) {
-    font-size: 24px;
-    padding: 20px 0;
-    flex-direction: column;
-    gap: 8px;
-  }
-`;
-
-const HeaderIcon = styled.span`
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  
-  @media (max-width: 768px) {
-    width: 28px;
-    height: 28px;
-  }
-`;
-
-const FormBox = styled.form`
-  display: flex;
-  flex-direction: column;
-  padding: 40px;
-
-  @media (max-width: 768px) {
-    padding: 24px 20px;
-  }
-`;
-
-const InnerContent = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 32px;
-
-  @media (max-width: 768px) {
-    gap: 24px;
-  }
-`;
-
-const FormSection = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-`;
-
-const SectionTitle = styled.h3`
-  font-size: 20px;
-  font-weight: 600;
-  color: #2d3748;
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-
-  @media (max-width: 768px) {
-    font-size: 18px;
-  }
-`;
-
-const SectionIcon = styled.span`
-  width: 24px;
-  height: 24px;
-  color: #34B89C;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-`;
-
-const PetSelect = styled.select`
-  padding: 16px;
-  border-radius: 12px;
-  border: 2px solid #6BC1E1;
-  font-size: 16px;
-  background: #f7fdfc;
-  color: #057a66;
-  font-weight: 600;
-  transition: all 0.2s ease;
-  cursor: pointer;
-
-  &:focus {
-    outline: none;
-    border-color: #34B89C;
-    box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.2);
-  }
-
-  @media (max-width: 768px) {
-    padding: 14px;
-    font-size: 16px;
-  }
-`;
-
-const DateInput = styled.input`
-  padding: 16px;
-  border-radius: 12px;
-  border: 2px solid #6BC1E1;
-  font-size: 16px;
-  background: #ffffff;
-  color: #2d3748;
-  font-weight: 500;
-  transition: all 0.2s ease;
-  cursor: pointer;
-
-  &:focus {
-    outline: none;
-    border-color: #34B89C;
-    box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.2);
-  }
-
-  @media (max-width: 768px) {
-    padding: 14px;
-    font-size: 16px;
-  }
-`;
-
-const SlotGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 16px;
-
-  @media (max-width: 768px) {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-  }
-
-  @media (max-width: 480px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const SlotButton = styled.button`
-  padding: 16px 12px;
-  border-radius: 12px;
-  border: 2px solid #e2e8f0;
-  background: white;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  transition: all 0.2s ease;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  position: relative;
-
-  &.selected {
-    background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
-    border-color: transparent;
+  const Header = styled.h2`
+    text-align: center;
     color: white;
-    font-weight: 600;
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(52, 184, 156, 0.3);
-  }
-
-  &:hover:not(:disabled) {
-    border-color: #34B89C;
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  }
-
-  &:disabled {
-    background: #f8f9fa;
-    color: #a0aec0;
-    cursor: not-allowed;
-  }
-
-  @media (max-width: 768px) {
-    padding: 14px 10px;
-  }
-`;
-
-const TakenIndicator = styled.span`
-  font-size: 12px;
-  color: #e53e3e;
-  font-weight: 500;
-
-  ${SlotButton}.selected & {
-    color: rgba(255, 255, 255, 0.9);
-  }
-`;
-
-const ButtonGroup = styled.div`
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  margin-top: 16px;
-
-  @media (max-width: 768px) {
-    flex-direction: column;
+    background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
+    padding: 28px 0;
+    margin: 0;
+    font-size: 32px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     gap: 12px;
-  }
-`;
 
-const Cancel = styled.button`
-  padding: 18px 24px;
-  background: white;
-  color: #34B89C;
-  border: 2px solid #34B89C;
-  border-radius: 12px;
-  font-weight: 600;
-  font-size: 16px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  flex: 1;
+    @media (max-width: 768px) {
+      font-size: 24px;
+      padding: 20px 0;
+      flex-direction: column;
+      gap: 8px;
+    }
+  `;
 
-  &:hover {
+  const HeaderIcon = styled.span`
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    
+    @media (max-width: 768px) {
+      width: 28px;
+      height: 28px;
+    }
+  `;
+
+  const FormBox = styled.form`
+    display: flex;
+    flex-direction: column;
+    padding: 40px;
+
+    @media (max-width: 768px) {
+      padding: 24px 20px;
+    }
+  `;
+
+  const InnerContent = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+
+    @media (max-width: 768px) {
+      gap: 24px;
+    }
+  `;
+
+  const FormSection = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  `;
+
+  const SectionTitle = styled.h3`
+    font-size: 20px;
+    font-weight: 600;
+    color: #2d3748;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+
+    @media (max-width: 768px) {
+      font-size: 18px;
+    }
+  `;
+
+  const SectionIcon = styled.span`
+    width: 24px;
+    height: 24px;
+    color: #34B89C;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  `;
+
+  const PetSelect = styled.select`
+    padding: 16px;
+    border-radius: 12px;
+    border: 2px solid #6BC1E1;
+    font-size: 16px;
     background: #f7fdfc;
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(52, 184, 156, 0.2);
-  }
+    color: #057a66;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    cursor: pointer;
 
-  @media (max-width: 768px) {
+    &:focus {
+      outline: none;
+      border-color: #34B89C;
+      box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.2);
+    }
+
+    @media (max-width: 768px) {
+      padding: 14px;
+      font-size: 16px;
+    }
+  `;
+
+  const AppointmentTypeGrid = styled.div`
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+
+    @media (max-width: 768px) {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    @media (max-width: 480px) {
+      grid-template-columns: 1fr;
+    }
+  `;
+
+  const AppointmentTypeButton = styled.button`
+    padding: 16px 12px;
+    border-radius: 12px;
+    border: 2px solid #e2e8f0;
+    background: white;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    position: relative;
+
+    &.selected {
+      background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
+      border-color: transparent;
+      color: white;
+      font-weight: 600;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(52, 184, 156, 0.3);
+    }
+
+    &:hover:not(:disabled) {
+      border-color: #34B89C;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    @media (max-width: 768px) {
+      padding: 14px 10px;
+    }
+  `;
+
+  const DateInput = styled.input`
     padding: 16px;
-    order: 2;
-  }
-`;
+    border-radius: 12px;
+    border: 2px solid #6BC1E1;
+    font-size: 16px;
+    background: #ffffff;
+    color: #2d3748;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    cursor: pointer;
 
-const Next = styled.button`
-  padding: 18px 24px;
-  background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
-  color: white;
-  border: none;
-  border-radius: 12px;
-  font-weight: 600;
-  font-size: 16px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  flex: 1;
+    &:focus {
+      outline: none;
+      border-color: #34B89C;
+      box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.2);
+    }
 
-  &:hover:not(:disabled) {
-    opacity: 0.9;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 12px rgba(52, 184, 156, 0.3);
-  }
+    @media (max-width: 768px) {
+      padding: 14px;
+      font-size: 16px;
+    }
+  `;
 
-  &:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
+  // 🔹 NEW: Unavailable date warning styles
+  const UnavailableWarning = styled.div`
+    background: #fee;
+    border: 2px solid #fcc;
+    color: #c33;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-weight: 500;
+    text-align: center;
+  `;
 
-  @media (max-width: 768px) {
-    padding: 16px;
-    order: 1;
-  }
-`;
+  const UnavailableDatesInfo = styled.div`
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    color: #0369a1;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+  `;
 
-const LoadingSpinner = styled.div`
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 200px;
-  font-size: 18px;
-  color: #34B89C;
-  font-weight: 600;
-`;
+  const SlotGrid = styled.div`
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px;
+
+    @media (max-width: 768px) {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    @media (max-width: 480px) {
+      grid-template-columns: 1fr;
+    }
+  `;
+
+  const SlotButton = styled.button`
+    padding: 16px 12px;
+    border-radius: 12px;
+    border: 2px solid #e2e8f0;
+    background: white;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    position: relative;
+
+    &.selected {
+      background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
+      border-color: transparent;
+      color: white;
+      font-weight: 600;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(52, 184, 156, 0.3);
+    }
+
+    &:hover:not(:disabled) {
+      border-color: #34B89C;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    &:disabled {
+      background: #f8f9fa;
+      color: #a0aec0;
+      cursor: not-allowed;
+    }
+
+    @media (max-width: 768px) {
+      padding: 14px 10px;
+    }
+  `;
+
+  const TakenIndicator = styled.span`
+    font-size: 12px;
+    color: #e53e3e;
+    font-weight: 500;
+
+    ${SlotButton}.selected & {
+      color: rgba(255, 255, 255, 0.9);
+    }
+  `;
+
+  const ButtonGroup = styled.div`
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    margin-top: 16px;
+
+    @media (max-width: 768px) {
+      flex-direction: column;
+      gap: 12px;
+    }
+  `;
+
+  const Cancel = styled.button`
+    padding: 18px 24px;
+    background: white;
+    color: #34B89C;
+    border: 2px solid #34B89C;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex: 1;
+
+    &:hover {
+      background: #f7fdfc;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 8px rgba(52, 184, 156, 0.2);
+    }
+
+    @media (max-width: 768px) {
+      padding: 16px;
+      order: 2;
+    }
+  `;
+
+  const Next = styled.button`
+    padding: 18px 24px;
+    background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex: 1;
+
+    &:hover:not(:disabled) {
+      opacity: 0.9;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(52, 184, 156, 0.3);
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    @media (max-width: 768px) {
+      padding: 16px;
+      order: 1;
+    }
+  `;
+
+  const LoadingSpinner = styled.div`
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 200px;
+    font-size: 18px;
+    color: #34B89C;
+    font-weight: 600;
+  `;

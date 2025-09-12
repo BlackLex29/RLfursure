@@ -4,10 +4,20 @@ import React, { useState, useEffect, useCallback } from "react";
 import styled, { createGlobalStyle } from "styled-components";
 import { useRouter } from "next/navigation";
 import { db } from "../firebaseConfig";
-import { collection, getDocs, query, where, orderBy, onSnapshot, doc, setDoc } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+  doc,
+  setDoc,
+  Timestamp,
+} from "firebase/firestore";
 import { getAuth, onAuthStateChanged, User } from "firebase/auth";
-import { Timestamp } from "firebase/firestore";
 
+/* ===== GLOBAL STYLES ===== */
 const GlobalStyle = createGlobalStyle`
   body {
     margin: 0;
@@ -18,6 +28,7 @@ const GlobalStyle = createGlobalStyle`
   }
 `;
 
+/* ===== INTERFACES ===== */
 interface MedicalRecord {
   id: string;
   petName: string;
@@ -32,6 +43,7 @@ interface MedicalRecord {
   updateType?: string;
 }
 
+/* ===== COMPONENT ===== */
 const UserMedicalRecords: React.FC = () => {
   const router = useRouter();
   const auth = getAuth();
@@ -41,7 +53,7 @@ const UserMedicalRecords: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [openRecordId, setOpenRecordId] = useState<string | null>(null);
 
-  // Fetch user medical records safely
+  /* Fetch user records */
   const fetchUserMedicalRecords = useCallback(async (userEmail?: string | null) => {
     if (!userEmail) {
       setRecords([]);
@@ -57,8 +69,8 @@ const UserMedicalRecords: React.FC = () => {
       );
       const snapshot = await getDocs(q);
       const userRecords: MedicalRecord[] = [];
-      snapshot.forEach((doc) => {
-        userRecords.push({ id: doc.id, ...(doc.data() as Omit<MedicalRecord, 'id'>) });
+      snapshot.forEach((docSnap) => {
+        userRecords.push({ id: docSnap.id, ...(docSnap.data() as Omit<MedicalRecord, "id">) });
       });
       setRecords(userRecords);
     } catch (error) {
@@ -69,7 +81,7 @@ const UserMedicalRecords: React.FC = () => {
     }
   }, []);
 
-  // Memoize updateUserMedicalRecord
+  /* Update user medical record */
   const updateUserMedicalRecord = useCallback(
     async (record: MedicalRecord, userEmail?: string | null) => {
       if (!userEmail) return;
@@ -84,14 +96,14 @@ const UserMedicalRecords: React.FC = () => {
     []
   );
 
-  // Memoize subscribeToMedicalRecordUpdates with dependencies
+  /* Subscribe to realtime updates */
   const subscribeToMedicalRecordUpdates = useCallback(
     (userEmail?: string | null) => {
       if (!userEmail) return;
       const q = query(collection(db, "medicalRecords"), orderBy("date", "desc"));
       const unsubscribe = onSnapshot(q, async (snapshot) => {
         for (const change of snapshot.docChanges()) {
-          const recordData = { id: change.doc.id, ...(change.doc.data() as Omit<MedicalRecord, 'id'>) };
+          const recordData = { id: change.doc.id, ...(change.doc.data() as Omit<MedicalRecord, "id">) };
           await updateUserMedicalRecord(recordData, userEmail);
         }
         await fetchUserMedicalRecords(userEmail);
@@ -101,7 +113,7 @@ const UserMedicalRecords: React.FC = () => {
     [fetchUserMedicalRecords, updateUserMedicalRecord]
   );
 
-  // Initialize user
+  /* Handle auth state */
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
@@ -109,7 +121,6 @@ const UserMedicalRecords: React.FC = () => {
       if (email) {
         await fetchUserMedicalRecords(email);
         const unsubscribeSnapshot = subscribeToMedicalRecordUpdates(email);
-        // Cleanup on unmount or email change
         return () => unsubscribeSnapshot?.();
       } else {
         setRecords([]);
@@ -120,21 +131,52 @@ const UserMedicalRecords: React.FC = () => {
     return () => unsubscribeAuth();
   }, [auth, fetchUserMedicalRecords, subscribeToMedicalRecordUpdates]);
 
+  /* Format date */
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
+    return new Date(dateString).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
     });
   };
 
+  /* Print as PDF */
+  const downloadPDF = (record: MedicalRecord) => {
+    const printableContent = `
+      <html>
+        <head><title>Medical Record - ${record.petName}</title></head>
+        <body>
+          <h2>RL Clinic - Fursure Care</h2>
+          <h3>Medical Record</h3>
+          <p><b>Pet Name:</b> ${record.petName}</p>
+          <p><b>Pet Type:</b> ${record.petType === "dog" ? "Dog" : "Cat"}</p>
+          <p><b>Owner:</b> ${record.ownerName}</p>
+          <p><b>Date:</b> ${formatDate(record.date)}</p>
+          <p><b>Diagnosis:</b> ${record.diagnosis}</p>
+          <p><b>Treatment:</b> ${record.treatment}</p>
+          ${record.notes ? `<p><b>Notes:</b> ${record.notes}</p>` : ""}
+          <p style="margin-top:30px;font-size:12px;color:#666;">
+            This document is generated electronically and does not require a signature.<br/>
+            Generated on: ${new Date().toLocaleDateString()}
+          </p>
+        </body>
+      </html>
+    `;
+
+    const printWindow = window.open("", "_blank");
+    if (printWindow) {
+      printWindow.document.write(printableContent);
+      printWindow.document.close();
+      printWindow.onload = () => printWindow.print();
+    }
+  };
+
+  /* Render states */
   if (loading) {
     return (
       <>
         <GlobalStyle />
-        <Container>
-          <Loading>Loading medical records...</Loading>
-        </Container>
+        <Container><Loading>Loading medical records...</Loading></Container>
       </>
     );
   }
@@ -143,9 +185,7 @@ const UserMedicalRecords: React.FC = () => {
     return (
       <>
         <GlobalStyle />
-        <Container>
-          <EmptyText>Please log in to view your medical records.</EmptyText>
-        </Container>
+        <Container><EmptyText>Please log in to view your medical records.</EmptyText></Container>
       </>
     );
   }
@@ -160,14 +200,14 @@ const UserMedicalRecords: React.FC = () => {
             <Tagline>Fursure Care - My Medical Records</Tagline>
           </BrandSection>
           <ButtonGroup>
-            <BackButton onClick={() => router.push("/userdashboard")}>
-              &larr; Back to Home
-            </BackButton>
+            <BackButton onClick={() => router.push("/userdashboard")}>&larr; Back to Home</BackButton>
           </ButtonGroup>
         </HeaderBar>
 
         <Content>
-          <WelcomeMessage>Welcome, {currentUser.displayName || currentUser.email}!</WelcomeMessage>
+          <WelcomeMessage>
+            Welcome, {currentUser.displayName || currentUser.email}!
+          </WelcomeMessage>
 
           <SectionTitle>My Pet Medical Records</SectionTitle>
           {records.length === 0 ? (
@@ -179,50 +219,43 @@ const UserMedicalRecords: React.FC = () => {
           ) : (
             <RecordsGrid>
               {records.map((record) => (
-                <RecordCard key={record.id} onClick={() => setOpenRecordId(openRecordId === record.id ? null : record.id)}>
+                <RecordCard key={record.id}>
                   <RecordHeader>
                     <div>
                       <PetName>{record.petName}</PetName>
-                      <PetType>{record.petType === 'dog' ? 'Dog' : 'Cat'}</PetType>
+                      <PetType>{record.petType === "dog" ? "Dog" : "Cat"}</PetType>
                     </div>
                     <RecordDate>{formatDate(record.date)}</RecordDate>
                   </RecordHeader>
 
-                  <UpdateBadge>
-                    {record.updateType === 'record_updated' ? 'Updated' : 'New Record'}
-                  </UpdateBadge>
+                  <ViewDetailsButton
+                    onClick={() => setOpenRecordId(openRecordId === record.id ? null : record.id)}
+                  >
+                    {openRecordId === record.id ? "Hide Details" : "View Details"}
+                  </ViewDetailsButton>
 
                   <RecordDetails $open={openRecordId === record.id}>
                     <DetailItem>
                       <DetailLabel>Owner:</DetailLabel>
                       <DetailValue>{record.ownerName}</DetailValue>
                     </DetailItem>
-
                     <DetailItem>
                       <DetailLabel>Diagnosis:</DetailLabel>
                       <DetailValue>{record.diagnosis}</DetailValue>
                     </DetailItem>
-
                     <DetailItem>
                       <DetailLabel>Treatment:</DetailLabel>
                       <DetailValue>{record.treatment}</DetailValue>
                     </DetailItem>
-
                     {record.notes && (
                       <DetailItem>
                         <DetailLabel>Notes:</DetailLabel>
                         <DetailValue>{record.notes}</DetailValue>
                       </DetailItem>
                     )}
-
-                    <DetailItem>
-                      <DetailLabel>Status:</DetailLabel>
-                      <DetailValue>
-                        {record.updateType === 'record_updated'
-                          ? 'Record was updated by clinic'
-                          : 'New record created by clinic'}
-                      </DetailValue>
-                    </DetailItem>
+                    <ButtonGroupHorizontal>
+                      <PrintButton onClick={() => downloadPDF(record)}>Print as PDF</PrintButton>
+                    </ButtonGroupHorizontal>
                   </RecordDetails>
                 </RecordCard>
               ))}
@@ -430,7 +463,6 @@ const RecordCard = styled.div`
   border-left: 5px solid #6bc1e1;
   position: relative;
   transition: transform 0.2s, box-shadow 0.2s;
-  cursor: pointer;
 
   &:hover {
     transform: translateY(-4px);
@@ -476,23 +508,22 @@ const RecordDate = styled.span`
   color: #666;
 `;
 
-const UpdateBadge = styled.span`
-  position: absolute;
-  top: 15px;
-  right: 15px;
-  background: #34b89c;
+const ViewDetailsButton = styled.button`
+  background: linear-gradient(90deg, #6bc1e1, #34b89c);
   color: white;
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  
-  @media (max-width: 480px) {
-    position: relative;
-    top: 0;
-    right: 0;
-    display: inline-block;
-    margin-top: 10px;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 10px;
+  width: 100%;
+
+  &:hover {
+    opacity: 0.9;
+    transform: translateY(-2px);
   }
 `;
 
@@ -500,7 +531,9 @@ const RecordDetails = styled.div<{ $open: boolean }>`
   display: ${(props) => (props.$open ? 'flex' : 'none')};
   flex-direction: column;
   gap: 10px;
-  margin-top: 10px;
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #eee;
   transition: all 0.3s ease;
 `;
 
@@ -527,4 +560,26 @@ const DetailLabel = styled.span`
 const DetailValue = styled.span`
   color: #666;
   flex: 1;
+`;
+
+const ButtonGroupHorizontal = styled.div`
+  display: flex;
+  gap: 10px;
+  margin-top: 15px;
+`;
+
+const PrintButton = styled.button`
+  background: #2c3e50;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    background: #1a252f;
+  }
 `;

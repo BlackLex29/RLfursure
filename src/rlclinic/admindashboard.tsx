@@ -5,7 +5,7 @@ import styled, { createGlobalStyle, keyframes } from "styled-components";
 import { useRouter } from "next/navigation";
 import { auth, db } from "../firebaseConfig";
 import { signOut } from "firebase/auth";
-import { collection, getDocs, addDoc } from "firebase/firestore";
+import { collection, getDocs, addDoc, onSnapshot } from "firebase/firestore";
 
 // Global Styles
 const GlobalStyle = createGlobalStyle`
@@ -54,6 +54,16 @@ interface ClientType {
   name?: string;
 }
 
+// New interface for unavailable slots
+interface UnavailableSlot {
+  id: string;
+  date: string;
+  veterinarian: string;
+  isAllDay: boolean;
+  startTime?: string;
+  endTime?: string;
+}
+
 // Styled component interfaces
 interface ToggleButtonProps {
   $active?: boolean;
@@ -72,6 +82,7 @@ const Admindashboard: React.FC = () => {
   const router = useRouter();
   const [appointments, setAppointments] = useState<AppointmentType[]>([]);
   const [todaysAppointments, setTodaysAppointments] = useState<AppointmentType[]>([]);
+  const [unavailableSlots, setUnavailableSlots] = useState<UnavailableSlot[]>([]); // New state
   const [clients, setClients] = useState<ClientType[]>([]);
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [selectedClient, setSelectedClient] = useState("");
@@ -84,9 +95,10 @@ const Admindashboard: React.FC = () => {
   const [appointmentDate, setAppointmentDate] = useState("");
   const [appointmentTime, setAppointmentTime] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<"today" | "all">("today");
+  const [viewMode, setViewMode] = useState<"today" | "all" | "unavailable">("today"); // Updated view mode
   const [isMounted, setIsMounted] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState<string>("");
 
   const timeSlots = [
     "8:00 AM–8:30 AM", "8:30 AM–9:00 AM", "9:00 AM–9:30 AM", "9:30 AM–10:00 AM",
@@ -94,6 +106,11 @@ const Admindashboard: React.FC = () => {
     "1:00 PM–1:30 PM", "1:30 PM–2:00 PM", "2:00 PM–2:30 PM", "2:30 PM–3:00 PM",
     "3:00 PM–3:30 PM", "3:30 PM–4:00 PM", "4:00 PM–4:30 PM", "4:30 PM–5:00 PM", 
     "5:00 PM–5:30 PM", "5:30 PM–6:00 PM"
+  ];
+
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
   ];
 
   useEffect(() => { setIsMounted(true); }, []);
@@ -130,6 +147,28 @@ const Admindashboard: React.FC = () => {
     } catch (error) { console.error("Error fetching appointments:", error); }
   };
 
+  // New function to fetch unavailable slots
+  const fetchUnavailableSlots = async () => {
+    try {
+      const snapshot = await getDocs(collection(db, "unavailableSlots"));
+      const data: UnavailableSlot[] = [];
+      snapshot.forEach(doc => {
+        const docData = doc.data();
+        data.push({
+          id: doc.id,
+          date: docData.date || "",
+          veterinarian: docData.veterinarian || "",
+          isAllDay: docData.isAllDay || true,
+          startTime: docData.startTime || "",
+          endTime: docData.endTime || ""
+        });
+      });
+      setUnavailableSlots(data.sort((a,b) => a.date.localeCompare(b.date)));
+    } catch (error) { 
+      console.error("Error fetching unavailable slots:", error); 
+    }
+  };
+
   const fetchClients = async () => {
     try {
       const snapshot = await getDocs(collection(db, "users"));
@@ -142,13 +181,44 @@ const Admindashboard: React.FC = () => {
     } catch (error) { console.error("Error fetching clients:", error); }
   };
 
-  useEffect(() => { fetchAppointments(); fetchClients(); }, []);
+  useEffect(() => { 
+    fetchAppointments(); 
+    fetchClients(); 
+    fetchUnavailableSlots(); // Fetch unavailable slots on component mount
+
+    // Set up real-time listener for unavailable slots
+    const unsubscribe = onSnapshot(collection(db, "unavailableSlots"), (snapshot) => {
+      const data: UnavailableSlot[] = [];
+      snapshot.forEach(doc => {
+        const docData = doc.data();
+        data.push({
+          id: doc.id,
+          date: docData.date || "",
+          veterinarian: docData.veterinarian || "",
+          isAllDay: docData.isAllDay || true,
+          startTime: docData.startTime || "",
+          endTime: docData.endTime || ""
+        });
+      });
+      setUnavailableSlots(data.sort((a,b) => a.date.localeCompare(b.date)));
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const handleBookAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedClient || !petName.trim() || !appointmentDate || !appointmentTime) {
       alert("Please fill all required fields."); return;
     }
+
+    // Check if the selected date is unavailable
+    const isDateUnavailable = unavailableSlots.some(slot => slot.date === appointmentDate);
+    if (isDateUnavailable) {
+      alert("Cannot book appointment on this date. A doctor has marked this date as unavailable.");
+      return;
+    }
+
     setIsLoading(true);
     try {
       const isTaken = appointments.some(
@@ -190,7 +260,49 @@ const Admindashboard: React.FC = () => {
     }
   };
 
-  const displayedAppointments = viewMode === "today" ? todaysAppointments : appointments;
+  // Filter appointments by month if selected
+  const filteredAppointments = selectedMonth 
+    ? appointments.filter(appt => {
+        const date = new Date(appt.date);
+        return date.getMonth() === months.indexOf(selectedMonth);
+      })
+    : appointments;
+
+  // Filter unavailable slots by month if selected
+  const filteredUnavailableSlots = selectedMonth 
+    ? unavailableSlots.filter(slot => {
+        const date = new Date(slot.date);
+        return date.getMonth() === months.indexOf(selectedMonth);
+      })
+    : unavailableSlots;
+
+  // Function to get the correct data based on view mode
+  const getDisplayData = () => {
+    switch(viewMode) {
+      case "today":
+        return { data: todaysAppointments, type: "appointments" };
+      case "all":
+        return { data: filteredAppointments, type: "appointments" };
+      case "unavailable":
+        return { data: filteredUnavailableSlots, type: "unavailable" };
+      default:
+        return { data: [], type: "appointments" };
+    }
+  };
+
+  const displayData = getDisplayData();
+
+  // Format date for display
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-PH', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+  
   if(!isMounted) return null;
 
   return (
@@ -218,8 +330,6 @@ const Admindashboard: React.FC = () => {
             <NavItem onClick={() => { router.push("/manageappointment"); setIsMenuOpen(false); }}>Manage Appointments</NavItem>
             <NavItem onClick={() => { setShowBookingModal(true); setIsMenuOpen(false); }}>Book Appointment</NavItem>
             <NavItem onClick={() => { router.push("/medicalrecord"); setIsMenuOpen(false); }}>Medical Records</NavItem>
-            <NavItem onClick={() => { router.push("/vaccination"); setIsMenuOpen(false); }}>Vaccination</NavItem>
-            <NavItem onClick={() => { router.push("/suggestion"); setIsMenuOpen(false); }}>Suggestions</NavItem>
           </MobileNav>
         </MobileMenu>
 
@@ -240,48 +350,87 @@ const Admindashboard: React.FC = () => {
               <CardTitle>Medical Records</CardTitle>
               <CardDesc>Access and update pet medical history</CardDesc>
             </Card>
-            <Card onClick={()=>router.push("/vaccination")}>
-              <CardIcon>💉</CardIcon>
-              <CardTitle>Vaccination</CardTitle>
-              <CardDesc>Track and manage pet vaccination schedules</CardDesc>
-            </Card>
-            <Card onClick={()=>router.push("/suggestion")}>
-              <CardIcon>💡</CardIcon>
-              <CardTitle>Suggestions</CardTitle>
-              <CardDesc>View client feedback & suggestions</CardDesc>
+            {/* New card for viewing unavailable dates */}
+            <Card onClick={()=>setViewMode("unavailable")}>
+              <CardIcon>🚫</CardIcon>
+              <CardTitle>Doctor Unavailable Dates</CardTitle>
+              <CardDesc>View dates when doctors are unavailable</CardDesc>
             </Card>
           </CardsGrid>
 
           <AppointmentsSection>
             <SectionHeader>
-              <SectionTitle>{viewMode==="today"?"Today's Appointments":"All Appointments"}</SectionTitle>
+              <SectionTitle>
+                {viewMode === "today" && "Today's Appointments"}
+                {viewMode === "all" && "All Appointments"}
+                {viewMode === "unavailable" && "Doctor Unavailable Dates"}
+              </SectionTitle>
               <ControlsContainer>
                 <ViewToggle>
                   <ToggleButtonStyled $active={viewMode==="today"} onClick={()=>setViewMode("today")}>Today</ToggleButtonStyled>
                   <ToggleButtonStyled $active={viewMode==="all"} onClick={()=>setViewMode("all")}>All</ToggleButtonStyled>
+                  <ToggleButtonStyled $active={viewMode==="unavailable"} onClick={()=>setViewMode("unavailable")}>Unavailable</ToggleButtonStyled>
                 </ViewToggle>
-                <RefreshButton onClick={fetchAppointments}>Refresh</RefreshButton>
+                {(viewMode === "all" || viewMode === "unavailable") && (
+                  <MonthFilter>
+                    <MonthSelect 
+                      value={selectedMonth} 
+                      onChange={(e) => setSelectedMonth(e.target.value)}
+                    >
+                      <option value="">All Months</option>
+                      {months.map((month) => (
+                        <option key={month} value={month}>{month}</option>
+                      ))}
+                    </MonthSelect>
+                  </MonthFilter>
+                )}
+                <RefreshButton onClick={() => {
+                  fetchAppointments();
+                  fetchUnavailableSlots();
+                }}>Refresh</RefreshButton>
               </ControlsContainer>
             </SectionHeader>
 
-            {displayedAppointments.length===0 ? (
-              <NoAppointments>{viewMode==="today"?"No appointments for today.":"No appointments yet."}</NoAppointments>
+            {displayData.data.length === 0 ? (
+              <NoAppointments>
+                {viewMode === "today" && "No appointments for today."}
+                {viewMode === "all" && "No appointments found."}
+                {viewMode === "unavailable" && "No unavailable dates set by doctors."}
+              </NoAppointments>
             ) : (
               <AppointmentsGrid>
-                {displayedAppointments.map((appt,index)=>{
-                  const borderColor=statusColor(appt.status);
-                  return (
-                    <AppointmentCard key={appt.id} $delay={index*0.1} $borderLeftColor={borderColor}>
-                      <InfoRow><strong>Owner:</strong> {appt.clientName}</InfoRow>
-                      <InfoRow><strong>Pet:</strong> {appt.petName||"-"}</InfoRow>
-                      <InfoRow><strong>Date:</strong> {appt.date} | <strong>Time:</strong> {appt.timeSlot}</InfoRow>
-                      <InfoRow><strong>Type:</strong> {appt.petType||"-"} | <strong>Breed:</strong> {appt.petBreed||"-"}</InfoRow>
-                      <StatusLabel style={{backgroundColor:borderColor}}>
-                        {appt.status||"Pending"}{appt.bookedByAdmin&&" (by Admin)"}
-                      </StatusLabel>
-                    </AppointmentCard>
-                  );
-                })}
+                {viewMode === "unavailable" ? (
+                  // Render unavailable slots
+                  (displayData.data as UnavailableSlot[]).map((slot, index) => (
+                    <UnavailableCard key={slot.id} $delay={index * 0.1}>
+                      <UnavailableIcon>🚫</UnavailableIcon>
+                      <UnavailableInfo>
+                        <UnavailableDate>{formatDate(slot.date)}</UnavailableDate>
+                        <UnavailableDoctor>Doctor: {slot.veterinarian}</UnavailableDoctor>
+                        <UnavailableTime>
+                          {slot.isAllDay ? 'All Day' : `${slot.startTime} - ${slot.endTime}`}
+                        </UnavailableTime>
+                        <UnavailableStatus>Unavailable</UnavailableStatus>
+                      </UnavailableInfo>
+                    </UnavailableCard>
+                  ))
+                ) : (
+                  // Render appointments
+                  (displayData.data as AppointmentType[]).map((appt, index) => {
+                    const borderColor = statusColor(appt.status);
+                    return (
+                      <AppointmentCard key={appt.id} $delay={index * 0.1} $borderLeftColor={borderColor}>
+                        <InfoRow><strong>Owner:</strong> {appt.clientName}</InfoRow>
+                        <InfoRow><strong>Pet:</strong> {appt.petName || "-"}</InfoRow>
+                        <InfoRow><strong>Date:</strong> {appt.date} | <strong>Time:</strong> {appt.timeSlot}</InfoRow>
+                        <InfoRow><strong>Type:</strong> {appt.petType || "-"} | <strong>Breed:</strong> {appt.petBreed || "-"}</InfoRow>
+                        <StatusLabel style={{ backgroundColor: borderColor }}>
+                          {appt.status || "Pending"}{appt.bookedByAdmin && " (by Admin)"}
+                        </StatusLabel>
+                      </AppointmentCard>
+                    );
+                  })
+                )}
               </AppointmentsGrid>
             )}
           </AppointmentsSection>
@@ -349,6 +498,9 @@ const Admindashboard: React.FC = () => {
                       <FormGroup>
                         <Label>Appointment Date *</Label>
                         <Input type="date" value={appointmentDate} onChange={(e)=>setAppointmentDate(e.target.value)} min={new Date().toISOString().split('T')[0]} required disabled={isLoading} />
+                        {appointmentDate && unavailableSlots.some(slot => slot.date === appointmentDate) && (
+                          <UnavailableWarning>⚠️ Warning: A doctor is unavailable on this date</UnavailableWarning>
+                        )}
                       </FormGroup>
 
                       <FormGroup>
@@ -379,6 +531,86 @@ const Admindashboard: React.FC = () => {
 };
 
 /* Styled Components */
+
+// ... (keeping all existing styled components)
+
+// New styled components for unavailable slots
+const UnavailableCard = styled.div<{ $delay: number }>`
+  animation: ${fadeInUp} 0.4s ease forwards;
+  animation-delay: ${props => props.$delay}s;
+  opacity: 0;
+  padding: 1.2rem; 
+  border-left: 6px solid #dc3545; 
+  background: white; 
+  border-radius: 10px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+  transition: transform 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+
+  &:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+  }
+
+  @media (max-width: 480px) {
+    padding: 1rem;
+    flex-direction: column;
+    text-align: center;
+  }
+`;
+
+const UnavailableIcon = styled.div`
+  font-size: 2rem;
+  flex-shrink: 0;
+`;
+
+const UnavailableInfo = styled.div`
+  flex: 1;
+`;
+
+const UnavailableDate = styled.div`
+  font-weight: bold;
+  font-size: 1.1rem;
+  color: #2d3748;
+  margin-bottom: 0.3rem;
+`;
+
+const UnavailableDoctor = styled.div`
+  font-size: 0.95rem;
+  color: #4a5568;
+  margin-bottom: 0.3rem;
+`;
+
+const UnavailableTime = styled.div`
+  font-size: 0.9rem;
+  color: #718096;
+  margin-bottom: 0.5rem;
+`;
+
+const UnavailableStatus = styled.div`
+  display: inline-block;
+  padding: 0.3rem 0.7rem; 
+  border-radius: 20px; 
+  background-color: #dc3545;
+  color: white; 
+  font-size: 0.8rem;
+  font-weight: 500;
+`;
+
+const UnavailableWarning = styled.div`
+  background: #fff3cd;
+  border: 1px solid #ffeaa7;
+  color: #856404;
+  padding: 0.5rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+  font-weight: 500;
+`;
+
+// ... (keeping all other existing styled components unchanged)
 
 const PageContainer = styled.div`
   display: flex; 
@@ -649,10 +881,15 @@ const ControlsContainer = styled.div`
   align-items: center;
   gap: 1rem;
 
+  @media (max-width: 768px) {
+    flex-wrap: wrap;
+  }
+
   @media (max-width: 480px) {
     flex-direction: column;
     align-items: flex-start;
     width: 100%;
+    gap: 0.8rem;
   }
 `;
 
@@ -679,6 +916,26 @@ const ToggleButtonStyled = styled.button<ToggleButtonProps>`
 
   @media (max-width: 480px) {
     padding: 0.5rem 1rem;
+  }
+`;
+
+const MonthFilter = styled.div`
+  display: flex;
+  align-items: center;
+`;
+
+const MonthSelect = styled.select`
+  padding: 0.6rem 0.8rem; 
+  border: 1px solid #ddd; 
+  border-radius: 8px;
+  font-size: 0.9rem;
+  transition: border-color 0.2s;
+  background: white;
+
+  &:focus {
+    outline: none;
+    border-color: #2C5E4F;
+    box-shadow: 0 0 0 2px rgba(44, 94, 79, 0.1);
   }
 `;
 
