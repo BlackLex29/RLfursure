@@ -11,26 +11,29 @@ import {
   query, 
   where,
   orderBy,
-  Timestamp 
+  Timestamp,
+  deleteDoc,
+  doc
 } from "firebase/firestore";
 import { useAuthState } from 'react-firebase-hooks/auth';
+import { useRouter } from 'next/navigation';
 
 // Updated types to match the appointment booking component
 interface Appointment {
   id: string;
   petName: string;
-  clientName: string; // This is the email from booking
-  date: string; // Date as string from booking
+  clientName: string;
+  date: string;
   timeSlot: string;
   appointmentType: string;
   status: string;
   paymentMethod: string;
-  createdAt?: Timestamp; // Fixed: Changed from any to Timestamp
+  createdAt?: Timestamp;
 }
 
 interface Unavailable {
   id: string;
-  date: string; // Changed to string to match the unavailableSlots collection
+  date: string;
   veterinarian: string;
   isAllDay: boolean;
   startTime?: string;
@@ -59,22 +62,39 @@ const VetDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'appointments' | 'unavailable'>('appointments');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userLoading, setUserLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const router = useRouter();
 
-  // Function to get display name (extract last name from full name)
+  // Handle sign out
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      router.push('/login');
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
+  };
+
+  // Function to get display name
   const getDisplayName = () => {
     if (!currentUser) return 'User';
     
-    // If name exists, extract the last name
     if (currentUser.name && currentUser.name.trim()) {
       const nameParts = currentUser.name.trim().split(' ').filter(part => part.length > 0);
       if (nameParts.length > 0) {
-        return nameParts[nameParts.length - 1]; // Return last part of name
+        return nameParts[nameParts.length - 1];
       }
     }
     
-    // Fallback to email if no name available
     return currentUser.email || 'User';
   };
+
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!loading && !user) {
+      router.push('/login');
+    }
+  }, [user, loading, router]);
 
   // Fetch current user data
   useEffect(() => {
@@ -101,12 +121,11 @@ const VetDashboard: React.FC = () => {
     }
   }, [user]);
 
-  // Load ALL appointments (since booking component doesn't assign to specific vet)
+  // Load ALL appointments
   useEffect(() => {
     if (!currentUser) return;
     
     const appointmentsRef = collection(db, 'appointments');
-    // Remove veterinarianId filter since it doesn't exist in booking component
     const q = query(appointmentsRef, orderBy('createdAt', 'desc'));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -116,7 +135,6 @@ const VetDashboard: React.FC = () => {
         appointmentsData.push({ 
           id: doc.id, 
           ...data,
-          // Ensure all required fields exist
           petName: data.petName || 'Unknown Pet',
           clientName: data.clientName || 'Unknown Client',
           date: data.date || '',
@@ -132,25 +150,28 @@ const VetDashboard: React.FC = () => {
     return () => unsubscribe();
   }, [currentUser]);
 
-  // Load unavailable slots - updated to match the collection name from booking component
+  // Load unavailable slots - FIXED: Filter by current veterinarian
   useEffect(() => {
     if (!currentUser) return;
     
-    const unavailableRef = collection(db, 'unavailableSlots'); // Changed collection name
+    const unavailableRef = collection(db, 'unavailableSlots');
     const q = query(unavailableRef, orderBy('date', 'asc'));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const unavailableData: Unavailable[] = [];
       snapshot.forEach((doc) => {
         const data = doc.data();
-        unavailableData.push({ 
-          id: doc.id, 
-          date: data.date || '',
-          veterinarian: data.veterinarian || '',
-          isAllDay: data.isAllDay || true,
-          startTime: data.startTime || '',
-          endTime: data.endTime || ''
-        } as Unavailable);
+        // Only show unavailable slots for the current veterinarian
+        if (data.veterinarian === currentUser.name) {
+          unavailableData.push({ 
+            id: doc.id, 
+            date: data.date || '',
+            veterinarian: data.veterinarian || '',
+            isAllDay: data.isAllDay || true,
+            startTime: data.startTime || '',
+            endTime: data.endTime || ''
+          } as Unavailable);
+        }
       });
       setUnavailable(unavailableData);
     });
@@ -170,13 +191,14 @@ const VetDashboard: React.FC = () => {
     if (!currentUser || currentUser.role !== 'veterinarian') return;
     
     try {
-      const unavailableRef = collection(db, 'unavailableSlots'); // Match collection name
+      const unavailableRef = collection(db, 'unavailableSlots');
       const newSlot = {
-        date: newUnavailable.date.toISOString().split('T')[0], // Store as string to match booking component
+        date: newUnavailable.date.toISOString().split('T')[0],
         veterinarian: currentUser.name || 'Unknown Veterinarian',
         isAllDay: newUnavailable.isAllDay,
-        startTime: newUnavailable.isAllDay ? null : newUnavailable.startTime.toTimeString().slice(0, 5),
-        endTime: newUnavailable.isAllDay ? null : newUnavailable.endTime.toTimeString().slice(0, 5)
+        startTime: newUnavailable.isAllDay ? '' : newUnavailable.startTime.toTimeString().slice(0, 5),
+        endTime: newUnavailable.isAllDay ? '' : newUnavailable.endTime.toTimeString().slice(0, 5),
+        createdAt: Timestamp.now()
       };
       
       await addDoc(unavailableRef, newSlot);
@@ -188,8 +210,26 @@ const VetDashboard: React.FC = () => {
         startTime: new Date(),
         endTime: new Date(new Date().setHours(new Date().getHours() + 1))
       });
+      alert("Unavailable time marked successfully!");
     } catch (error) {
       console.error('Error marking unavailable:', error);
+      alert("Failed to mark unavailable time. Please try again.");
+    }
+  };
+
+  // Function to delete unavailable slot
+  const handleDeleteUnavailable = async (id: string) => {
+    if (!confirm("Are you sure you want to remove this unavailable date?")) return;
+    
+    setDeletingId(id);
+    try {
+      await deleteDoc(doc(db, "unavailableSlots", id));
+      alert("Unavailable date removed successfully!");
+    } catch (error) {
+      console.error("Error deleting unavailable slot:", error);
+      alert("Failed to remove unavailable date. Please try again.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -204,7 +244,6 @@ const VetDashboard: React.FC = () => {
   };
 
   const formatTime = (timeSlot: string) => {
-    // Handle time slot format like "8:00 AM–8:30 AM"
     return timeSlot || 'No time specified';
   };
 
@@ -252,13 +291,13 @@ const VetDashboard: React.FC = () => {
             <div className="user-avatar">
               {currentUser?.name?.charAt(0) || currentUser?.email?.charAt(0) || 'U'}
             </div>
-            <button onClick={() => signOut(auth)} className="sign-out-btn">
+            <button onClick={handleSignOut} className="sign-out-btn">
               Sign Out
             </button>
           </div>
         </div>
       </header>
-
+     
       <div className="dashboard-content">
         {/* Sidebar */}
         <aside className="sidebar">
@@ -385,8 +424,14 @@ const VetDashboard: React.FC = () => {
                           <div className="unavailable-time">
                             {slot.isAllDay ? 'All day' : `${slot.startTime} - ${slot.endTime}`}
                           </div>
-                          <div className="unavailable-vet">Set by: {slot.veterinarian}</div>
                         </div>
+                        <button 
+                          className="delete-unavailable-btn"
+                          onClick={() => handleDeleteUnavailable(slot.id)}
+                          disabled={deletingId === slot.id}
+                        >
+                          {deletingId === slot.id ? 'Deleting...' : 'Delete'}
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -656,7 +701,7 @@ const VetDashboard: React.FC = () => {
         }
         
         .quick-stats h4 {
-          color: #1e293b;
+          color: 1e293b;
           margin-bottom: 1rem;
           font-size: 1rem;
           font-weight: 600;
@@ -976,6 +1021,7 @@ const VetDashboard: React.FC = () => {
           border-left: 4px solid #ef4444;
           box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
           transition: all 0.2s;
+          justify-content: space-between;
         }
 
         .unavailable-card:hover {
@@ -1005,6 +1051,28 @@ const VetDashboard: React.FC = () => {
           color: #1e293b;
         }
 
+        .delete-unavailable-btn {
+          background: #ef4444;
+          color: white;
+          border: none;
+          padding: 0.5rem 1rem;
+          border-radius: 6px;
+          font-size: 0.85rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s;
+          white-space: nowrap;
+        }
+
+        .delete-unavailable-btn:hover:not(:disabled) {
+          background: #dc2626;
+        }
+
+        .delete-unavailable-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(-10px); }
           to { opacity: 1; transform: translateY(0); }
@@ -1027,6 +1095,16 @@ const VetDashboard: React.FC = () => {
           .date-navigation {
             width: 100%;
             justify-content: center;
+          }
+
+          .unavailable-card {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 1rem;
+          }
+
+          .delete-unavailable-btn {
+            width: 100%;
           }
         }
       `}</style>

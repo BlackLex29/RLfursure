@@ -23,8 +23,13 @@ const GlobalStyle = createGlobalStyle`
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background-color: #E6F4F1;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background-color: #f0f9f7;
+    color: #334155;
+  }
+
+  * {
+    box-sizing: border-box;
   }
 `;
 
@@ -144,21 +149,99 @@ const UserMedicalRecords: React.FC = () => {
   const downloadPDF = (record: MedicalRecord) => {
     const printableContent = `
       <html>
-        <head><title>Medical Record - ${record.petName}</title></head>
+        <head>
+          <title>Medical Record - ${record.petName}</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              line-height: 1.6;
+              color: #334155;
+              max-width: 800px;
+              margin: 0 auto;
+              padding: 20px;
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 30px;
+              border-bottom: 2px solid #34B89C;
+              padding-bottom: 20px;
+            }
+            .clinic-name {
+              color: #34B89C;
+              font-size: 28px;
+              font-weight: bold;
+              margin: 0;
+            }
+            .tagline {
+              color: #6BC1E1;
+              font-size: 16px;
+              margin: 5px 0 0 0;
+            }
+            .record-details {
+              margin-bottom: 20px;
+            }
+            .detail-row {
+              display: flex;
+              margin-bottom: 10px;
+            }
+            .detail-label {
+              font-weight: bold;
+              min-width: 120px;
+              color: #334155;
+            }
+            .footer {
+              margin-top: 40px;
+              font-size: 12px;
+              color: #666;
+              text-align: center;
+              border-top: 1px solid #ddd;
+              padding-top: 20px;
+            }
+          </style>
+        </head>
         <body>
-          <h2>RL Clinic - Fursure Care</h2>
-          <h3>Medical Record</h3>
-          <p><b>Pet Name:</b> ${record.petName}</p>
-          <p><b>Pet Type:</b> ${record.petType === "dog" ? "Dog" : "Cat"}</p>
-          <p><b>Owner:</b> ${record.ownerName}</p>
-          <p><b>Date:</b> ${formatDate(record.date)}</p>
-          <p><b>Diagnosis:</b> ${record.diagnosis}</p>
-          <p><b>Treatment:</b> ${record.treatment}</p>
-          ${record.notes ? `<p><b>Notes:</b> ${record.notes}</p>` : ""}
-          <p style="margin-top:30px;font-size:12px;color:#666;">
-            This document is generated electronically and does not require a signature.<br/>
-            Generated on: ${new Date().toLocaleDateString()}
-          </p>
+          <div class="header">
+            <h1 class="clinic-name">RL Clinic</h1>
+            <p class="tagline">Fursure Care - Medical Record</p>
+          </div>
+          
+          <div class="record-details">
+            <div class="detail-row">
+              <span class="detail-label">Pet Name:</span>
+              <span>${record.petName}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Pet Type:</span>
+              <span>${record.petType === "dog" ? "Dog" : "Cat"}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Owner:</span>
+              <span>${record.ownerName}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Date:</span>
+              <span>${formatDate(record.date)}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Diagnosis:</span>
+              <span>${record.diagnosis}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Treatment:</span>
+              <span>${record.treatment}</span>
+            </div>
+            ${record.notes ? `
+            <div class="detail-row">
+              <span class="detail-label">Notes:</span>
+              <span>${record.notes}</span>
+            </div>
+            ` : ""}
+          </div>
+          
+          <div class="footer">
+            <p>This document is generated electronically and does not require a signature.</p>
+            <p>Generated on: ${new Date().toLocaleDateString()}</p>
+          </div>
         </body>
       </html>
     `;
@@ -196,11 +279,17 @@ const UserMedicalRecords: React.FC = () => {
       <PageContainer>
         <HeaderBar>
           <BrandSection>
-            <ClinicName>RL Clinic</ClinicName>
-            <Tagline>Fursure Care - My Medical Records</Tagline>
+            <ClinicLogo>🐾</ClinicLogo>
+            <div>
+              <ClinicName>RL Clinic</ClinicName>
+              <Tagline>Fursure Care - My Medical Records</Tagline>
+            </div>
           </BrandSection>
           <ButtonGroup>
-            <BackButton onClick={() => router.push("/userdashboard")}>&larr; Back to Home</BackButton>
+            <BackButton onClick={() => router.push("/userdashboard")}>
+              <Icon className="material-icons"></Icon>
+              Back to Home
+            </BackButton>
           </ButtonGroup>
         </HeaderBar>
 
@@ -214,7 +303,7 @@ const UserMedicalRecords: React.FC = () => {
             <EmptyState>
               <EmptyIcon>📋</EmptyIcon>
               <EmptyText>No medical records found</EmptyText>
-              <EmptySubtext>You don&apos;t have any medical records yet.</EmptySubtext>
+              <EmptySubtext>You dont have any medical records yet.</EmptySubtext>
             </EmptyState>
           ) : (
             <RecordsGrid>
@@ -223,7 +312,9 @@ const UserMedicalRecords: React.FC = () => {
                   <RecordHeader>
                     <div>
                       <PetName>{record.petName}</PetName>
-                      <PetType>{record.petType === "dog" ? "Dog" : "Cat"}</PetType>
+                      <PetType $petType={record.petType}>
+                        {record.petType === "dog" ? "🐶 Dog" : "🐱 Cat"}
+                      </PetType>
                     </div>
                     <RecordDate>{formatDate(record.date)}</RecordDate>
                   </RecordHeader>
@@ -232,6 +323,9 @@ const UserMedicalRecords: React.FC = () => {
                     onClick={() => setOpenRecordId(openRecordId === record.id ? null : record.id)}
                   >
                     {openRecordId === record.id ? "Hide Details" : "View Details"}
+                    <Icon className="material-icons">
+                      {openRecordId === record.id ? "⬆" : "⬇"}
+                    </Icon>
                   </ViewDetailsButton>
 
                   <RecordDetails $open={openRecordId === record.id}>
@@ -241,11 +335,11 @@ const UserMedicalRecords: React.FC = () => {
                     </DetailItem>
                     <DetailItem>
                       <DetailLabel>Diagnosis:</DetailLabel>
-                      <DetailValue>{record.diagnosis}</DetailValue>
+                      <DiagnosisValue>{record.diagnosis}</DiagnosisValue>
                     </DetailItem>
                     <DetailItem>
                       <DetailLabel>Treatment:</DetailLabel>
-                      <DetailValue>{record.treatment}</DetailValue>
+                      <TreatmentValue>{record.treatment}</TreatmentValue>
                     </DetailItem>
                     {record.notes && (
                       <DetailItem>
@@ -254,7 +348,10 @@ const UserMedicalRecords: React.FC = () => {
                       </DetailItem>
                     )}
                     <ButtonGroupHorizontal>
-                      <PrintButton onClick={() => downloadPDF(record)}>Print as PDF</PrintButton>
+                      <PrintButton onClick={() => downloadPDF(record)}>
+                        <Icon className="material-icons"></Icon>
+                        Print as PDF
+                      </PrintButton>
                     </ButtonGroupHorizontal>
                   </RecordDetails>
                 </RecordCard>
@@ -277,100 +374,89 @@ const PageContainer = styled.div`
 `;
 
 const HeaderBar = styled.header`
+  background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
+  color: white;
+  padding: 1rem 2rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 40px;
-  background: linear-gradient(135deg, #6bc1e1 0%, #34b89c 100%);
-  color: white;
-  box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.1);
-  flex-wrap: wrap;
-  gap: 20px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  position: sticky;
+  top: 0;
+  z-index: 10;
 
   @media (max-width: 768px) {
-    padding: 15px 20px;
     flex-direction: column;
-    align-items: flex-start;
+    gap: 1rem;
+    padding: 1rem;
   }
 `;
 
 const BrandSection = styled.div`
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
+  gap: 0.75rem;
+`;
+
+const ClinicLogo = styled.div`
+  font-size: 2.5rem;
 `;
 
 const ClinicName = styled.h1`
-  font-size: 32px;
-  font-weight: bold;
-  font-family: "Rozha One", serif;
   margin: 0;
-  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.2);
-
-  @media (max-width: 768px) {
-    font-size: 28px;
-  }
-  
-  @media (max-width: 480px) {
-    font-size: 24px;
-  }
+  font-size: 1.8rem;
+  font-weight: 700;
 `;
 
 const Tagline = styled.p`
-  font-size: 16px;
-  font-weight: 500;
-  margin: 0;
+  margin: 0.25rem 0 0 0;
   opacity: 0.9;
-  letter-spacing: 1px;
-  
-  @media (max-width: 480px) {
-    font-size: 14px;
-  }
+  font-size: 0.9rem;
 `;
 
 const ButtonGroup = styled.div`
   display: flex;
-  gap: 15px;
+  gap: 0.75rem;
   align-items: center;
 
   @media (max-width: 768px) {
     width: 100%;
-    justify-content: space-between;
+    justify-content: center;
   }
+`;
+
+const Icon = styled.span`
+  font-size: 1.1rem;
+  margin-right: 0.4rem;
+  display: inline-flex;
+  align-items: center;
 `;
 
 const BackButton = styled.button`
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   color: white;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  padding: 10px 20px;
+  padding: 0.6rem 1rem;
   border-radius: 8px;
-  font-size: 14px;
   cursor: pointer;
+  font-weight: 500;
   transition: all 0.2s;
-  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.3);
-  }
-  
-  @media (max-width: 480px) {
-    padding: 8px 16px;
-    font-size: 13px;
+    background: rgba(255, 255, 255, 0.25);
   }
 `;
 
-const Content = styled.div`
-  flex: 1;
-  padding: 40px;
-  overflow-y: auto;
+const Content = styled.main`
+  padding: 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
 
   @media (max-width: 768px) {
-    padding: 20px;
-  }
-  
-  @media (max-width: 480px) {
-    padding: 15px;
+    padding: 1rem;
   }
 `;
 
@@ -382,73 +468,73 @@ const Container = styled.div`
 `;
 
 const Loading = styled.div`
-  font-size: 18px;
-  color: #666;
+  font-size: 1.1rem;
+  color: #64748b;
 `;
 
 const WelcomeMessage = styled.h2`
-  font-size: 20px;
-  color: #2c3e50;
-  margin-bottom: 20px;
+  font-size: 1.5rem;
+  color: #1e293b;
+  margin-bottom: 1.5rem;
   font-weight: 500;
   
   @media (max-width: 480px) {
-    font-size: 18px;
+    font-size: 1.25rem;
   }
 `;
 
 const SectionTitle = styled.h3`
-  font-size: 24px;
+  font-size: 1.5rem;
   font-weight: 600;
-  color: #2c3e50;
-  margin-bottom: 25px;
+  color: #1e293b;
+  margin-bottom: 1.5rem;
   
   @media (max-width: 480px) {
-    font-size: 20px;
+    font-size: 1.25rem;
   }
 `;
 
 const EmptyState = styled.div`
   text-align: center;
-  padding: 60px 20px;
+  padding: 3rem 2rem;
   background: white;
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
   
   @media (max-width: 480px) {
-    padding: 40px 15px;
+    padding: 2rem 1rem;
   }
 `;
 
 const EmptyIcon = styled.div`
-  font-size: 64px;
-  margin-bottom: 20px;
+  font-size: 3rem;
+  margin-bottom: 1rem;
 `;
 
 const EmptyText = styled.p`
-  font-size: 20px;
-  color: #2c3e50;
+  font-size: 1.25rem;
+  color: #1e293b;
   font-weight: 600;
-  margin-bottom: 10px;
+  margin-bottom: 0.5rem;
   
   @media (max-width: 480px) {
-    font-size: 18px;
+    font-size: 1.1rem;
   }
 `;
 
 const EmptySubtext = styled.p`
-  color: #666;
-  font-size: 16px;
+  color: #64748b;
+  font-size: 1rem;
   
   @media (max-width: 480px) {
-    font-size: 14px;
+    font-size: 0.9rem;
   }
 `;
 
 const RecordsGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: 20px;
+  gap: 1.5rem;
 
   @media (max-width: 768px) {
     grid-template-columns: 1fr;
@@ -457,20 +543,22 @@ const RecordsGrid = styled.div`
 
 const RecordCard = styled.div`
   background: white;
-  padding: 25px;
-  border-radius: 16px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
-  border-left: 5px solid #6bc1e1;
-  position: relative;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border-top: 4px solid #6BC1E1;
 
   &:hover {
     transform: translateY(-4px);
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   }
   
   @media (max-width: 480px) {
-    padding: 20px;
+    padding: 1.25rem;
   }
 `;
 
@@ -478,48 +566,53 @@ const RecordHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 15px;
-  padding-bottom: 15px;
-  border-bottom: 1px solid #eee;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e2e8f0;
   
   @media (max-width: 480px) {
     flex-direction: column;
-    gap: 10px;
+    gap: 0.75rem;
   }
 `;
 
 const PetName = styled.h4`
-  font-size: 18px;
+  font-size: 1.25rem;
   font-weight: 600;
-  color: #2c3e50;
-  margin: 0 0 5px 0;
+  color: #1e293b;
+  margin: 0 0 0.5rem 0;
 `;
 
-const PetType = styled.span`
-  font-size: 14px;
-  color: #666;
-  background: #f0f7ff;
-  padding: 3px 8px;
-  border-radius: 12px;
+const PetType = styled.span<{ $petType: string }>`
+  font-size: 0.85rem;
+  color: ${props => props.$petType === 'dog' ? '#1d4ed8' : '#be185d'};
+  background: ${props => props.$petType === 'dog' ? '#dbeafe' : '#fce7f3'};
+  padding: 0.25rem 0.5rem;
+  border-radius: 9999px;
+  font-weight: 500;
 `;
 
 const RecordDate = styled.span`
-  font-size: 14px;
-  color: #666;
+  font-size: 0.9rem;
+  color: #64748b;
 `;
 
 const ViewDetailsButton = styled.button`
-  background: linear-gradient(90deg, #6bc1e1, #34b89c);
+  background: linear-gradient(90deg, #34B89C, #6BC1E1);
   color: white;
   border: none;
-  padding: 8px 16px;
+  padding: 0.75rem 1rem;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
-  margin-top: 10px;
+  margin-top: 0.5rem;
   width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
 
   &:hover {
     opacity: 0.9;
@@ -530,26 +623,26 @@ const ViewDetailsButton = styled.button`
 const RecordDetails = styled.div<{ $open: boolean }>`
   display: ${(props) => (props.$open ? 'flex' : 'none')};
   flex-direction: column;
-  gap: 10px;
-  margin-top: 15px;
-  padding-top: 15px;
-  border-top: 1px solid #eee;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e2e8f0;
   transition: all 0.3s ease;
 `;
 
 const DetailItem = styled.div`
   display: flex;
-  gap: 10px;
+  gap: 0.75rem;
   
   @media (max-width: 480px) {
     flex-direction: column;
-    gap: 5px;
+    gap: 0.25rem;
   }
 `;
 
 const DetailLabel = styled.span`
   font-weight: 600;
-  color: #2c3e50;
+  color: #374151;
   min-width: 80px;
   
   @media (max-width: 480px) {
@@ -558,28 +651,42 @@ const DetailLabel = styled.span`
 `;
 
 const DetailValue = styled.span`
-  color: #666;
+  color: #475569;
   flex: 1;
+`;
+
+const DiagnosisValue = styled(DetailValue)`
+  color: #dc2626;
+  font-weight: 600;
+`;
+
+const TreatmentValue = styled(DetailValue)`
+  color: #059669;
+  font-weight: 600;
 `;
 
 const ButtonGroupHorizontal = styled.div`
   display: flex;
-  gap: 10px;
-  margin-top: 15px;
+  gap: 0.75rem;
+  margin-top: 1rem;
 `;
 
 const PrintButton = styled.button`
-  background: #2c3e50;
+  background: #34B89C;
   color: white;
   border: none;
-  padding: 8px 16px;
+  padding: 0.75rem 1rem;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 
   &:hover {
-    background: #1a252f;
+    background: #2a947c;
+    transform: translateY(-2px);
   }
 `;

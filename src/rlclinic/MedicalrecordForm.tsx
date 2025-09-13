@@ -1,4 +1,4 @@
- 'use client';
+'use client';
 
 import React, { useState, useEffect, useCallback } from "react";
 import styled, { createGlobalStyle } from "styled-components";
@@ -316,7 +316,7 @@ const MedicalRecordForm: React.FC = () => {
               Back
             </BackButton>
             <AddButton onClick={() => setShowForm(true)}>
-              <Icon className="material-icons"> </Icon>
+              <Icon className="material-icons"></Icon>
               Add Record
             </AddButton>
           </ButtonGroup>
@@ -331,7 +331,7 @@ const MedicalRecordForm: React.FC = () => {
             <FormCard>
               <Title>
                 {editingRecord ? "Edit Medical Record" : "Add New Medical Record"}
-                <FormHelpText>{"Please fill in all required fields marked with *"}</FormHelpText>
+                <FormHelpText>Please fill in all required fields marked with *</FormHelpText>
               </Title>
               <Form onSubmit={handleSubmit}>
                 <FormRow>
@@ -410,7 +410,7 @@ const MedicalRecordForm: React.FC = () => {
                   <FormGroup>
                     <Label>Diagnosis *</Label>
                     <Select name="diagnosis" value={formData.diagnosis} onChange={handleChange} required>
-                      <option value="">{"Select Diagnosis"}</option>
+                      <option value="">Select Diagnosis</option>
                       {(DIAGNOSIS_OPTIONS[formData.petType as keyof typeof DIAGNOSIS_OPTIONS] || []).map(opt => (
                         <option key={opt} value={opt}>{opt}</option>
                       ))}
@@ -419,7 +419,7 @@ const MedicalRecordForm: React.FC = () => {
                   <FormGroup>
                     <Label>Treatment *</Label>
                     <Select name="treatment" value={formData.treatment} onChange={handleChange} required>
-                      <option value="">{"Select Treatment"}</option>
+                      <option value="">Select Treatment</option>
                       {(TREATMENT_OPTIONS[formData.petType as keyof typeof TREATMENT_OPTIONS] || []).map(opt => (
                         <option key={opt} value={opt}>{opt}</option>
                       ))}
@@ -445,7 +445,7 @@ const MedicalRecordForm: React.FC = () => {
                 
                 <ButtonGroupForm>
                   <SaveButton type="submit">
-                    <Icon className="material-icons">{editingRecord ? "" : "Save"}</Icon>
+                    <Icon className="material-icons">{editingRecord ? "save" : "Add"}</Icon>
                     {editingRecord ? "Update Record" : " Record"}
                   </SaveButton>
                   <CancelButton type="button" onClick={() => {
@@ -483,7 +483,7 @@ const MedicalRecordForm: React.FC = () => {
                 <SectionTitle>Medical Records</SectionTitle>
                 <FilterSection>
                   <SearchContainer>
-                    <SearchIcon className="material-icons">🔍︎</SearchIcon>
+                    <SearchIcon className="material-icons"></SearchIcon>
                     <SearchInput 
                       type="text" 
                       placeholder="Search by pet or owner name" 
@@ -497,8 +497,8 @@ const MedicalRecordForm: React.FC = () => {
                     <option value="cat">Cats Only</option>
                   </FilterSelect>
                   <RefreshButton onClick={fetchMedicalRecords}>
-                    <Icon className="material-icons">Refresh</Icon>
-                    
+                    <Icon className="material-icons"></Icon>
+                    Refresh
                   </RefreshButton>
                 </FilterSection>
               </SectionHeader>
@@ -525,8 +525,8 @@ const MedicalRecordForm: React.FC = () => {
                     <EmptyText>No medical records found</EmptyText>
                     <EmptySubtext>{searchTerm || filterPetType !== "all" ? "Try adjusting your search or filter" : "Add your first medical record to get started"}</EmptySubtext>
                     <AddButton onClick={() => setShowForm(true)}>
-                      <Icon className="material-icons">Add</Icon>
-                       Your First Record
+                      <Icon className="material-icons"></Icon>
+                      Add Your First Record
                     </AddButton>
                   </EmptyState>
                 ) : (
@@ -649,7 +649,7 @@ const PageContainer = styled.div`
 `;
 
 const HeaderBar = styled.header`
-  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
   color: white;
   padding: 1rem 2rem;
   display: flex;
@@ -674,19 +674,19 @@ const BrandSection = styled.div`
 `;
 
 const ClinicLogo = styled.div`
-  font-size: 2rem;
+  font-size: 2.5rem;
 `;
 
 const ClinicName = styled.h1`
   margin: 0;
-  font-size: 1.5rem;
+  font-size: 1.8rem;
   font-weight: 700;
 `;
 
 const Tagline = styled.p`
   margin: 0.25rem 0 0 0;
   opacity: 0.9;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
 `;
 
 const ButtonGroup = styled.div`
@@ -813,8 +813,8 @@ const Input = styled.input`
 
   &:focus {
     outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    border-color: #34B89C;
+    box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.15);
   }
 `;
 
@@ -832,8 +832,8 @@ const Select = styled.select`
 
   &:focus {
     outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    border-color: #34B89C;
+    box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.15);
   }
 `;
 
@@ -848,8 +848,8 @@ const TextArea = styled.textarea`
 
   &:focus {
     outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    border-color: #34B89C;
+    box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.15);
   }
 `;
 
@@ -865,7 +865,7 @@ const ButtonGroupForm = styled.div`
 `;
 
 const SaveButton = styled.button`
-  background: #10b981;
+  background: #34B89C;
   border: none;
   color: white;
   padding: 0.75rem 1.5rem;
@@ -877,7 +877,7 @@ const SaveButton = styled.button`
   align-items: center;
 
   &:hover {
-    background: #059669;
+    background: #2a947c;
     transform: translateY(-2px);
   }
 `;
@@ -954,8 +954,8 @@ const SearchInput = styled.input`
 
   &:focus {
     outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    border-color: #34B89C;
+    box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.15);
   }
 
   @media (max-width: 640px) {
@@ -972,13 +972,13 @@ const FilterSelect = styled.select`
 
   &:focus {
     outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    border-color: #34B89C;
+    box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.15);
   }
 `;
 
 const RefreshButton = styled.button`
-  background: #3b82f6;
+  background: #6BC1E1;
   border: none;
   color: white;
   padding: 0.5rem 1rem;
@@ -990,7 +990,7 @@ const RefreshButton = styled.button`
   align-items: center;
 
   &:hover {
-    background: #2563eb;
+    background: #59a7c5;
   }
 `;
 
@@ -1007,12 +1007,13 @@ const StatCard = styled.div`
   border-radius: 12px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   text-align: center;
+  border-top: 4px solid #34B89C;
 `;
 
 const StatNumber = styled.div`
   font-size: 2rem;
   font-weight: 700;
-  color: #2563eb;
+  color: #34B89C;
   margin-bottom: 0.5rem;
 `;
 
@@ -1056,6 +1057,7 @@ const RecordCard = styled.div`
   display: flex;
   flex-direction: column;
   height: 100%;
+  border-top: 4px solid #6BC1E1;
 
   &:hover {
     transform: translateY(-4px);
@@ -1137,7 +1139,7 @@ const CardActions = styled.div`
 `;
 
 const ActionButton = styled.button`
-  background: #3b82f6;
+  background: #6BC1E1;
   border: none;
   color: white;
   padding: 0.5rem 1rem;
@@ -1150,7 +1152,7 @@ const ActionButton = styled.button`
   transition: all 0.2s;
 
   &:hover {
-    background: #2563eb;
+    background: #59a7c5;
     transform: translateY(-2px);
   }
 `;

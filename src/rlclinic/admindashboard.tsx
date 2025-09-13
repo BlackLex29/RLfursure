@@ -5,14 +5,14 @@ import styled, { createGlobalStyle, keyframes } from "styled-components";
 import { useRouter } from "next/navigation";
 import { auth, db } from "../firebaseConfig";
 import { signOut } from "firebase/auth";
-import { collection, getDocs, addDoc, onSnapshot } from "firebase/firestore";
+import { collection, getDocs, addDoc, onSnapshot, deleteDoc, doc } from "firebase/firestore";
 
 // Global Styles
 const GlobalStyle = createGlobalStyle`
-  @import url('https://fonts.googleapis.com/css2?family=Rozha+One&family=Poppins:wght@300;400;500;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
   body {
-    font-family: 'Poppins', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background-color: #E6F4F1;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background-color: #f0f9f7;
     margin: 0;
     padding: 0;
     overflow-x: hidden;
@@ -82,7 +82,7 @@ const Admindashboard: React.FC = () => {
   const router = useRouter();
   const [appointments, setAppointments] = useState<AppointmentType[]>([]);
   const [todaysAppointments, setTodaysAppointments] = useState<AppointmentType[]>([]);
-  const [unavailableSlots, setUnavailableSlots] = useState<UnavailableSlot[]>([]); // New state
+  const [unavailableSlots, setUnavailableSlots] = useState<UnavailableSlot[]>([]);
   const [clients, setClients] = useState<ClientType[]>([]);
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [selectedClient, setSelectedClient] = useState("");
@@ -95,10 +95,11 @@ const Admindashboard: React.FC = () => {
   const [appointmentDate, setAppointmentDate] = useState("");
   const [appointmentTime, setAppointmentTime] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<"today" | "all" | "unavailable">("today"); // Updated view mode
+  const [viewMode, setViewMode] = useState<"today" | "all" | "unavailable">("today");
   const [isMounted, setIsMounted] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<string>("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const timeSlots = [
     "8:00 AM–8:30 AM", "8:30 AM–9:00 AM", "9:00 AM–9:30 AM", "9:30 AM–10:00 AM",
@@ -184,7 +185,7 @@ const Admindashboard: React.FC = () => {
   useEffect(() => { 
     fetchAppointments(); 
     fetchClients(); 
-    fetchUnavailableSlots(); // Fetch unavailable slots on component mount
+    fetchUnavailableSlots();
 
     // Set up real-time listener for unavailable slots
     const unsubscribe = onSnapshot(collection(db, "unavailableSlots"), (snapshot) => {
@@ -243,6 +244,23 @@ const Admindashboard: React.FC = () => {
       console.error("Error booking appointment:", error);
       alert("Failed to book appointment. Please try again.");
     } finally { setIsLoading(false); }
+  };
+
+  // Function to delete unavailable slot
+  const handleDeleteUnavailable = async (id: string) => {
+    if (!confirm("Are you sure you want to remove this unavailable date?")) return;
+    
+    setDeletingId(id);
+    try {
+      await deleteDoc(doc(db, "unavailableSlots", id));
+      alert("Unavailable date removed successfully!");
+      fetchUnavailableSlots();
+    } catch (error) {
+      console.error("Error deleting unavailable slot:", error);
+      alert("Failed to remove unavailable date. Please try again.");
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const resetForm = () => {
@@ -412,6 +430,12 @@ const Admindashboard: React.FC = () => {
                         </UnavailableTime>
                         <UnavailableStatus>Unavailable</UnavailableStatus>
                       </UnavailableInfo>
+                      <DeleteButton 
+                        onClick={() => handleDeleteUnavailable(slot.id)}
+                        disabled={deletingId === slot.id}
+                      >
+                        {deletingId === slot.id ? "Deleting..." : "Delete"}
+                      </DeleteButton>
                     </UnavailableCard>
                   ))
                 ) : (
@@ -532,86 +556,6 @@ const Admindashboard: React.FC = () => {
 
 /* Styled Components */
 
-// ... (keeping all existing styled components)
-
-// New styled components for unavailable slots
-const UnavailableCard = styled.div<{ $delay: number }>`
-  animation: ${fadeInUp} 0.4s ease forwards;
-  animation-delay: ${props => props.$delay}s;
-  opacity: 0;
-  padding: 1.2rem; 
-  border-left: 6px solid #dc3545; 
-  background: white; 
-  border-radius: 10px;
-  box-shadow: 0 3px 10px rgba(0,0,0,0.08);
-  transition: transform 0.2s;
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-
-  &:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-  }
-
-  @media (max-width: 480px) {
-    padding: 1rem;
-    flex-direction: column;
-    text-align: center;
-  }
-`;
-
-const UnavailableIcon = styled.div`
-  font-size: 2rem;
-  flex-shrink: 0;
-`;
-
-const UnavailableInfo = styled.div`
-  flex: 1;
-`;
-
-const UnavailableDate = styled.div`
-  font-weight: bold;
-  font-size: 1.1rem;
-  color: #2d3748;
-  margin-bottom: 0.3rem;
-`;
-
-const UnavailableDoctor = styled.div`
-  font-size: 0.95rem;
-  color: #4a5568;
-  margin-bottom: 0.3rem;
-`;
-
-const UnavailableTime = styled.div`
-  font-size: 0.9rem;
-  color: #718096;
-  margin-bottom: 0.5rem;
-`;
-
-const UnavailableStatus = styled.div`
-  display: inline-block;
-  padding: 0.3rem 0.7rem; 
-  border-radius: 20px; 
-  background-color: #dc3545;
-  color: white; 
-  font-size: 0.8rem;
-  font-weight: 500;
-`;
-
-const UnavailableWarning = styled.div`
-  background: #fff3cd;
-  border: 1px solid #ffeaa7;
-  color: #856404;
-  padding: 0.5rem 0.8rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  margin-top: 0.5rem;
-  font-weight: 500;
-`;
-
-// ... (keeping all other existing styled components unchanged)
-
 const PageContainer = styled.div`
   display: flex; 
   flex-direction: column; 
@@ -623,7 +567,8 @@ const HeaderBar = styled.header`
   justify-content: space-between; 
   align-items: center;
   padding: 1rem 1.5rem; 
-  background: #fff; 
+  background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
+  color: white;
   box-shadow: 0 2px 10px rgba(0,0,0,0.1);
   position: sticky;
   top: 0;
@@ -651,7 +596,7 @@ const MenuToggle = styled.div`
   span {
     height: 2px;
     width: 100%;
-    background-color: #333;
+    background-color: white;
     border-radius: 2px;
   }
 
@@ -663,8 +608,8 @@ const MenuToggle = styled.div`
 const ClinicName = styled.h1`
   margin: 0; 
   font-size: 1.8rem;
-  font-family: 'Rozha One', serif;
-  color: #2C5E4F;
+  font-weight: 700;
+  color: white;
 
   @media (max-width: 768px) {
     font-size: 1.5rem;
@@ -678,7 +623,7 @@ const ClinicName = styled.h1`
 const Tagline = styled.p`
   margin: 0; 
   font-size: 0.9rem; 
-  color: #666;
+  color: rgba(255, 255, 255, 0.9);
 
   @media (max-width: 768px) {
     display: none;
@@ -696,12 +641,13 @@ const UserSection = styled.div`
 `;
 
 const AdminBadge = styled.span`
-  background: #17a2b8; 
+  background: rgba(255, 255, 255, 0.2); 
   color: white; 
   padding: 0.4rem 0.8rem; 
   border-radius: 20px; 
   font-size: 0.8rem;
   font-weight: 500;
+  backdrop-filter: blur(10px);
 
   @media (max-width: 480px) {
     font-size: 0.7rem;
@@ -711,16 +657,16 @@ const AdminBadge = styled.span`
 
 const LogoutButton = styled.button`
   padding: 0.6rem 1.2rem; 
-  border: none; 
+  border: 1px solid rgba(255, 255, 255, 0.3); 
   border-radius: 8px; 
   cursor: pointer; 
-  background: #dc3545; 
+  background: rgba(255, 255, 255, 0.15); 
   color: white; 
   font-weight: 600;
-  transition: background 0.2s;
+  transition: all 0.2s;
 
   &:hover {
-    background: #bd2130;
+    background: rgba(255, 255, 255, 0.25);
   }
 
   @media (max-width: 480px) {
@@ -760,6 +706,7 @@ const NavItem = styled.div`
   border-bottom: 1px solid #eee;
   font-weight: 500;
   transition: background 0.2s;
+  color: #2C5E4F;
 
   &:hover {
     background: #f8f9fa;
@@ -811,6 +758,7 @@ const Card = styled.div`
   box-shadow: 0 4px 12px rgba(0,0,0,0.08); 
   transition: all 0.3s ease;
   animation: ${slideIn} 0.5s ease forwards;
+  border-top: 4px solid #34B89C;
   
   &:hover {
     transform: translateY(-5px);
@@ -906,12 +854,12 @@ const ToggleButtonStyled = styled.button<ToggleButtonProps>`
   cursor: pointer; 
   transition: all 0.2s; 
   font-size: 0.9rem;
-  background: ${props => props.$active ? '#2C5E4F' : 'transparent'};
+  background: ${props => props.$active ? '#34B89C' : 'transparent'};
   color: ${props => props.$active ? 'white' : '#333'};
   font-weight: ${props => props.$active ? '600' : 'normal'};
   
   &:hover {
-    background: ${props => props.$active ? '#24483c' : '#e5e5e5'};
+    background: ${props => props.$active ? '#2a947c' : '#e5e5e5'};
   }
 
   @media (max-width: 480px) {
@@ -934,8 +882,8 @@ const MonthSelect = styled.select`
 
   &:focus {
     outline: none;
-    border-color: #2C5E4F;
-    box-shadow: 0 0 0 2px rgba(44, 94, 79, 0.1);
+    border-color: #34B89C;
+    box-shadow: 0 0 0 2px rgba(52, 184, 156, 0.1);
   }
 `;
 
@@ -944,14 +892,14 @@ const RefreshButton = styled.button`
   border: none; 
   border-radius: 8px; 
   cursor: pointer; 
-  background: #2C5E4F; 
+  background: #34B89C; 
   color: white; 
   font-weight: 600;
   transition: background 0.2s;
   font-size: 0.9rem;
 
   &:hover {
-    background: #24483c;
+    background: #2a947c;
   }
 
   @media (max-width: 480px) {
@@ -1030,6 +978,110 @@ const NoAppointments = styled.p`
   background: white;
   border-radius: 10px;
   box-shadow: 0 3px 10px rgba(0,0,0,0.05);
+`;
+
+// New styled components for unavailable slots
+const UnavailableCard = styled.div<{ $delay: number }>`
+  animation: ${fadeInUp} 0.4s ease forwards;
+  animation-delay: ${props => props.$delay}s;
+  opacity: 0;
+  padding: 1.2rem; 
+  border-left: 6px solid #dc3545; 
+  background: white; 
+  border-radius: 10px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+  transition: transform 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  position: relative;
+
+  &:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+  }
+
+  @media (max-width: 480px) {
+    padding: 1rem;
+    flex-direction: column;
+    text-align: center;
+    gap: 0.8rem;
+  }
+`;
+
+const UnavailableIcon = styled.div`
+  font-size: 2rem;
+  flex-shrink: 0;
+`;
+
+const UnavailableInfo = styled.div`
+  flex: 1;
+`;
+
+const UnavailableDate = styled.div`
+  font-weight: bold;
+  font-size: 1.1rem;
+  color: #2d3748;
+  margin-bottom: 0.3rem;
+`;
+
+const UnavailableDoctor = styled.div`
+  font-size: 0.95rem;
+  color: #4a5568;
+  margin-bottom: 0.3rem;
+`;
+
+const UnavailableTime = styled.div`
+  font-size: 0.9rem;
+  color: #718096;
+  margin-bottom: 0.5rem;
+`;
+
+const UnavailableStatus = styled.div`
+  display: inline-block;
+  padding: 0.3rem 0.7rem; 
+  border-radius: 20px; 
+  background-color: #dc3545;
+  color: white; 
+  font-size: 0.8rem;
+  font-weight: 500;
+`;
+
+const DeleteButton = styled.button`
+  background: #dc3545;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+
+  &:hover:not(:disabled) {
+    background: #bd2130;
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  @media (max-width: 480px) {
+    width: 100%;
+  }
+`;
+
+const UnavailableWarning = styled.div`
+  background: #fff3cd;
+  border: 1px solid #ffeaa7;
+  color: #856404;
+  padding: 0.5rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+  font-weight: 500;
 `;
 
 const ModalOverlay = styled.div`
@@ -1144,8 +1196,8 @@ const Input = styled.input`
 
   &:focus {
     outline: none;
-    border-color: #2C5E4F;
-    box-shadow: 0 0 0 2px rgba(44, 94, 79, 0.1);
+    border-color: #34B89C;
+    box-shadow: 0 0 0 2px rgba(52, 184, 156, 0.1);
   }
 
   &:disabled {
@@ -1164,8 +1216,8 @@ const Select = styled.select`
 
   &:focus {
     outline: none;
-    border-color: #2C5E4F;
-    box-shadow: 0 0 0 2px rgba(44, 94, 79, 0.1);
+    border-color: #34B89C;
+    box-shadow: 0 0 0 2px rgba(52, 184, 156, 0.1);
   }
 
   &:disabled {
@@ -1216,13 +1268,13 @@ const SubmitButton = styled.button`
   border: none; 
   border-radius: 8px; 
   cursor: pointer; 
-  background: #2C5E4F; 
+  background: #34B89C; 
   color: white; 
   font-weight: 600;
   transition: background 0.2s;
 
   &:hover:not(:disabled) {
-    background: #24483c;
+    background: #2a947c;
   }
 
   &:disabled {

@@ -36,6 +36,7 @@ interface UserProfile {
   firstName: string;
   lastName: string;
   email: string;
+  profilePicture?: string;
 }
 
 const timeSlots = [
@@ -60,6 +61,12 @@ const UserDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isClient, setIsClient] = useState(false);
+  
+  // Profile editing state
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [editFirstName, setEditFirstName] = useState("");
+  const [editLastName, setEditLastName] = useState("");
+  const [profilePictureUrl, setProfilePictureUrl] = useState("");
 
   // Get today's date in a consistent format (YYYY-MM-DD)
   const getTodayDate = () => new Date().toISOString().split("T")[0];
@@ -83,21 +90,33 @@ const UserDashboard: React.FC = () => {
       try {
         const userDoc = await getDoc(doc(db, "users", userId));
         if (userDoc.exists()) {
-          setUserProfile(userDoc.data() as UserProfile);
+          const profileData = userDoc.data() as UserProfile;
+          setUserProfile(profileData);
+          setEditFirstName(profileData.firstName || "");
+          setEditLastName(profileData.lastName || "");
+          setProfilePictureUrl(profileData.profilePicture || "");
         } else {
-          setUserProfile({
+          const defaultProfile: UserProfile = {
             firstName: userEmail.split('@')[0],
             lastName: "",
             email: userEmail
-          });
+          };
+          setUserProfile(defaultProfile);
+          setEditFirstName(defaultProfile.firstName);
+          setEditLastName("");
+          setProfilePictureUrl("");
         }
       } catch (error) {
         console.error("Error fetching user profile:", error);
-        setUserProfile({
+        const defaultProfile: UserProfile = {
           firstName: userEmail.split('@')[0],
           lastName: "",
           email: userEmail
-        });
+        };
+        setUserProfile(defaultProfile);
+        setEditFirstName(defaultProfile.firstName);
+        setEditLastName("");
+        setProfilePictureUrl("");
       } finally {
         setLoading(false);
       }
@@ -121,6 +140,7 @@ const UserDashboard: React.FC = () => {
 
     return () => unsub();
   }, [userEmail, userId]);
+
   const handleLogout = async () => {
     await signOut(auth);
     router.push("/");
@@ -169,8 +189,58 @@ const UserDashboard: React.FC = () => {
 
   const cancelEdit = () => setEditingId(null);
 
+  // Profile editing functions
+  const toggleProfileEdit = () => {
+    if (isEditingProfile) {
+      // Save when toggling off
+      saveProfileEdit();
+    } else {
+      // Start editing
+      setIsEditingProfile(true);
+      setEditFirstName(userProfile?.firstName || "");
+      setEditLastName(userProfile?.lastName || "");
+      setProfilePictureUrl(userProfile?.profilePicture || "");
+    }
+  };
+
+  const saveProfileEdit = async () => {
+    if (!userId) return;
+
+    try {
+      const updatedProfile = {
+        firstName: editFirstName,
+        lastName: editLastName,
+        email: userEmail || "",
+        profilePicture: profilePictureUrl
+      };
+
+      await updateDoc(doc(db, "users", userId), updatedProfile);
+      
+      // Fix: Update the state properly
+      setUserProfile(prevProfile => ({
+        ...prevProfile!,
+        ...updatedProfile
+      }));
+      
+      setIsEditingProfile(false);
+      alert("Profile updated successfully!");
+    } catch (error) {
+      console.error("Error updating profile:", error);
+      alert("Failed to update profile.");
+    }
+  };
+
+  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      // Create a URL for the image preview
+      const imageUrl = URL.createObjectURL(file);
+      setProfilePictureUrl(imageUrl);
+    }
+  };
+
   // Prevent rendering until client-side to avoid hydration mismatch
- if (!isClient) {
+  if (!isClient) {
     return (
       <>
         <GlobalStyle />
@@ -191,7 +261,7 @@ const UserDashboard: React.FC = () => {
     <>
       <GlobalStyle />
       <PageContainer>
-        {/* Header with mobile hamburger menu */}
+        {/* Header with profile and hamburger menu */}
         <HeaderBar>
           <HeaderLeft>
             <MobileMenuButton onClick={() => setIsMenuOpen(!isMenuOpen)}>
@@ -201,12 +271,13 @@ const UserDashboard: React.FC = () => {
                 <span></span>
               </HamburgerIcon>
             </MobileMenuButton>
+            
             <WelcomeSection>
               {loading ? (
                 <WelcomeTitle>Loading...</WelcomeTitle>
               ) : (
                 <WelcomeTitle>
-                  Welcome back, {userProfile?.firstName} {userProfile?.lastName}!
+                  Welcome back, {userProfile?.firstName}!
                 </WelcomeTitle>
               )}
               <WelcomeSubtitle>How can we help your pet today?</WelcomeSubtitle>
@@ -214,16 +285,90 @@ const UserDashboard: React.FC = () => {
           </HeaderLeft>
           
           <HeaderRight className={isMenuOpen ? "open" : ""}>
-            <ProfileSection>
-              <ProfileIcon>👤</ProfileIcon>
-              {loading ? (
-                <ProfileName>Loading...</ProfileName>
-              ) : (
+            {/* Profile Section - Now on the right side */}
+            <ProfileContainer>
+              <ProfileIconButton onClick={toggleProfileEdit}>
+                <ProfileAvatar>
+                  {userProfile?.profilePicture ? (
+                    <ProfileImage src={userProfile.profilePicture} alt="Profile" />
+                  ) : (
+                    <DefaultAvatar>👤</DefaultAvatar>
+                  )}
+                </ProfileAvatar>
                 <ProfileName>
-                  {userProfile?.firstName} {userProfile?.lastName}
+                  {loading ? "Loading..." : `${userProfile?.firstName} ${userProfile?.lastName}`}
                 </ProfileName>
+                <EditIcon>✏️</EditIcon>
+              </ProfileIconButton>
+
+              {/* Profile Edit Modal */}
+              {isEditingProfile && (
+                <ProfileModalOverlay onClick={() => setIsEditingProfile(false)}>
+                  <ProfileModal onClick={(e) => e.stopPropagation()}>
+                    <ModalHeader>
+                      <ModalTitle>Edit Profile</ModalTitle>
+                      <CloseButton onClick={() => setIsEditingProfile(false)}>×</CloseButton>
+                    </ModalHeader>
+                    
+                    <ModalContent>
+                      <ProfileImageSection>
+                        <ProfileImagePreview>
+                          {profilePictureUrl ? (
+                            <ProfileImage src={profilePictureUrl} alt="Profile Preview" />
+                          ) : (
+                            <DefaultAvatarLarge>👤</DefaultAvatarLarge>
+                          )}
+                        </ProfileImagePreview>
+                        <ImageUploadLabel htmlFor="profile-pic">
+                          Choose Photo
+                          <ImageUploadInput
+                            type="file"
+                            accept="image/*"
+                            onChange={handleImageUpload}
+                            id="profile-pic"
+                          />
+                        </ImageUploadLabel>
+                      </ProfileImageSection>
+                      
+                      <FormGroup>
+                        <Label>First Name</Label>
+                        <EditInput
+                          type="text"
+                          value={editFirstName}
+                          onChange={(e) => setEditFirstName(e.target.value)}
+                          placeholder="First name"
+                        />
+                      </FormGroup>
+                      
+                      <FormGroup>
+                        <Label>Last Name</Label>
+                        <EditInput
+                          type="text"
+                          value={editLastName}
+                          onChange={(e) => setEditLastName(e.target.value)}
+                          placeholder="Last name"
+                        />
+                      </FormGroup>
+                      
+                      <FormGroup>
+                        <Label>Email</Label>
+                        <EmailDisplay>{userEmail}</EmailDisplay>
+                      </FormGroup>
+                    </ModalContent>
+                    
+                    <ModalActions>
+                      <CancelButton onClick={() => setIsEditingProfile(false)}>
+                        Cancel
+                      </CancelButton>
+                      <SaveProfileButton onClick={saveProfileEdit}>
+                        Save Changes
+                      </SaveProfileButton>
+                    </ModalActions>
+                  </ProfileModal>
+                </ProfileModalOverlay>
               )}
-            </ProfileSection>
+            </ProfileContainer>
+            
             <LogoutButton onClick={handleLogout}>Logout</LogoutButton>
           </HeaderRight>
         </HeaderBar>
@@ -353,7 +498,249 @@ const UserDashboard: React.FC = () => {
 
 export default UserDashboard;
 
-/* ================== RESPONSIVE STYLES ================== */
+/* ================== UPDATED PROFILE STYLES ================== */
+const ProfileContainer = styled.div`
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-right: 1.5rem;
+
+  @media (max-width: 768px) {
+    margin-right: 1rem;
+    margin-bottom: 1rem;
+  }
+`;
+
+const ProfileIconButton = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  cursor: pointer;
+  padding: 0.5rem 1rem;
+  border-radius: 1.5rem;
+  transition: all 0.2s ease;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+
+  &:hover {
+    background: #f1f5f9;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+  }
+
+  @media (max-width: 768px) {
+    gap: 0.5rem;
+    padding: 0.4rem 0.8rem;
+  }
+`;
+
+const ProfileAvatar = styled.div`
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: linear-gradient(135deg, #6BC1E1, #34B89C);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+
+  @media (max-width: 768px) {
+    width: 35px;
+    height: 35px;
+  }
+`;
+
+const ProfileImage = styled.img`
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+`;
+
+const DefaultAvatar = styled.div`
+  font-size: 1.2rem;
+  color: white;
+
+  @media (max-width: 768px) {
+    font-size: 1rem;
+  }
+`;
+
+const DefaultAvatarLarge = styled(DefaultAvatar)`
+  font-size: 3rem;
+`;
+
+const ProfileName = styled.span`
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #2c3e50;
+  white-space: nowrap;
+
+  @media (max-width: 768px) {
+    font-size: 0.85rem;
+  }
+
+  @media (max-width: 480px) {
+    display: none;
+  }
+`;
+
+const EditIcon = styled.span`
+  font-size: 0.8rem;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+  
+  ${ProfileIconButton}:hover & {
+    opacity: 1;
+  }
+`;
+
+const ProfileModalOverlay = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+`;
+
+const ProfileModal = styled.div`
+  background: white;
+  border-radius: 1rem;
+  width: 100%;
+  max-width: 450px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  animation: modalFadeIn 0.3s ease;
+
+  @keyframes modalFadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(-20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+`;
+
+const ModalHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #e2e8f0;
+`;
+
+const ModalTitle = styled.h3`
+  margin: 0;
+  font-size: 1.4rem;
+  color: #2c3e50;
+`;
+
+const CloseButton = styled.button`
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #64748b;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+
+  &:hover {
+    background: #f1f5f9;
+    color: #334155;
+  }
+`;
+
+const ModalContent = styled.div`
+  padding: 1.5rem;
+`;
+
+const ProfileImageSection = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 1.5rem;
+`;
+
+const ProfileImagePreview = styled.div`
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  overflow: hidden;
+  margin-bottom: 1rem;
+  border: 3px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f8fafc;
+`;
+
+const ImageUploadLabel = styled.label`
+  padding: 0.5rem 1rem;
+  background: #f1f5f9;
+  color: #475569;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background: #e2e8f0;
+  }
+`;
+
+const ImageUploadInput = styled.input`
+  display: none;
+`;
+
+const EmailDisplay = styled.p`
+  margin: 0;
+  padding: 0.75rem;
+  background: #f8fafc;
+  border-radius: 0.5rem;
+  color: #64748b;
+  font-size: 0.9rem;
+`;
+
+const ModalActions = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #e2e8f0;
+`;
+
+const SaveProfileButton = styled.button`
+  background: linear-gradient(90deg, #34B89C, #6BC1E1);
+  color: white;
+  border: none;
+  padding: 0.7rem 1.5rem;
+  border-radius: 0.5rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(52, 184, 156, 0.3);
+  }
+`;
+
+/* ================== EXISTING RESPONSIVE STYLES ================== */
 const PageContainer = styled.div`
   display: flex;
   flex-direction: column;
@@ -395,6 +782,8 @@ const HeaderLeft = styled.div`
 
   @media (max-width: 768px) {
     gap: 1rem;
+    flex-direction: column;
+    align-items: flex-start;
   }
 `;
 
@@ -429,6 +818,7 @@ const MobileMenuButton = styled.button`
   
   @media (max-width: 768px) {
     display: block;
+    align-self: flex-end;
   }
 `;
 
@@ -463,6 +853,10 @@ const HamburgerIcon = styled.div`
 const WelcomeSection = styled.div`
   display: flex;
   flex-direction: column;
+
+  @media (max-width: 768px) {
+    order: 2;
+  }
 `;
 
 const WelcomeTitle = styled.h2`
@@ -498,53 +892,6 @@ const WelcomeSubtitle = styled.p`
 
   @media (max-width: 480px) {
     font-size: 0.8rem;
-  }
-`;
-
-const ProfileSection = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 0.8rem;
-
-  @media (max-width: 768px) {
-    justify-content: center;
-  }
-`;
-
-const ProfileIcon = styled.div`
-  font-size: 1.5rem;
-  width: 2.8rem;
-  height: 2.8rem;
-  border-radius: 50%;
-  background: #f0f9ff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  @media (max-width: 1024px) {
-    width: 2.5rem;
-    height: 2.5rem;
-    font-size: 1.3rem;
-  }
-
-  @media (max-width: 768px) {
-    width: 2.2rem;
-    height: 2.2rem;
-    font-size: 1.1rem;
-  }
-`;
-
-const ProfileName = styled.span`
-  font-weight: 600;
-  color: #2c3e50;
-  font-size: 1rem;
-  
-  @media (max-width: 1024px) {
-    font-size: 0.95rem;
-  }
-
-  @media (max-width: 768px) {
-    font-size: 0.9rem;
   }
 `;
 
@@ -1186,5 +1533,18 @@ const CancelEditButton = styled.button`
 
   @media (max-width: 480px) {
     width: 100%;
+  }
+`;
+
+const EditInput = styled.input`
+  padding: 0.9rem 1rem;
+  border-radius: 0.6rem;
+  border: 1px solid #ddd;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+  &:focus {
+    outline: none;
+    border-color: #6BC1E1;
+    box-shadow: 0 0 0 3px rgba(107, 193, 225, 0.2);
   }
 `;
