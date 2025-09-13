@@ -424,28 +424,6 @@ const GoogleIcon = styled.span`
   background-clip: text;
 `;
 
-const RoleBadge = styled.div<{ $role: string }>`
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  margin-top: 8px;
-  background: ${props =>
-    props.$role === "admin"
-      ? "rgba(231, 76, 60, 0.15)"
-      : props.$role === "veterinarian"
-      ? "rgba(52, 152, 219, 0.15)"
-      : "rgba(52, 184, 156, 0.15)"};
-  color: ${props =>
-    props.$role === "admin"
-      ? "#e74c3c"
-      : props.$role === "veterinarian"
-      ? "#3498db"
-      : "#34B89C"};
-`;
-
 export default function LoginPage() {
   const [isClient, setIsClient] = useState(false);
   const router = useRouter();
@@ -489,9 +467,18 @@ export default function LoginPage() {
       } else {
         router.push("/userdashboard");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       const authErr = err as AuthError;
-      setError(authErr.message || "Login failed. Please try again.");
+      // Show user-friendly error messages
+      if (authErr.code === "auth/invalid-credential" || authErr.code === "auth/wrong-password") {
+        setError("Wrong password. Please try again.");
+      } else if (authErr.code === "auth/user-not-found") {
+        setError("No account found with this email.");
+      } else if (authErr.code === "auth/invalid-email") {
+        setError("Invalid email address.");
+      } else {
+        setError("Login failed. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -537,7 +524,7 @@ export default function LoginPage() {
       } else {
         router.push("/userdashboard");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Google login error:", err);
       setError("Google login failed. Please try again.");
     } finally {
@@ -644,7 +631,7 @@ export default function LoginPage() {
             </GoogleButton>
 
             <SignUpPrompt>
-              Don't have an account? <a onClick={() => router.push("/createaccount")}>Sign up</a>
+              Don&apos;t have an account? <a onClick={() => router.push("/createaccount")}>Sign up</a>
             </SignUpPrompt>
           </AdditionalOptions>
         </RightPanel>

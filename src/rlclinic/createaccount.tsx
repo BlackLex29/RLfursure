@@ -92,7 +92,7 @@ const Card = styled.div`
     left: 0;
     right: 0;
     height: 8px;
-    background: linear-gradient(90deg, #34B89C, #6BC1E1, #2F99FD);
+    background: linear-gradient(90deg, #FF9E6D, #FFD166, #4ECDC4);
   }
   
   @media (max-width: 640px) {
@@ -625,7 +625,21 @@ export const Createaccount = () => {
   };
 
   // Send OTP Email Function via API Route
- const sendOTPEmail = async (email: string, otpCode: string, name: string): Promise<boolean> => {
+const sendOTPEmail = async (email: string, otpCode: string, name: string): Promise<boolean> => {
+  // For development/testing only - bypass actual API call
+  if (process.env.NODE_ENV === 'development') {
+    console.log('🛠️ Development mode: Simulating OTP email sent');
+    console.log('📧 To:', email);
+    console.log('🔢 OTP:', otpCode);
+    console.log('👤 Name:', name);
+    
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    return true;
+  }
+  
+  // Original API call for production
   try {
     const response = await fetch('/api/send-otp', {
       method: 'POST',
@@ -639,50 +653,19 @@ export const Createaccount = () => {
       }),
     });
 
-    // Read the response body once
-    let responseData;
-    const contentType = response.headers.get('content-type');
-    
-    try {
-      if (contentType && contentType.includes('application/json')) {
-        responseData = await response.json();
-      } else {
-        // If not JSON, read as text
-        const textData = await response.text();
-        responseData = { 
-          error: response.ok ? 'Unexpected response format' : `Server error: ${response.status}`,
-          details: textData 
-        };
-      }
-    } catch (parseError) {
-      throw new Error('Failed to parse server response');
-    }
-
-    // Handle response based on status
     if (!response.ok) {
-      const errorMessage = responseData.error || `HTTP Error: ${response.status}`;
-      throw new Error(errorMessage);
+      const errorText = await response.text();
+      throw new Error(errorText || `Server error: ${response.status}`);
     }
 
-    console.log('Email sent successfully:', responseData);
+    const result = await response.json();
+    return result.success;
     
-    // In development, show the OTP in console for testing
-    //if (process.env.NODE_ENV === 'development' && responseData.otp) {
-    //  console.log('🔐 Development OTP:', responseData.otp);
-    //}
-    
-    return true;
   } catch (error) {
     console.error('Error sending email:', error);
-    
-    if (error instanceof Error) {
-      throw error;
-    } else {
-      throw new Error('Failed to send OTP. Please check your internet connection and try again.');
-    }
+    throw error;
   }
 };
-
   // Database Functions
   const checkPhoneNumberExists = async (phone: string): Promise<boolean> => {
     try {
@@ -799,8 +782,7 @@ const handleSendOTP = async (): Promise<void> => {
   
   try {
     const otpCode = generateOTP();
-    // Remove this console.log in production
-    // console.log("Generated OTP:", otpCode);
+    // REMOVE this line: console.log("Generated OTP:", otpCode);
     
     otpRef.current = otpCode;
     otpEmailRef.current = formData.email.toLowerCase();
@@ -826,40 +808,38 @@ const handleSendOTP = async (): Promise<void> => {
     setLoading(false);
   }
 };
-
-  const handleResendOTP = async (): Promise<void> => {
-    if (resendCooldown > 0) return;
+const handleResendOTP = async (): Promise<void> => {
+  if (resendCooldown > 0) return;
+  
+  setOtpLoading(true);
+  setError("");
+  setInfo("");
+  
+  try {
+    const otpCode = generateOTP();
+    // REMOVE this line: console.log("Resending OTP:", otpCode);
     
-    setOtpLoading(true);
-    setError("");
-    setInfo("");
+    otpRef.current = otpCode;
     
-    try {
-      const otpCode = generateOTP();
-      console.log("Resending OTP:", otpCode);
-      
-      otpRef.current = otpCode;
-      
-      await sendOTPEmail(
-        formData.email, 
-        otpCode, 
-        `${formData.firstname} ${formData.lastname}`
-      );
-      
-      setInfo("📧 OTP resent successfully! Please check your inbox and spam folder.");
-      setResendCooldown(60);
-    } catch (err: unknown) {
-      console.error("Resend OTP error:", err);
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("Failed to resend OTP. Please try again.");
-      }
-    } finally {
-      setOtpLoading(false);
+    await sendOTPEmail(
+      formData.email, 
+      otpCode, 
+      `${formData.firstname} ${formData.lastname}`
+    );
+    
+    setInfo("📧 OTP resent successfully! Please check your inbox and spam folder.");
+    setResendCooldown(60);
+  } catch (err: unknown) {
+    console.error("Resend OTP error:", err);
+    if (err instanceof Error) {
+      setError(err.message);
+    } else {
+      setError("Failed to resend OTP. Please try again.");
     }
-  };
-
+  } finally {
+    setOtpLoading(false);
+  }
+};
   const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
     setError("");
@@ -1214,7 +1194,7 @@ const handleSendOTP = async (): Promise<void> => {
                     placeholder="Enter your last name"
                     value={formData.lastname}
                     onChange={handleInputChange}
-                                        minLength={2}
+                    minLength={2}
                     maxLength={50}
                     required
                     autoComplete="family-name"
@@ -1348,9 +1328,25 @@ const handleSendOTP = async (): Promise<void> => {
             <OTPVerificationCard>
               <VerificationTitle>Verify Your Email</VerificationTitle>
               <VerificationText>
-                We've sent a 6-digit verification code to your email address.
+                We&apos;ve sent a 6-digit verification code to your email address.
                 Please enter it below to complete your registration.
               </VerificationText>
+              
+              {/* Development OTP Display - Remove in production */}
+              {process.env.NODE_ENV === 'development' && otpRef.current && (
+                <div style={{
+                  background: '#fff3cd', 
+                  border: '1px solid #ffc107', 
+                  borderRadius: '8px', 
+                  padding: '15px', 
+                  margin: '15px 0', 
+                  textAlign: 'center'
+                }}>
+                  <strong style={{color: '#856404'}}>
+                    Development Mode - OTP: {otpRef.current}
+                  </strong>
+                </div>
+              )}
               
               <VerificationEmail>
                 📧 {formData.email}
@@ -1387,7 +1383,7 @@ const handleSendOTP = async (): Promise<void> => {
               </Form>
               
               <ResendText>
-                Didn't receive the code?{" "}
+                Didn&apos;t receive the code?{" "}
                 {resendCooldown > 0 ? (
                   `Resend available in ${resendCooldown}s`
                 ) : (
