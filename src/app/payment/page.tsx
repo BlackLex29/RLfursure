@@ -1,11 +1,9 @@
 import React,{ Suspense } from "react";
-import Payment from "@/rlclinic/payment";
+import PaymentForm from "@/rlclinic/payment";
 
-export default function Home() {
-  return ( <Suspense fallback={<div>Loading.....</div>}>
-      
-      <Payment/>
-    
-  </Suspense>
-    );  
-  }
+export default function PaymentPage() {
+  return ( <Suspense fallback={<div>Loading...</div>}>
+      <PaymentForm />
+    </Suspense>
+  );  
+}

@@ -1,718 +1,368 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState } from "react";
+import styled from "styled-components";
+import { useRouter, useSearchParams } from "next/navigation";
+import { db } from "../firebaseConfig";
+import { doc, updateDoc } from "firebase/firestore";
 
-const PaymentForm = () => {
-  const [paymentMethod, setPaymentMethod] = useState("Cash");
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [error, setError] = useState("");
-  const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [showErrorModal, setShowErrorModal] = useState(false);
-  const [modalMessage, setModalMessage] = useState("");
+const PaymentForm: React.FC = () => {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const appointmentId = searchParams.get("appointmentId");
 
-  // Check payment status for popup approach
-  const checkPaymentStatus = useCallback(async (paymentIntentId: string) => {
-    try {
-      const res = await fetch(`/api/check-payment-status?payment_intent_id=${paymentIntentId}`);
-      const data = await res.json();
-      
-      if (data.status === 'succeeded') {
-        setModalMessage("Payment successful! Thank you for your order.");
-        setShowSuccessModal(true);
-      } else if (data.status === 'failed') {
-        setModalMessage("Payment failed. Please try again.");
-        setShowErrorModal(true);
-      }
-      
-      // Clear the payment intent ID from storage
-      sessionStorage.removeItem('paymentIntentId');
-    } catch (error) {
-      console.error("Error checking payment status:", error);
-      setModalMessage("Error verifying payment status. Please contact support.");
-      setShowErrorModal(true);
-    }
-  }, []);
+  const [paymentMethod, setPaymentMethod] = useState<"Cash" | "Online" | "">("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Handle payment status when returning from payment gateway
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const paymentStatus = urlParams.get('payment_status');
-    
-    if (paymentStatus === 'success') {
-      setModalMessage("Payment successful! Thank you for your order.");
-      setShowSuccessModal(true);
-      window.history.replaceState({}, document.title, window.location.pathname);
-    } else if (paymentStatus === 'failed') {
-      setModalMessage("Payment failed. Please try again or choose another payment method.");
-      setShowErrorModal(true);
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-
-    // Check for payment intent ID in session storage (for popup approach)
-    const paymentIntentId = sessionStorage.getItem('paymentIntentId');
-    if (paymentIntentId) {
-      checkPaymentStatus(paymentIntentId);
-    }
-  }, [router, checkPaymentStatus]);
-
-  const handlePaymentSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handlePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsProcessing(true);
-    setError("");
-
-    if (paymentMethod === "Cash") {
-      // Simulate processing time
-      setTimeout(() => {
-        setModalMessage("Cash payment selected. Your order has been confirmed!");
-        setShowSuccessModal(true);
-        setIsProcessing(false);
-      }, 1500);
-    } else {
-      try {
-        // Determine payment method type for PayMongo
-        let paymentMethodType = "card";
-        if (paymentMethod === "GCash") paymentMethodType = "gcash";
-        if (paymentMethod === "Maya") paymentMethodType = "paymaya";
-        
-        const res = await fetch("/api/create-payment-intent", {
-          method: "POST",
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            amount: 10000,
-            description: "Order Payment",
-            payment_method_type: paymentMethodType,
-            return_url: `${window.location.origin}/userdashboard`
-          })
-        });
-
-        const responseData = await res.json();
-
-        if (!res.ok) {
-          throw new Error(
-            `Payment error: ${res.status} - ${responseData.error || 'Unknown error'}. ` +
-            `${responseData.details ? JSON.stringify(responseData.details) : ''}`
-          );
-        }
-
-        if (!responseData || Object.keys(responseData).length === 0) {
-          throw new Error("Empty response received from server");
-        }
-
-        const checkoutUrl = responseData?.data?.attributes?.checkout_url;
-
-        if (checkoutUrl) {
-          // Store payment intent ID for status checking
-          if (responseData.data.id) {
-            sessionStorage.setItem('paymentIntentId', responseData.data.id);
-          }
-          
-          // Redirect directly to payment gateway
-          window.location.href = checkoutUrl;
-        } else {
-          setModalMessage("Failed to initialize online payment. No checkout URL received.");
-          setShowErrorModal(true);
-          console.error("PayMongo Response:", responseData);
-        }
-      } catch (err) {
-        console.error("Payment error:", err);
-        setModalMessage((err as Error).message || "Error starting online payment. Please try again or use cash payment.");
-        setShowErrorModal(true);
-      } finally {
-        setIsProcessing(false);
-      }
+    
+    if (!appointmentId) {
+      alert("No appointment linked!");
+      return;
     }
-  };
+    if (!paymentMethod) {
+      alert("Please select a payment method.");
+      return;
+    }
 
-  const handlePaymentMethodChange = (method: string) => {
-    setPaymentMethod(method);
-    setError("");
-  };
+    setIsSubmitting(true);
+    
+    try {
+      await updateDoc(doc(db, "appointments", appointmentId), {
+        paymentMethod,
+        status: "Payment Completed",
+      });
 
-  const handleModalClose = () => {
-    setShowSuccessModal(false);
-    setShowErrorModal(false);
-    if (showSuccessModal) {
-      router.push('/userdashboard');
+      alert(`Payment method ${paymentMethod} saved successfully!`);
+
+      if (paymentMethod === "Cash") {
+        router.push("/userdashboard");
+      } else {
+        router.push("/online-payment");
+      }
+    } catch (error) {
+      console.error("Error saving payment method:", error);
+      alert("Failed to save payment method.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="payment-container">
-      <div className="payment-header">
-        <h2>Choose Payment Method</h2>
-      </div>
-      
-      <div className="payment-content">
-        <form onSubmit={handlePaymentSubmit}>
-          <div className="payment-methods">
-            <label className={`payment-option ${paymentMethod === "Cash" ? "selected" : ""}`}>
-              <input
+    <Wrapper>
+      <Card>
+        <Header>
+          <HeaderIcon>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M4.5 3.75a3 3 0 00-3 3v.75h21v-.75a3 3 0 00-3-3h-15z" />
+              <path fillRule="evenodd" d="M22.5 9.75h-21v7.5a3 3 0 003 3h15a3 3 0 003-3v-7.5zm-18 3.75a.75.75 0 01.75-.75h6a.75.75 0 010 1.5h-6a.75.75 0 01-.75-.75zm.75 2.25a.75.75 0 000 1.5h3a.75.75 0 000-1.5h-3z" clipRule="evenodd" />
+            </svg>
+          </HeaderIcon>
+          <Title>Choose Payment Method</Title>
+          <Subtitle>Please select your preferred option</Subtitle>
+        </Header>
+        
+        <Form onSubmit={handlePaymentSubmit}>
+          <OptionWrapper>
+            <RadioLabel selected={paymentMethod === "Cash"}>
+              <RadioInput
                 type="radio"
+                name="payment"
                 value="Cash"
                 checked={paymentMethod === "Cash"}
-                onChange={() => handlePaymentMethodChange("Cash")}
-                className="sr-only"
+                onChange={() => setPaymentMethod("Cash")}
               />
-              <span className="checkmark"></span>
-              <div className="payment-icon">
-                <i className="fas fa-money-bill-wave"></i>
-              </div>
-              <div className="payment-details">
-                <h3>Cash Payment</h3>
-                <p>Pay with cash when your order arrives</p>
-              </div>
-            </label>
-            
-            <label className={`payment-option ${paymentMethod === "Card" ? "selected" : ""}`}>
-              <input
+              <PaymentOption>
+                <PaymentIcon>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 7.5a2.25 2.25 0 100 4.5 2.25 2.25 0 000-4.5z" />
+                    <path fillRule="evenodd" d="M1.5 4.875C1.5 3.839 2.34 3 3.375 3h17.25c1.035 0 1.875.84 1.875 1.875v9.75c0 1.036-.84 1.875-1.875 1.875H3.375A1.875 1.875 0 011.5 14.625v-9.75zM8.25 9.75a3.75 3.75 0 117.5 0 3.75 3.75 0 01-7.5 0zM18.75 9a.75.75 0 00-.75.75v.008c0 .414.336.75.75.75h.008a.75.75 0 00.75-.75V9.75a.75.75 0 00-.75-.75h-.008zM4.5 9.75A.75.75 0 015.25 9h.008a.75.75 0 01.75.75v.008a.75.75 0 01-.75.75H5.25a.75.75 0 01-.75-.75V9.75z" clipRule="evenodd" />
+                  </svg>
+                </PaymentIcon>
+                <PaymentText>
+                  <PaymentTitle>Cash Payment</PaymentTitle>
+                  <PaymentDescription>Pay with cash at the clinic</PaymentDescription>
+                </PaymentText>
+              </PaymentOption>
+            </RadioLabel>
+
+            <RadioLabel selected={paymentMethod === "Online"}>
+              <RadioInput
                 type="radio"
-                value="Card"
-                checked={paymentMethod === "Card"}
-                onChange={() => handlePaymentMethodChange("Card")}
-                className="sr-only"
+                name="payment"
+                value="Online"
+                checked={paymentMethod === "Online"}
+                onChange={() => setPaymentMethod("Online")}
               />
-              <span className="checkmark"></span>
-              <div className="payment-icon">
-                <i className="fas fa-credit-card"></i>
-              </div>
-              <div className="payment-details">
-                <h3>Credit/Debit Card</h3>
-                <p>Pay securely with your card</p>
-              </div>
-            </label>
-            
-            <label className={`payment-option ${paymentMethod === "GCash" ? "selected" : ""}`}>
-              <input
-                type="radio"
-                value="GCash"
-                checked={paymentMethod === "GCash"}
-                onChange={() => handlePaymentMethodChange("GCash")}
-                className="sr-only"
-              />
-              <span className="checkmark"></span>
-              <div className="payment-icon">
-                <i className="fas fa-mobile-alt"></i>
-              </div>
-              <div className="payment-details">
-                <h3>GCash</h3>
-                <p>Pay using your GCash wallet</p>
-              </div>
-            </label>
-            
-            <label className={`payment-option ${paymentMethod === "Maya" ? "selected" : ""}`}>
-              <input
-                type="radio"
-                value="Maya"
-                checked={paymentMethod === "Maya"}
-                onChange={() => handlePaymentMethodChange("Maya")}
-                className="sr-only"
-              />
-              <span className="checkmark"></span>
-              <div className="payment-icon">
-                <i className="fas fa-wallet"></i>
-              </div>
-              <div className="payment-details">
-                <h3>Maya</h3>
-                <p>Pay using your Maya wallet</p>
-              </div>
-            </label>
-          </div>
-          
-          {error && (
-            <div className="error-message">
-              <i className="fas fa-exclamation-circle"></i>
-              <span>{error}</span>
-              <button 
-                type="button" 
-                className="error-close"
-                onClick={() => setError("")}
-                aria-label="Close error message"
-              >
-                <i className="fas fa-times"></i>
-              </button>
-            </div>
-          )}
-          
-          <button
-            type="submit"
-            className={`payment-btn ${isProcessing ? "processing" : ""}`}
-            disabled={isProcessing}
-          >
-            {isProcessing ? (
-              <>
-                <i className="fas fa-spinner fa-spin"></i>
-                Processing...
-              </>
-            ) : (
-              <>
-                <i className="fas fa-arrow-right"></i>
-                Proceed to Payment
-              </>
-            )}
-          </button>
-          
-          <div className="security-note">
-            <i className="fas fa-lock"></i>
-            <span>Your payment details are secure and encrypted</span>
-          </div>
-        </form>
-      </div>
+              <PaymentOption>
+                <PaymentIcon>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 1.5a.75.75 0 01.75.75V4.5a.75.75 0 01-1.5 0V2.25A.75.75 0 0112 1.5zM5.636 4.136a.75.75 0 011.06 0l1.592 1.591a.75.75 0 01-1.061 1.06l-1.591-1.59a.75.75 0 010-1.061zm12.728 0a.75.75 0 010 1.06l-1.591 1.592a.75.75 0 01-1.06-1.061l1.59-1.591a.75.75 0 011.061 0zm-6.816 4.496a.75.75 0 01.82.311l5.228 7.917a.75.75 0 01-.777 1.148l-2.097-.43 1.045 3.9a.75.75 0 01-1.45.388l-1.044-3.899-1.601 1.42a.75.75 0 01-1.247-.606l.569-9.47a.75.75 0 01.554-.68zM3 10.5a.75.75 0 01.75-.75H6a.75.75 0 010 1.5H3.75A.75.75 0 013 10.5zm14.25 0a.75.75 0 01.75-.75h2.25a.75.75 0 010 1.5H18a.75.75 0 01-.75-.75zm-8.962 3.712a.75.75 0 010 1.061l-1.592 1.591a.75.75 0 01-1.061-1.06l1.591-1.592a.75.75 0 011.06 0z" />
+                  </svg>
+                </PaymentIcon>
+                <PaymentText>
+                  <PaymentTitle>Online Payment</PaymentTitle>
+                  <PaymentDescription>Pay securely with your card</PaymentDescription>
+                </PaymentText>
+              </PaymentOption>
+            </RadioLabel>
+          </OptionWrapper>
 
-      {/* Success Modal */}
-      {showSuccessModal && (
-        <div className="modal-overlay" onClick={handleModalClose}>
-          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-icon success">
-                <i className="fas fa-check-circle"></i>
-              </div>
-              <h3>Payment Successful</h3>
-              <button className="modal-close" onClick={handleModalClose}>
-                <i className="fas fa-times"></i>
-              </button>
-            </div>
-            <div className="modal-content">
-              <p>{modalMessage}</p>
-            </div>
-            <div className="modal-actions">
-              <button className="modal-btn confirm" onClick={handleModalClose}>
-                Continue to Dashboard
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Error Modal */}
-      {showErrorModal && (
-        <div className="modal-overlay" onClick={handleModalClose}>
-          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-icon error">
-                <i className="fas fa-exclamation-circle"></i>
-              </div>
-              <h3>Payment Error</h3>
-              <button className="modal-close" onClick={handleModalClose}>
-                <i className="fas fa-times"></i>
-              </button>
-            </div>
-            <div className="modal-content">
-              <p>{modalMessage}</p>
-            </div>
-            <div className="modal-actions">
-              <button className="modal-btn confirm" onClick={handleModalClose}>
-                Try Again
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <style>{`
-        .payment-container {
-          width: 100%;
-          max-width: 500px;
-          margin: 2rem auto;
-          background: white;
-          border-radius: 16px;
-          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-          overflow: hidden;
-        }
-        
-        .payment-header {
-          background: #4a6cf7;
-          color: white;
-          padding: 1.5rem;
-          text-align: center;
-        }
-        
-        .payment-header h2 {
-          font-weight: 600;
-          font-size: 1.8rem;
-          margin: 0;
-        }
-        
-        .payment-content {
-          padding: 1.5rem;
-        }
-        
-        .payment-methods {
-          display: flex;
-          flex-direction: column;
-          gap: 1rem;
-          margin-bottom: 1.5rem;
-        }
-        
-        .payment-option {
-          border: 2px solid #e6e6e6;
-          border-radius: 12px;
-          padding: 1.2rem;
-          cursor: pointer;
-          transition: all 0.3s ease;
-          display: flex;
-          align-items: center;
-          gap: 1rem;
-          position: relative;
-        }
-        
-        .payment-option:hover {
-          border-color: #4a6cf7;
-          background-color: #f8f9ff;
-        }
-        
-        .payment-option.selected {
-          border-color: #4a6cf7;
-          background-color: #f0f4ff;
-        }
-        
-        .sr-only {
-          position: absolute;
-          width: 1px;
-          height: 1px;
-          padding: 0;
-          margin: -1px;
-          overflow: hidden;
-          clip: rect(0, 0, 0, 0);
-          white-space: nowrap;
-          border: 0;
-        }
-        
-        .checkmark {
-          width: 22px;
-          height: 22px;
-          border: 2px solid #ccc;
-          border-radius: 50%;
-          display: inline-flex;
-          justify-content: center;
-          align-items: center;
-          transition: all 0.3s ease;
-          flex-shrink: 0;
-        }
-        
-        .payment-option.selected .checkmark {
-          border-color: #4a6cf7;
-          background-color: #4a6cf7;
-        }
-        
-        .checkmark:after {
-          content: "✓";
-          color: white;
-          font-size: 14px;
-          display: none;
-        }
-        
-        .payment-option.selected .checkmark:after {
-          display: block;
-        }
-        
-        .payment-icon {
-          font-size: 1.5rem;
-          width: 40px;
-          text-align: center;
-          color: #4a6cf7;
-          flex-shrink: 0;
-        }
-        
-        .payment-details {
-          flex: 1;
-        }
-        
-        .payment-details h3 {
-          font-size: 1.1rem;
-          margin-bottom: 0.3rem;
-          color: #333;
-        }
-        
-        .payment-details p {
-          color: #666;
-          font-size: 0.9rem;
-          margin: 0;
-        }
-        
-        .payment-btn {
-          width: 100%;
-          padding: 1rem;
-          background: #4a6cf7;
-          color: white;
-          border: none;
-          border-radius: 12px;
-          font-size: 1.1rem;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.3s ease;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          gap: 0.5rem;
-        }
-        
-        .payment-btn:hover:not(:disabled) {
-          background: #3a5cd8;
-          transform: translateY(-2px);
-          box-shadow: 0 5px 15px rgba(58, 92, 216, 0.3);
-        }
-        
-        .payment-btn:active {
-          transform: translateY(0);
-        }
-        
-        .payment-btn:disabled {
-          opacity: 0.8;
-          cursor: not-allowed;
-        }
-        
-        .payment-btn.processing {
-          background: #3a5cd8;
-        }
-        
-        .error-message {
-          background-color: #fee;
-          color: #c33;
-          padding: 0.8rem;
-          border-radius: 8px;
-          margin-bottom: 1rem;
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          border-left: 4px solid #c33;
-          position: relative;
-        }
-        
-        .error-close {
-          background: none;
-          border: none;
-          color: #c33;
-          cursor: pointer;
-          margin-left: auto;
-          padding: 0.2rem;
-          border-radius: 4px;
-        }
-        
-        .error-close:hover {
-          background-color: rgba(204, 51, 51, 0.1);
-        }
-        
-        .security-note {
-          text-align: center;
-          margin-top: 1.2rem;
-          color: #666;
-          font-size: 0.9rem;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          gap: 0.5rem;
-        }
-        
-        /* Modal Styles */
-        .modal-overlay {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background-color: rgba(0, 0, 0, 0.6);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 1000;
-          padding: 1rem;
-          animation: fadeIn 0.3s ease-out;
-        }
-        
-        .modal-container {
-          background: white;
-          border-radius: 16px;
-          width: 100%;
-          max-width: 450px;
-          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-          overflow: hidden;
-          animation: slideUp 0.3s ease-out;
-        }
-        
-        .modal-header {
-          display: flex;
-          align-items: center;
-          padding: 1.5rem;
-          border-bottom: 1px solid #eaeaea;
-          position: relative;
-        }
-        
-        .modal-icon {
-          width: 40px;
-          height: 40px;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          margin-right: 1rem;
-          font-size: 1.5rem;
-        }
-        
-        .modal-icon.success {
-          background-color: #e7f6e9;
-          color: #28a745;
-        }
-        
-        .modal-icon.error {
-          background-color: #feeceb;
-          color: #dc3545;
-        }
-        
-        .modal-header h3 {
-          margin: 0;
-          font-size: 1.5rem;
-          font-weight: 600;
-          color: #2c3e50;
-        }
-        
-        .modal-close {
-          position: absolute;
-          top: 1rem;
-          right: 1rem;
-          background: none;
-          border: none;
-          font-size: 1.2rem;
-          cursor: pointer;
-          color: #666;
-          padding: 0.2rem;
-          border-radius: 4px;
-        }
-        
-        .modal-close:hover {
-          background-color: #f5f5f5;
-        }
-        
-        .modal-content {
-          padding: 1.5rem;
-        }
-        
-        .modal-content p {
-          margin: 0;
-          font-size: 1.1rem;
-          line-height: 1.6;
-          color: #555;
-          text-align: center;
-        }
-        
-        .modal-actions {
-          padding: 0 1.5rem 1.5rem;
-          display: flex;
-          justify-content: center;
-        }
-        
-        .modal-btn {
-          padding: 0.8rem 2rem;
-          border: none;
-          border-radius: 8px;
-          font-size: 1rem;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-        
-        .modal-btn.confirm {
-          background: #4a6cf7;
-          color: white;
-        }
-        
-        .modal-btn.confirm:hover {
-          background: #3a5cd8;
-          transform: translateY(-2px);
-          box-shadow: 0 4px 10px rgba(58, 92, 216, 0.3);
-        }
-        
-        /* Animations */
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        
-        @keyframes slideUp {
-          from { 
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to { 
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        
-        /* Responsive adjustments */
-        @media (max-width: 576px) {
-          .payment-container {
-            margin: 1rem;
-            max-width: none;
-          }
-          
-          .payment-header {
-            padding: 1.2rem;
-          }
-          
-          .payment-header h2 {
-            font-size: 1.5rem;
-          }
-          
-          .payment-content {
-            padding: 1.2rem;
-          }
-          
-          .payment-option {
-            padding: 1rem;
-          }
-          
-          .modal-container {
-            margin: 1rem;
-          }
-          
-          .modal-header {
-            padding: 1.2rem;
-          }
-          
-          .modal-content {
-            padding: 1.2rem;
-          }
-        }
-        
-        @media (max-width: 400px) {
-          .payment-option {
-            flex-direction: column;
-            text-align: center;
-            gap: 0.7rem;
-          }
-          
-          .payment-details h3 {
-            font-size: 1rem;
-          }
-          
-          .payment-details p {
-            font-size: 0.8rem;
-          }
-          
-          .payment-btn {
-            padding: 0.8rem;
-            font-size: 1rem;
-          }
-          
-          .modal-header {
-            flex-direction: column;
-            text-align: center;
-            gap: 0.8rem;
-          }
-          
-          .modal-icon {
-            margin-right: 0;
-          }
-        }
-      `}</style>
-
-      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-    </div>
+          <ButtonGroup>
+            <CancelButton 
+              type="button" 
+              onClick={() => router.back()}
+            >
+              Go Back
+            </CancelButton>
+            <SubmitButton 
+              type="submit" 
+              disabled={!paymentMethod || isSubmitting}
+            >
+              {isSubmitting ? "Processing..." : "Proceed"}
+            </SubmitButton>
+          </ButtonGroup>
+        </Form>
+      </Card>
+    </Wrapper>
   );
 };
 
 export default PaymentForm;
+
+// 🌈 Styled Components
+const Wrapper = styled.div`
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: linear-gradient(160deg, #36d1dc 0%, #5b86e5 100%);
+  padding: 20px;
+
+  @media (max-width: 768px) {
+    padding: 16px;
+    align-items: flex-start;
+  }
+`;
+
+const Card = styled.div`
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+  width: 100%;
+  max-width: 500px;
+  overflow: hidden;
+  animation: fadeIn 0.5s ease;
+  
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (max-width: 768px) {
+    border-radius: 20px;
+    max-width: 100%;
+  }
+`;
+
+const Header = styled.div`
+  background: linear-gradient(135deg, #36d1dc 0%, #5b86e5 100%);
+  padding: 32px 20px;
+  text-align: center;
+  position: relative;
+
+  @media (max-width: 768px) {
+    padding: 28px 16px;
+  }
+`;
+
+const HeaderIcon = styled.div`
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 16px;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  @media (max-width: 768px) {
+    width: 40px;
+    height: 40px;
+    margin-bottom: 12px;
+  }
+`;
+
+const Title = styled.h2`
+  color: white;
+  font-size: 28px;
+  font-weight: 700;
+  margin: 0 0 8px 0;
+
+  @media (max-width: 768px) {
+    font-size: 24px;
+  }
+`;
+
+const Subtitle = styled.p`
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 16px;
+  margin: 0;
+
+  @media (max-width: 768px) {
+    font-size: 14px;
+  }
+`;
+
+const Form = styled.form`
+  padding: 10px 0;
+`;
+
+const OptionWrapper = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 32px 24px;
+
+  @media (max-width: 768px) {
+    margin: 24px 16px;
+    gap: 12px;
+  }
+`;
+
+const RadioLabel = styled.label<{ selected: boolean }>`
+  display: block;
+  padding: 20px;
+  border-radius: 16px;
+  border: 2px solid ${props => props.selected ? '#5b86e5' : '#e2e8f0'};
+  background: ${props => props.selected ? '#f0f9ff' : '#ffffff'};
+  transition: all 0.3s ease;
+  cursor: pointer;
+  position: relative;
+
+  &:hover {
+    border-color: #5b86e5;
+    background: #f7fbfe;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(91, 134, 229, 0.15);
+  }
+
+  @media (max-width: 768px) {
+    padding: 16px;
+  }
+`;
+
+const RadioInput = styled.input`
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+`;
+
+const PaymentOption = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 16px;
+`;
+
+const PaymentIcon = styled.div`
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #36d1dc 0%, #5b86e5 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  @media (max-width: 768px) {
+    width: 40px;
+    height: 40px;
+  }
+`;
+
+const PaymentText = styled.div`
+  flex: 1;
+`;
+
+const PaymentTitle = styled.div`
+  font-size: 18px;
+  font-weight: 600;
+  color: #2d3748;
+  margin-bottom: 4px;
+
+  @media (max-width: 768px) {
+    font-size: 16px;
+  }
+`;
+
+const PaymentDescription = styled.div`
+  font-size: 14px;
+  color: #718096;
+
+  @media (max-width: 768px) {
+    font-size: 13px;
+  }
+`;
+
+const ButtonGroup = styled.div`
+  display: flex;
+  gap: 16px;
+  margin: 32px 24px 24px;
+
+  @media (max-width: 768px) {
+    flex-direction: column-reverse;
+    margin: 24px 16px 20px;
+    gap: 12px;
+  }
+`;
+
+const CancelButton = styled.button`
+  flex: 1;
+  padding: 16px;
+  border-radius: 12px;
+  border: 2px solid #5b86e5;
+  background: white;
+  color: #5b86e5;
+  font-weight: 600;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+
+  &:hover {
+    background: #f7f9ff;
+    transform: translateY(-2px);
+  }
+
+  @media (max-width: 768px) {
+    padding: 14px;
+  }
+`;
+
+const SubmitButton = styled.button`
+  flex: 1;
+  padding: 16px;
+  border-radius: 12px;
+  border: none;
+  background: linear-gradient(135deg, #36d1dc 0%, #5b86e5 100%);
+  color: white;
+  font-weight: 600;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+
+  &:hover:not(:disabled) {
+    opacity: 0.9;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px rgba(54, 209, 220, 0.3);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  @media (max-width: 768px) {
+    padding: 14px;
+  }
+`;

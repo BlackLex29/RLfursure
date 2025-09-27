@@ -91,7 +91,10 @@ const ManageAppointments: React.FC = () => {
   const handleStatusUpdate = async (id: string, status: string) => {
     try {
       const docRef = doc(db, "appointments", id);
-      await updateDoc(docRef, { status });
+      await updateDoc(docRef, { 
+        status,
+        completedAt: status === "Done" || status === "No Show" ? new Date().toISOString() : null
+      });
     } catch (error) {
       console.error("Error updating status:", error);
     }
@@ -245,7 +248,8 @@ const ManageAppointments: React.FC = () => {
                 let statusColor = "#ffc107"; // Pending
                 if (appt.status === "Confirmed") statusColor = "#28a745";
                 if (appt.status === "Cancelled") statusColor = "#dc3545";
-                if (appt.status === "Done") statusColor = "#6c757d";
+                if (appt.status === "Done") statusColor = "#28a745"; // Green for Done
+                if (appt.status === "No Show") statusColor = "#dc3545"; // Red for No Show
 
                 let paymentColor = "#555";
                 if (appt.paymentMethod === "Cash") paymentColor = "#ff7f50";
@@ -285,23 +289,23 @@ const ManageAppointments: React.FC = () => {
                     </CardContent>
                     
                     <ActionButtons>
-                      <ActionButton
-                        onClick={() => handleStatusUpdate(appt.id, "Confirmed")}
-                        bg="#28a745"
-                      >
-                        ✅ Confirm
-                      </ActionButton>
-                      <ActionButton
-                        onClick={() => handleStatusUpdate(appt.id, "Done")}
-                        bg="#6c757d"
+                      <ActionButton 
+                        onClick={() => handleStatusUpdate(appt.id, "Done")} 
+                        bg="#28a745" // Green for Done
                       >
                         ✔️ Done
                       </ActionButton>
-                      <ActionButton
-                        onClick={() => handleDelete(appt.id)}
-                        bg="#dc3545"
+                      <ActionButton 
+                        onClick={() => handleStatusUpdate(appt.id, "No Show")} 
+                        bg="#dc3545" // Red for No Show
                       >
-                        ❌ Cancel
+                        ❌ No Show
+                      </ActionButton>
+                      <ActionButton 
+                        onClick={() => handleDelete(appt.id)} 
+                        bg="#6c757d" // Gray for Cancel
+                      >
+                        🗑️ Cancel
                       </ActionButton>
                     </ActionButtons>
                   </AppointmentCard>

@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import styled, { createGlobalStyle } from "styled-components";
 import { useRouter } from "next/navigation";
+import Link from 'next/link';
 import { 
   doc, 
   setDoc, 
@@ -102,25 +103,25 @@ const Card = styled.div`
 
 // Header Styles
 const LogoContainer = styled.div`
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   margin-bottom: 30px;
+  cursor: pointer;
 `;
 
-const Logo = styled.div`
-  font-size: 48px;
-  margin-bottom: 10px;
-`;
-
-const LogoText = styled.h1`
-  color: #4ECDC4;
-  font-size: 28px;
-  font-weight: 700;
-  margin: 0;
+const LogoImage = styled.img`
+  width: 100px;
+  height:100px;
+  object-fit: contain;
   
   @media (max-width: 640px) {
-    font-size: 24px;
+    width: 40px;
+    height: 40px;
   }
 `;
+
 
 const Title = styled.h2`
   color: #2D3748;
@@ -625,22 +626,11 @@ export const Createaccount = () => {
   };
 
   // Send OTP Email Function via API Route
-const sendOTPEmail = async (email: string, otpCode: string, name: string): Promise<boolean> => {
-  // For development/testing only - bypass actual API call
-  if (process.env.NODE_ENV === 'development') {
-    console.log('🛠️ Development mode: Simulating OTP email sent');
-    console.log('📧 To:', email);
-    console.log('🔢 OTP:', otpCode);
-    console.log('👤 Name:', name);
-    
-    // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    return true;
-  }
-  
-  // Original API call for production
+// Ultra-safe version with no type errors
+const sendOTPEmail = async (email: string, name: string): Promise<{ success: boolean; otp?: string }> => {
   try {
+    console.log('🔄 Sending OTP to:', email);
+    
     const response = await fetch('/api/send-otp', {
       method: 'POST',
       headers: {
@@ -648,22 +638,51 @@ const sendOTPEmail = async (email: string, otpCode: string, name: string): Promi
       },
       body: JSON.stringify({ 
         email: email.toLowerCase(), 
-        otpCode, 
         name: sanitizeInput(name) 
       }),
     });
 
+    const responseData = await response.json();
+    
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || `Server error: ${response.status}`);
+      // Very safe error message extraction
+      let errorMessage = `Server error: ${response.status}`;
+      
+      if (responseData && typeof responseData === 'object') {
+        if (typeof responseData.error === 'string') {
+          errorMessage = responseData.error;
+        } else if (typeof responseData.message === 'string') {
+          errorMessage = responseData.message;
+        }
+      }
+      
+      throw new Error(errorMessage);
     }
 
-    const result = await response.json();
-    return result.success;
+    // Check if response has otp field
+    const otp = (responseData && typeof responseData === 'object' && typeof responseData.otp === 'string') 
+      ? responseData.otp 
+      : undefined;
+
+    return { 
+      success: true, 
+      otp: otp 
+    };
     
   } catch (error) {
-    console.error('Error sending email:', error);
-    throw error;
+    console.error('❌ OTP Send Error:', error);
+    
+    // Handle any type of error safely
+    if (error instanceof Error) {
+      throw error; // Just re-throw the original error
+    }
+    
+    // Handle non-Error objects
+    if (typeof error === 'string') {
+      throw new Error(error);
+    }
+    
+    throw new Error('Failed to send OTP. Please try again.');
   }
 };
   // Database Functions
@@ -782,7 +801,6 @@ const handleSendOTP = async (): Promise<void> => {
   
   try {
     const otpCode = generateOTP();
-    // REMOVE this line: console.log("Generated OTP:", otpCode);
     
     otpRef.current = otpCode;
     otpEmailRef.current = formData.email.toLowerCase();
@@ -817,7 +835,6 @@ const handleResendOTP = async (): Promise<void> => {
   
   try {
     const otpCode = generateOTP();
-    // REMOVE this line: console.log("Resending OTP:", otpCode);
     
     otpRef.current = otpCode;
     
@@ -1154,10 +1171,20 @@ const handleResendOTP = async (): Promise<void> => {
           <PetDecoration>🐕</PetDecoration>
           <PetDecoration>🐈</PetDecoration>
           
-          <LogoContainer>
-            <Logo>🐾</Logo>
-            <LogoText>Fursureclinic</LogoText>
-          </LogoContainer>
+          {/* Logo Section with Image */}
+          <Link href="/" passHref>
+            <LogoContainer>
+             <LogoImage 
+              src="https://scontent.fmnl13-4.fna.fbcdn.net/v/t39.30808-6/308051699_1043145306431767_6902051210877649285_n.jpg?_nc_cat=108&ccb=1-7&_nc_sid=6ee11a&_nc_eui2=AeH7C3PaObQLeqOOxA3pTYw1U6XSiAPBS_lTpdKIA8FL-aWJ6pOqX-tCsYAmdUOHVzzxg-T9gjpVH_1PkEO0urYZ&_nc_ohc=c0pRYSw4KrsQ7kNvwHE5hTL&_nc_oc=AdnvMYaefSnLD_BwDZly3HzWrlUVGkQ679uNFhrON8Jd2UeyPFELDF-ZgFiqTpl5QFA&_nc_zt=23&_nc_ht=scontent.fmnl13-4.fna&_nc_gid=GOsLrMoCfHtNYu3UarKtXQ&oh=00_AfYkkXSbQmUWBw5G7PQZzCYGBVqYBsWLo3ZYe87ifPKIyA&oe=68D30859" 
+              alt="FurSureCare Logo" 
+  onError={(e) => {
+    // Fallback if image fails to load
+    const target = e.target as HTMLImageElement;
+    target.style.display = 'none';
+  }}
+/>
+            </LogoContainer>
+          </Link>
           
           <Title>Create Account</Title>
           <Subtitle>Join our pet-loving community</Subtitle>
@@ -1224,206 +1251,206 @@ const handleResendOTP = async (): Promise<void> => {
                 <Label htmlFor="phone">Phone Number</Label>
                 <Input
                   id="phone"
-                  name="phone"
-                  type="tel"
-                  placeholder="09XXXXXXXXX (11 digits)"
-                  value={formData.phone}
-                  onChange={handleInputChange}
-                  required
-                  autoComplete="tel"
-                  maxLength={11}
-                />
-                {phoneError && <ErrorText>{phoneError}</ErrorText>}
-              </InputGroup>
-              
-              <InputGroup>
-                <Label htmlFor="password">Password</Label>
-                <PasswordInputContainer>
-                  <Input
-                    id="password"
-                    name="password"
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Create a strong password"
-                    value={formData.password}
-                    onChange={handleInputChange}
-                    onFocus={handlePasswordFocus}
-                    onBlur={handlePasswordBlur}
-                    required
-                    autoComplete="new-password"
-                  />
-                  <PasswordToggle 
-                    type="button" 
-                    onClick={togglePasswordVisibility}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                  >
-                    {showPassword ? "🔓" : "🔒"}
-                  </PasswordToggle>
-                </PasswordInputContainer>
-                
-                {showPasswordRules && (
-                  <PasswordRules>
-                    <RuleText>Password must contain:</RuleText>
-                    <RuleItem valid={passwordErrors.hasMinLength}>
-                      At least 8 characters
-                    </RuleItem>
-                    <RuleItem valid={passwordErrors.hasUpperCase}>
-                      One uppercase letter
-                    </RuleItem>
-                    <RuleItem valid={passwordErrors.hasLowerCase}>
-                      One lowercase letter
-                    </RuleItem>
-                    <RuleItem valid={passwordErrors.hasNumber}>
-                      One number
-                    </RuleItem>
-                    <RuleItem valid={passwordErrors.hasSpecialChar}>
-                      One special character (@$!%*?&)
-                    </RuleItem>
-                  </PasswordRules>
-                )}
-              </InputGroup>
-              
-              <InputGroup>
-                <Label htmlFor="confirmPassword">Confirm Password</Label>
-                <PasswordInputContainer>
-                  <Input
-                    id="confirmPassword"
-                    name="confirmPassword"
-                    type={showConfirmPassword ? "text" : "password"}
-                    placeholder="Confirm your password"
-                    value={formData.confirmPassword}
+                    name="phone"
+                    type="tel"
+                    placeholder="09XXXXXXXXX (11 digits)"
+                    value={formData.phone}
                     onChange={handleInputChange}
                     required
-                    autoComplete="new-password"
+                    autoComplete="tel"
+                    maxLength={11}
                   />
-                  <PasswordToggle 
-                    type="button" 
-                    onClick={toggleConfirmPasswordVisibility}
-                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
-                  >
-                    {showConfirmPassword ? "🔓" : "🔒"}
-                  </PasswordToggle>
-                </PasswordInputContainer>
-                {formData.confirmPassword && formData.password !== formData.confirmPassword && (
-                  <ErrorText>Passwords do not match</ErrorText>
-                )}
-              </InputGroup>
-              
-              <CheckboxContainer>
-                <Checkbox
-                  id="rememberMe"
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                />
-                <CheckboxLabel htmlFor="rememberMe">
-                  Remember me on this device
-                </CheckboxLabel>
-              </CheckboxContainer>
-              
-              <Button type="submit" disabled={loading}>
-                {loading ? "Sending OTP..." : "Create Account"}
-              </Button>
-            </Form>
-          ) : (
-            <OTPVerificationCard>
-              <VerificationTitle>Verify Your Email</VerificationTitle>
-              <VerificationText>
-                We&apos;ve sent a 6-digit verification code to your email address.
-                Please enter it below to complete your registration.
-              </VerificationText>
-              
-              {/* Development OTP Display - Remove in production */}
-              {process.env.NODE_ENV === 'development' && otpRef.current && (
-                <div style={{
-                  background: '#fff3cd', 
-                  border: '1px solid #ffc107', 
-                  borderRadius: '8px', 
-                  padding: '15px', 
-                  margin: '15px 0', 
-                  textAlign: 'center'
-                }}>
-                  <strong style={{color: '#856404'}}>
-                    Development Mode - OTP: {otpRef.current}
-                  </strong>
-                </div>
-              )}
-              
-              <VerificationEmail>
-                📧 {formData.email}
-              </VerificationEmail>
-              
-              <Form onSubmit={handleVerifyOTP}>
-                <InputGroup>
-                  <Label htmlFor="otp">Verification Code</Label>
-                  <Input
-                    id="otp"
-                    name="otp"
-                    type="text"
-                    placeholder="Enter 6-digit code"
-                    value={otp}
-                    onChange={handleOtpChange}
-                    required
-                    maxLength={6}
-                    autoComplete="one-time-code"
-                  />
+                  {phoneError && <ErrorText>{phoneError}</ErrorText>}
                 </InputGroup>
                 
-                <ButtonContainer>
-                  <Button type="submit" disabled={otpLoading || otp.length !== 6}>
-                    {otpLoading ? "Verifying..." : "Verify & Create Account"}
-                  </Button>
-                  <SecondaryButton 
-                    type="button" 
-                    onClick={handleCancelOTP}
-                    disabled={otpLoading}
-                  >
-                    Cancel
-                  </SecondaryButton>
-                </ButtonContainer>
+                <InputGroup>
+                  <Label htmlFor="password">Password</Label>
+                  <PasswordInputContainer>
+                    <Input
+                      id="password"
+                      name="password"
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Create a strong password"
+                      value={formData.password}
+                      onChange={handleInputChange}
+                      onFocus={handlePasswordFocus}
+                      onBlur={handlePasswordBlur}
+                      required
+                      autoComplete="new-password"
+                    />
+                    <PasswordToggle 
+                      type="button" 
+                      onClick={togglePasswordVisibility}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? "🔓" : "🔒"}
+                    </PasswordToggle>
+                  </PasswordInputContainer>
+                  
+                  {showPasswordRules && (
+                    <PasswordRules>
+                      <RuleText>Password must contain:</RuleText>
+                      <RuleItem valid={passwordErrors.hasMinLength}>
+                        At least 8 characters
+                      </RuleItem>
+                      <RuleItem valid={passwordErrors.hasUpperCase}>
+                        One uppercase letter
+                      </RuleItem>
+                      <RuleItem valid={passwordErrors.hasLowerCase}>
+                        One lowercase letter
+                      </RuleItem>
+                      <RuleItem valid={passwordErrors.hasNumber}>
+                        One number
+                      </RuleItem>
+                      <RuleItem valid={passwordErrors.hasSpecialChar}>
+                        One special character (@$!%*?&)
+                      </RuleItem>
+                    </PasswordRules>
+                  )}
+                </InputGroup>
+                
+                <InputGroup>
+                  <Label htmlFor="confirmPassword">Confirm Password</Label>
+                  <PasswordInputContainer>
+                    <Input
+                      id="confirmPassword"
+                      name="confirmPassword"
+                      type={showConfirmPassword ? "text" : "password"}
+                      placeholder="Confirm your password"
+                      value={formData.confirmPassword}
+                      onChange={handleInputChange}
+                      required
+                      autoComplete="new-password"
+                    />
+                    <PasswordToggle 
+                      type="button" 
+                      onClick={toggleConfirmPasswordVisibility}
+                      aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                    >
+                      {showConfirmPassword ? "🔓" : "🔒"}
+                    </PasswordToggle>
+                  </PasswordInputContainer>
+                  {formData.confirmPassword && formData.password !== formData.confirmPassword && (
+                    <ErrorText>Passwords do not match</ErrorText>
+                  )}
+                </InputGroup>
+                
+                <CheckboxContainer>
+                  <Checkbox
+                    id="rememberMe"
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                  />
+                  <CheckboxLabel htmlFor="rememberMe">
+                    Remember me on this device
+                  </CheckboxLabel>
+                </CheckboxContainer>
+                
+                <Button type="submit" disabled={loading}>
+                  {loading ? "Sending OTP..." : "Create Account"}
+                </Button>
               </Form>
-              
-              <ResendText>
-                Didn&apos;t receive the code?{" "}
-                {resendCooldown > 0 ? (
-                  `Resend available in ${resendCooldown}s`
-                ) : (
-                  <ResendLink onClick={handleResendOTP}>
-                    Resend OTP
-                  </ResendLink>
+            ) : (
+              <OTPVerificationCard>
+                <VerificationTitle>Verify Your Email</VerificationTitle>
+                <VerificationText>
+                  We&apos;ve sent a 6-digit verification code to your email address.
+                  Please enter it below to complete your registration.
+                </VerificationText>
+                
+                {/* Development OTP Display - Remove in production */}
+                {process.env.NODE_ENV === 'development' && otpRef.current && (
+                  <div style={{
+                    background: '#fff3cd', 
+                    border: '1px solid #ffc107', 
+                    borderRadius: '8px', 
+                    padding: '15px', 
+                    margin: '15px 0', 
+                    textAlign: 'center'
+                  }}>
+                    <strong style={{color: '#856404'}}>
+                      Development Mode - OTP: {otpRef.current}
+                    </strong>
+                  </div>
                 )}
-              </ResendText>
-            </OTPVerificationCard>
-          )}
-          
-          {!otpSent && (
-            <>
-              <Divider>
-                <DividerLine />
-                <DividerText>or continue with</DividerText>
-                <DividerLine />
-              </Divider>
-              
-              <GoogleButton 
-                type="button" 
-                onClick={handleGoogleSignUp}
-                disabled={loading}
-              >
-                <GoogleIcon>G</GoogleIcon>
-                Sign up with Google
-              </GoogleButton>
-            </>
-          )}
-          
-          <LoginRedirect>
-            Already have an account?{" "}
-            <LoginLink onClick={handleLoginRedirect}>
-              Sign in here
-            </LoginLink>
-          </LoginRedirect>
-        </Card>
-      </Container>
-    </>
-  );
-};
-
-export default Createaccount;
+                
+                <VerificationEmail>
+                  📧 {formData.email}
+                </VerificationEmail>
+                
+                <Form onSubmit={handleVerifyOTP}>
+                  <InputGroup>
+                    <Label htmlFor="otp">Verification Code</Label>
+                    <Input
+                      id="otp"
+                      name="otp"
+                      type="text"
+                      placeholder="Enter 6-digit code"
+                      value={otp}
+                      onChange={handleOtpChange}
+                      required
+                      maxLength={6}
+                      autoComplete="one-time-code"
+                    />
+                  </InputGroup>
+                  
+                  <ButtonContainer>
+                    <Button type="submit" disabled={otpLoading || otp.length !== 6}>
+                      {otpLoading ? "Verifying..." : "Verify & Create Account"}
+                    </Button>
+                    <SecondaryButton 
+                      type="button" 
+                      onClick={handleCancelOTP}
+                      disabled={otpLoading}
+                    >
+                      Cancel
+                    </SecondaryButton>
+                  </ButtonContainer>
+                </Form>
+                
+                <ResendText>
+                  Didn&apos;t receive the code?{" "}
+                  {resendCooldown > 0 ? (
+                    `Resend available in ${resendCooldown}s`
+                  ) : (
+                    <ResendLink onClick={handleResendOTP}>
+                      Resend OTP
+                    </ResendLink>
+                  )}
+                </ResendText>
+              </OTPVerificationCard>
+            )}
+            
+            {!otpSent && (
+              <>
+                <Divider>
+                  <DividerLine />
+                  <DividerText>or continue with</DividerText>
+                  <DividerLine />
+                </Divider>
+                
+                <GoogleButton 
+                  type="button" 
+                  onClick={handleGoogleSignUp}
+                  disabled={loading}
+                >
+                  <GoogleIcon>G</GoogleIcon>
+                  Sign up with Google
+                </GoogleButton>
+              </>
+            )}
+            
+            <LoginRedirect>
+              Already have an account?{" "}
+              <LoginLink onClick={handleLoginRedirect}>
+                Sign in here
+              </LoginLink>
+            </LoginRedirect>
+          </Card>
+        </Container>
+      </>
+    );
+  };
+  
+  export default Createaccount;

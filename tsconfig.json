@@ -37,7 +37,7 @@
     "src/rlclinic",
     "src/rlclinic",
     "out/types/**/*.ts"
-, "src/api/create-payment-intent"  ],
+, "src/api/create-payment-intent", "src/public/clinic-logo.png"  ],
   "exclude": [
     "node_modules"
   ]

@@ -1,4 +1,3 @@
-"use client";
 import Userdashboard from "@/rlclinic/userdashboard";
 
 export default function Home() {

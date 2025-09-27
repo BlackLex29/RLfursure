@@ -348,6 +348,7 @@ const Admindashboard: React.FC = () => {
             <NavItem onClick={() => { router.push("/manageappointment"); setIsMenuOpen(false); }}>Manage Appointments</NavItem>
             <NavItem onClick={() => { setShowBookingModal(true); setIsMenuOpen(false); }}>Book Appointment</NavItem>
             <NavItem onClick={() => { router.push("/medicalrecord"); setIsMenuOpen(false); }}>Medical Records</NavItem>
+            <NavItem onClick={() => { router.push("/monthlystatistic"); setIsMenuOpen(false); }}>Monthly Statistics</NavItem>
           </MobileNav>
         </MobileMenu>
 
@@ -373,6 +374,12 @@ const Admindashboard: React.FC = () => {
               <CardIcon>🚫</CardIcon>
               <CardTitle>Doctor Unavailable Dates</CardTitle>
               <CardDesc>View dates when doctors are unavailable</CardDesc>
+            </Card>
+            {/* New card for monthly statistics */}
+            <Card onClick={()=>router.push("/monthlystatistic")}>
+              <CardIcon>📊</CardIcon>
+              <CardTitle>Monthly Statistics</CardTitle>
+              <CardDesc>View monthly appointment statistics and reports</CardDesc>
             </Card>
           </CardsGrid>
 

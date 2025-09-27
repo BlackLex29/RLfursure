@@ -13,7 +13,8 @@ const GlobalStyle = createGlobalStyle`
     padding: 0;
     box-sizing: border-box;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background-color: #E6F4F1;
+    background: linear-gradient(135deg, #E6F7F4 0%, #F0F8FF 100%);
+    min-height: 100vh;
   }
   
   * {
@@ -26,7 +27,17 @@ const fadeIn = keyframes`
   to { opacity: 1; transform: translateY(0); }
 `;
 
-// Listahan ng mga breed para sa Pilipinas
+const slideUp = keyframes`
+  from { 
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to { 
+    opacity: 1;
+    transform: translateY(0);
+  }
+`;
+
 const dogBreeds = [
   "Aspin (Asong Pinoy)",
   "Shih Tzu",
@@ -67,8 +78,10 @@ const Petregister: React.FC = () => {
   const [breedOptions, setBreedOptions] = useState<string[]>([]);
   const [gender, setGender] = useState<"Male" | "Female">("Male");
   const [isLoading, setIsLoading] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [modalMessage, setModalMessage] = useState("");
 
-  // I-update ang breed options kapag nagbago ang pet type
   useEffect(() => {
     if (petType === "Dog") {
       setBreedOptions(dogBreeds);
@@ -77,12 +90,9 @@ const Petregister: React.FC = () => {
     } else {
       setBreedOptions([]);
     }
-    
-    // I-reset ang breed kapag nagbago ang pet type
     setPetBreed("");
   }, [petType]);
 
-  // Get current user info
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user?.email) {
@@ -97,7 +107,8 @@ const Petregister: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!petName.trim()) {
-      alert("Please enter your pet's name.");
+      setModalMessage("Please enter your pet's name.");
+      setShowErrorModal(true);
       return;
     }
 
@@ -106,7 +117,10 @@ const Petregister: React.FC = () => {
     try {
       const petId = doc(collection(db, "pets")).id;
 
-      // Save to pets
+      // Calculate age from birthday
+      const age = birthday ? calculateAge(birthday) : "";
+
+      // Save to pets collection
       await setDoc(doc(db, "pets", petId), {
         petId,
         petName: petName.trim(),
@@ -126,36 +140,44 @@ const Petregister: React.FC = () => {
         ownerEmail: petOwnerEmail,
         petType: petType.trim(),
         petBreed: petBreed.trim(),
-        age: birthday ? calculateAge(birthday) : "",
+        age: age,
         gender,
         color: color.trim(),
         createdAt: new Date().toISOString(),
       });
 
-      // Initial medical record
+      // Initial medical record with ALL information
       await setDoc(doc(db, "medicalRecords", petId), {
         petId,
         petName: petName.trim(),
         ownerEmail: petOwnerEmail,
+        ownerName: "", // Will be filled from user data
+        birthDate: birthday || "", // ✅ Save birthday here
+        breed: petBreed.trim(), // ✅ Save breed here
+        petType: petType.toLowerCase(), // ✅ Convert to lowercase for consistency
+        gender: gender,
+        color: color.trim(),
         date: new Date().toISOString().split("T")[0],
-        diagnosis: "",
-        treatment: "",
-        notes: "Initial registration",
+        diagnosis: "Initial checkup",
+        treatment: "Registration",
+        notes: "Pet registration and initial medical record created",
+        veterinarian: "System",
         createdAt: new Date().toISOString(),
         status: "Registered",
+        petAge: age // ✅ Include calculated age
       });
 
-      alert("Pet registered successfully!");
-      router.push("/userdashboard");
+      setModalMessage("Pet registered successfully! All information has been saved to medical records.");
+      setShowSuccessModal(true);
     } catch (error) {
       console.error("Error saving pet:", error);
-      alert("Failed to save pet. Please try again.");
+      setModalMessage("Failed to save pet. Please try again.");
+      setShowErrorModal(true);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Helper: calculate age
   const calculateAge = (birthDate: string) => {
     const today = new Date();
     const birth = new Date(birthDate);
@@ -166,10 +188,21 @@ const Petregister: React.FC = () => {
       age--;
     }
 
-    if (age <= 0) return "Puppy/Kitten (0-1 year)";
-    if (age <= 3) return "Young (1-3 years)";
-    if (age <= 7) return "Adult (3-7 years)";
-    return "Senior (7+ years)";
+    if (age <= 0) {
+      const months = Math.max(0, today.getMonth() - birth.getMonth() + 
+        (12 * (today.getFullYear() - birth.getFullYear())));
+      return months <= 1 ? "1 month" : `${months} months`;
+    }
+    if (age === 1) return "1 year";
+    return `${age} years`;
+  };
+
+  const handleModalClose = () => {
+    setShowSuccessModal(false);
+    setShowErrorModal(false);
+    if (showSuccessModal) {
+      router.push("/userdashboard");
+    }
   };
 
   return (
@@ -179,7 +212,7 @@ const Petregister: React.FC = () => {
         <HeaderBar>
           <BrandSection>
             <ClinicName>RL Clinic</ClinicName>
-            <Tagline>Fursure Care</Tagline>
+            <Tagline>Fursure Care - Pet Registration</Tagline>
           </BrandSection>
         </HeaderBar>
 
@@ -204,7 +237,6 @@ const Petregister: React.FC = () => {
                 </Label>
               </FormGroup>
 
-              {/* Pet Info */}
               <FormGroup>
                 <Label>
                   <Input 
@@ -228,8 +260,9 @@ const Petregister: React.FC = () => {
                       onChange={(e) => setBirthday(e.target.value)} 
                       max={new Date().toISOString().split('T')[0]}
                       disabled={isLoading}
+                      required
                     />
-                    <Span>Date of Birth</Span>
+                    <Span>Date of Birth *</Span>
                   </Label>
                 </FormGroup>
 
@@ -241,8 +274,9 @@ const Petregister: React.FC = () => {
                       onChange={(e) => setColor(e.target.value)} 
                       placeholder=" " 
                       disabled={isLoading}
+                      required
                     />
-                    <Span>Color/Markings</Span>
+                    <Span>Color/Markings *</Span>
                   </Label>
                 </FormGroup>
               </FormRow>
@@ -287,7 +321,7 @@ const Petregister: React.FC = () => {
               <FormGroup>
                 <GenderTitle>Gender *</GenderTitle>
                 <GenderWrapper>
-                  <RadioLabelStyled selected={gender==="Male"} disabled={isLoading}>
+                  <RadioLabelStyled $selected={gender==="Male"} $disabled={isLoading}>
                     <RadioInput 
                       type="radio" 
                       name="gender" 
@@ -298,7 +332,7 @@ const Petregister: React.FC = () => {
                     Male
                   </RadioLabelStyled>
 
-                  <RadioLabelStyled selected={gender==="Female"} disabled={isLoading}>
+                  <RadioLabelStyled $selected={gender==="Female"} $disabled={isLoading}>
                     <RadioInput 
                       type="radio" 
                       name="gender" 
@@ -312,7 +346,7 @@ const Petregister: React.FC = () => {
               </FormGroup>
 
               <ButtonGroup>
-                <Button type="submit" disabled={isLoading || !petName.trim() || !petType || !petBreed}>
+                <Button type="submit" disabled={isLoading || !petName.trim() || !petType || !petBreed || !birthday || !color}>
                   {isLoading ? (
                     <>
                       <Spinner />
@@ -331,7 +365,74 @@ const Petregister: React.FC = () => {
             </Form>
           </Card>
         </Content>
+
+        {/* Success Modal */}
+        {showSuccessModal && (
+          <ModalOverlay onClick={handleModalClose}>
+            <ModalContainer onClick={(e) => e.stopPropagation()}>
+              <ModalHeader>
+                <ModalIcon $variant="success">
+                  <i className="fas fa-check-circle"></i>
+                </ModalIcon>
+                <ModalTitle>Success!</ModalTitle>
+                <ModalClose onClick={handleModalClose}>
+                  <i className="fas fa-times"></i>
+                </ModalClose>
+              </ModalHeader>
+              <ModalContent>
+                <p>{modalMessage}</p>
+                <PetDetails>
+                  <DetailItem>
+                    <strong>Pet Name:</strong> {petName}
+                  </DetailItem>
+                  <DetailItem>
+                    <strong>Type:</strong> {petType}
+                  </DetailItem>
+                  <DetailItem>
+                    <strong>Breed:</strong> {petBreed}
+                  </DetailItem>
+                  <DetailItem>
+                    <strong>Gender:</strong> {gender}
+                  </DetailItem>
+                </PetDetails>
+              </ModalContent>
+              <ModalActions>
+                <ModalButton $variant="success" onClick={handleModalClose}>
+                  Continue to Dashboard
+                </ModalButton>
+              </ModalActions>
+            </ModalContainer>
+          </ModalOverlay>
+        )}
+
+        {/* Error Modal */}
+        {showErrorModal && (
+          <ModalOverlay onClick={handleModalClose}>
+            <ModalContainer onClick={(e) => e.stopPropagation()}>
+              <ModalHeader>
+                <ModalIcon $variant="error">
+                  <i className="fas fa-exclamation-circle"></i>
+                </ModalIcon>
+                <ModalTitle>Registration Error</ModalTitle>
+                <ModalClose onClick={handleModalClose}>
+                  <i className="fas fa-times"></i>
+                </ModalClose>
+              </ModalHeader>
+              <ModalContent>
+                <p>{modalMessage}</p>
+              </ModalContent>
+              <ModalActions>
+                <ModalButton $variant="error" onClick={handleModalClose}>
+                  Try Again
+                </ModalButton>
+              </ModalActions>
+            </ModalContainer>
+          </ModalOverlay>
+        )}
       </PageContainer>
+      
+      {/* Font Awesome CSS */}
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     </>
   );
 };
@@ -368,7 +469,6 @@ const BrandSection = styled.div`
 const ClinicName = styled.h1`
   font-size: 32px;
   font-weight: bold;
-  font-family: "Rozha One", serif;
   margin: 0;
   
   @media (max-width: 768px) {
@@ -418,7 +518,6 @@ const Header = styled.h2`
   text-align: center;
   color: #2c3e50;
   margin-bottom: 30px;
-  font-family: 'Rozha One', serif;
   font-size: 28px;
   display: flex;
   flex-direction: column;
@@ -561,20 +660,20 @@ const GenderWrapper = styled.div`
   }
 `;
 
-const RadioLabelStyled = styled.label<{selected?: boolean, disabled?: boolean}>`
+const RadioLabelStyled = styled.label<{$selected?: boolean, $disabled?: boolean}>`
   display: flex;
   align-items: center;
   gap: 8px;
-  cursor: ${props => props.disabled ? 'not-allowed' : 'pointer'};
+  cursor: ${props => props.$disabled ? 'not-allowed' : 'pointer'};
   padding: 10px 15px;
   border-radius: 8px;
   background: ${props => {
-    if (props.disabled) return '#f8f9fa';
-    return props.selected ? 'linear-gradient(90deg, #6bc1e1, #34b89c)' : '#f8f9fa';
+    if (props.$disabled) return '#f8f9fa';
+    return props.$selected ? 'linear-gradient(90deg, #6bc1e1, #34b89c)' : '#f8f9fa';
   }};
   color: ${props => {
-    if (props.disabled) return '#aaa';
-    return props.selected ? 'white' : '#2c3e50';
+    if (props.$disabled) return '#aaa';
+    return props.$selected ? 'white' : '#2c3e50';
   }};
   transition: all 0.2s;
   flex: 1;
@@ -582,8 +681,8 @@ const RadioLabelStyled = styled.label<{selected?: boolean, disabled?: boolean}>`
 
   &:hover {
     background: ${props => {
-      if (props.disabled) return '#f8f9fa';
-      return props.selected 
+      if (props.$disabled) return '#f8f9fa';
+      return props.$selected 
         ? 'linear-gradient(90deg, #5aa7c8, #2f9b85)' 
         : '#e9ecef';
     }};
@@ -672,5 +771,143 @@ const Spinner = styled.div`
   @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
+  }
+`;
+
+/* ===== MODAL STYLES ===== */
+const ModalOverlay = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+  animation: fadeIn 0.3s ease-out;
+`;
+
+const ModalContainer = styled.div`
+  background: white;
+  border-radius: 20px;
+  width: 100%;
+  max-width: 450px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  animation: ${slideUp} 0.3s ease-out;
+`;
+
+const ModalHeader = styled.div`
+  display: flex;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #eaeaea;
+  position: relative;
+`;
+
+const ModalIcon = styled.div<{$variant?: 'success' | 'error'}>`
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 1rem;
+  font-size: 1.8rem;
+  background: ${props => 
+    props.$variant === 'success' ? 'linear-gradient(135deg, #34b89c, #6bc1e1)' :
+    props.$variant === 'error' ? 'linear-gradient(135deg, #ff6b6b, #ff8e8e)' :
+    'linear-gradient(135deg, #6bc1e1, #34b89c)'
+  };
+  color: white;
+`;
+
+const ModalTitle = styled.h3`
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #2c3e50;
+`;
+
+const ModalClose = styled.button`
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  cursor: pointer;
+  color: #666;
+  padding: 0.5rem;
+  border-radius: 50%;
+  width: 35px;
+  height: 35px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  &:hover {
+    background-color: #f5f5f5;
+  }
+`;
+
+const ModalContent = styled.div`
+  padding: 1.5rem;
+  
+  p {
+    margin: 0 0 1rem 0;
+    font-size: 1.1rem;
+    line-height: 1.6;
+    color: #555;
+    text-align: center;
+  }
+`;
+
+const PetDetails = styled.div`
+  background: linear-gradient(135deg, #f8fdfc 0%, #f0faf8 100%);
+  border-radius: 12px;
+  padding: 1rem;
+  margin-top: 1rem;
+  border-left: 4px solid #34b89c;
+`;
+
+const DetailItem = styled.p`
+  margin: 0.5rem 0;
+  font-size: 0.95rem;
+  color: #2c3e50;
+  
+  strong {
+    color: #34b89c;
+  }
+`;
+
+const ModalActions = styled.div`
+  padding: 0 1.5rem 1.5rem;
+  display: flex;
+  justify-content: center;
+`;
+
+const ModalButton = styled.button<{$variant?: 'success' | 'error'}>`
+  padding: 0.8rem 2rem;
+  border: none;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: ${props => 
+    props.$variant === 'success' ? 'linear-gradient(135deg, #34b89c, #6bc1e1)' :
+    props.$variant === 'error' ? 'linear-gradient(135deg, #ff6b6b, #ff8e8e)' :
+    'linear-gradient(135deg, #6bc1e1, #34b89c)'
+  };
+  color: white;
+  
+  &:hover {
+    opacity: 0.9;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(52, 184, 156, 0.3);
   }
 `;
