@@ -3,17 +3,18 @@
 import React, { useEffect, useState } from "react";
 import styled, { createGlobalStyle } from "styled-components";
 import { useRouter } from "next/navigation";
-import { auth, db } from "../firebaseConfig";
+import { auth, db, storage } from "../firebaseConfig";
 import { signOut } from "firebase/auth";
-import { collection, onSnapshot, doc, deleteDoc, query, where, updateDoc, getDoc } from "firebase/firestore";
+import { collection, onSnapshot, doc, deleteDoc, query, where, updateDoc, getDoc, setDoc } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 const GlobalStyle = createGlobalStyle`
   body {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background-color: #f8fafc;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: #f8f9fa;
     scroll-behavior: smooth;
   }
   
@@ -30,6 +31,10 @@ interface AppointmentType {
   timeSlot: string;
   status?: string;
   paymentMethod?: string;
+  appointmentType?: string;
+  completedAt?: string;
+  notes?: string;
+  veterinarian?: string;
 }
 
 interface UserProfile {
@@ -54,7 +59,7 @@ const timeSlots = [
 const UserDashboard: React.FC = () => {
   const router = useRouter();
   const [appointments, setAppointments] = useState<AppointmentType[]>([]);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [completedAppointments, setCompletedAppointments] = useState<AppointmentType[]>([]);
   const [editDate, setEditDate] = useState("");
   const [editSlot, setEditSlot] = useState("");
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -67,21 +72,49 @@ const UserDashboard: React.FC = () => {
   const [editFirstName, setEditFirstName] = useState("");
   const [editLastName, setEditLastName] = useState("");
   const [profilePictureUrl, setProfilePictureUrl] = useState("");
+  const [profilePictureFile, setProfilePictureFile] = useState<File | null>(null);
 
-  // Get today's date in a consistent format (YYYY-MM-DD)
-  const getTodayDate = () => new Date().toISOString().split("T")[0];
-  
-  // Initialize with the same value on server and client
-  const [today, setToday] = useState(getTodayDate());
+  // Modal states
+  const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState<AppointmentType | null>(null);
 
-  const userEmail = auth.currentUser?.email;
-  const userId = auth.currentUser?.uid;
+  // Medical Records modal state
+  const [showMedicalRecordsModal, setShowMedicalRecordsModal] = useState(false);
+
+  // Success message states
+  const [showSuccessMessage, setShowSuccessMessage] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
+
+  const [today, setToday] = useState('');
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  // Show success message
+  const showSuccess = (message: string) => {
+    setSuccessMessage(message);
+    setShowSuccessMessage(true);
+    setTimeout(() => {
+      setShowSuccessMessage(false);
+    }, 3000);
+  };
 
   useEffect(() => {
     setIsClient(true);
-    // Ensure date is consistent after hydration
-    setToday(getTodayDate());
-  }, []);
+    setToday(new Date().toISOString().split("T")[0]);
+    
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) {
+        setUserEmail(user.email);
+        setUserId(user.uid);
+      } else {
+        router.push("/");
+      }
+    });
+
+    return () => unsubscribe();
+  }, [router]);
 
   useEffect(() => {
     if (!userEmail || !userId) return;
@@ -92,7 +125,7 @@ const UserDashboard: React.FC = () => {
         if (userDoc.exists()) {
           const profileData = userDoc.data() as UserProfile;
           setUserProfile(profileData);
-          setEditFirstName(profileData.firstName || "");
+          setEditFirstName(profileData.firstName || userEmail.split('@')[0]);
           setEditLastName(profileData.lastName || "");
           setProfilePictureUrl(profileData.profilePicture || "");
         } else {
@@ -101,6 +134,7 @@ const UserDashboard: React.FC = () => {
             lastName: "",
             email: userEmail
           };
+          await setDoc(doc(db, "users", userId), defaultProfile);
           setUserProfile(defaultProfile);
           setEditFirstName(defaultProfile.firstName);
           setEditLastName("");
@@ -124,106 +158,169 @@ const UserDashboard: React.FC = () => {
 
     fetchUserProfile();
 
-    const q = query(
+    // Query for active appointments (excluding completed ones)
+    const activeQuery = query(
       collection(db, "appointments"),
       where("clientName", "==", userEmail)
     );
 
-    const unsub = onSnapshot(q, (snapshot) => {
+    const activeUnsub = onSnapshot(activeQuery, (snapshot) => {
       const data: AppointmentType[] = [];
       snapshot.forEach((doc) => {
-        data.push({ id: doc.id, ...(doc.data() as Omit<AppointmentType, 'id'>) });
+        const appointmentData = { id: doc.id, ...(doc.data() as Omit<AppointmentType, 'id'>) };
+        // Filter out completed appointments (Done, Not Attend, Cancelled)
+        if (!["Done", "Not Attend", "Cancelled"].includes(appointmentData.status || "")) {
+          data.push(appointmentData);
+        }
       });
       data.sort((a, b) => a.date.localeCompare(b.date));
       setAppointments(data);
     });
 
-    return () => unsub();
+    // Query for completed appointments (for history)
+    const completedQuery = query(
+      collection(db, "appointments"),
+      where("clientName", "==", userEmail)
+    );
+
+    const completedUnsub = onSnapshot(completedQuery, (snapshot) => {
+      const data: AppointmentType[] = [];
+      snapshot.forEach((doc) => {
+        const appointmentData = { id: doc.id, ...(doc.data() as Omit<AppointmentType, 'id'>) };
+        // Only include completed appointments
+        if (["Done", "Not Attend", "Cancelled"].includes(appointmentData.status || "")) {
+          data.push(appointmentData);
+        }
+      });
+      // Sort by completion date (most recent first)
+      data.sort((a, b) => {
+        const dateA = a.completedAt || a.date;
+        const dateB = b.completedAt || b.date;
+        return new Date(dateB).getTime() - new Date(dateA).getTime();
+      });
+      setCompletedAppointments(data);
+    });
+
+    return () => {
+      activeUnsub();
+      completedUnsub();
+    };
   }, [userEmail, userId]);
 
   const handleLogout = async () => {
     await signOut(auth);
-    router.push("/");
+    router.push("/homepage");
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this appointment?")) return;
     try {
       await deleteDoc(doc(db, "appointments", id));
-      alert("Appointment deleted successfully.");
+      setShowCancelModal(false);
+      showSuccess("Appointment cancelled successfully!");
     } catch (error) {
       console.error(error);
-      alert("Failed to delete appointment.");
+      alert("Failed to cancel appointment.");
     }
   };
 
-  const startEditing = (appt: AppointmentType) => {
-    setEditingId(appt.id);
-    setEditDate(appt.date || today);
-    setEditSlot(appt.timeSlot);
+  const openCancelModal = (appt: AppointmentType) => {
+    setSelectedAppointment(appt);
+    setShowCancelModal(true);
   };
 
-  const saveEdit = async (id: string) => {
-    if (!editDate || !editSlot) return alert("Please select date and time slot.");
+  const openRescheduleModal = (appt: AppointmentType) => {
+    setSelectedAppointment(appt);
+    setEditDate(appt.date || today);
+    setEditSlot(appt.timeSlot);
+    setShowRescheduleModal(true);
+  };
+
+  const openHistoryModal = (appt: AppointmentType) => {
+    setSelectedAppointment(appt);
+    setShowHistoryModal(true);
+  };
+
+  const handleMedicalRecordsClick = () => {
+    setShowMedicalRecordsModal(true);
+  };
+
+  const saveEdit = async () => {
+    if (!selectedAppointment || !editDate || !editSlot) {
+      return alert("Please select date and time slot.");
+    }
 
     const isTaken = appointments.some(a =>
-      a.id !== id &&
+      a.id !== selectedAppointment.id &&
       a.date === editDate &&
       a.timeSlot === editSlot &&
       a.status !== "Cancelled"
     );
+    
     if (isTaken) return alert("This time slot is already taken.");
 
     try {
-      await updateDoc(doc(db, "appointments", id), {
+      await updateDoc(doc(db, "appointments", selectedAppointment.id), {
         date: editDate,
         timeSlot: editSlot
       });
-      setEditingId(null);
-      alert("Appointment updated successfully.");
+      setShowRescheduleModal(false);
+      setSelectedAppointment(null);
+      showSuccess("Appointment rescheduled successfully!");
     } catch (error) {
       console.error(error);
-      alert("Failed to update appointment.");
+      alert("Failed to reschedule appointment.");
     }
   };
-
-  const cancelEdit = () => setEditingId(null);
 
   // Profile editing functions
   const toggleProfileEdit = () => {
     if (isEditingProfile) {
-      // Save when toggling off
       saveProfileEdit();
     } else {
-      // Start editing
       setIsEditingProfile(true);
-      setEditFirstName(userProfile?.firstName || "");
+      setEditFirstName(userProfile?.firstName || userEmail?.split('@')[0] || "");
       setEditLastName(userProfile?.lastName || "");
       setProfilePictureUrl(userProfile?.profilePicture || "");
+      setProfilePictureFile(null);
     }
+  };
+
+  const uploadImageToStorage = async (file: File): Promise<string> => {
+    if (!userId) throw new Error("No user ID");
+    
+    const storageRef = ref(storage, `profile-pictures/${userId}/${file.name}`);
+    const snapshot = await uploadBytes(storageRef, file);
+    const downloadURL = await getDownloadURL(snapshot.ref);
+    return downloadURL;
   };
 
   const saveProfileEdit = async () => {
     if (!userId) return;
 
     try {
+      let imageUrl = profilePictureUrl;
+      
+      if (profilePictureFile) {
+        imageUrl = await uploadImageToStorage(profilePictureFile);
+      }
+
       const updatedProfile = {
-        firstName: editFirstName,
-        lastName: editLastName,
+        firstName: editFirstName.trim() || userEmail?.split('@')[0] || "User",
+        lastName: editLastName.trim(),
         email: userEmail || "",
-        profilePicture: profilePictureUrl
+        profilePicture: imageUrl
       };
 
       await updateDoc(doc(db, "users", userId), updatedProfile);
       
-      // Fix: Update the state properly
       setUserProfile(prevProfile => ({
         ...prevProfile!,
         ...updatedProfile
       }));
       
       setIsEditingProfile(false);
-      alert("Profile updated successfully!");
+      setProfilePictureFile(null);
+      showSuccess("Profile updated successfully!");
     } catch (error) {
       console.error("Error updating profile:", error);
       alert("Failed to update profile.");
@@ -233,13 +330,34 @@ const UserDashboard: React.FC = () => {
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      // Create a URL for the image preview
+      setProfilePictureFile(file);
       const imageUrl = URL.createObjectURL(file);
       setProfilePictureUrl(imageUrl);
     }
   };
 
-  // Prevent rendering until client-side to avoid hydration mismatch
+  const getAppointmentTypeLabel = (type?: string) => {
+    const types: Record<string, string> = {
+      vaccination: "Vaccination",
+      checkup: "Check Up",
+      antiRabies: "Anti Rabies",
+      ultrasound: "Ultrasound",
+      groom: "Grooming",
+      spayNeuter: "Spay/Neuter",
+      deworm: "Deworming"
+    };
+    return types[type || ""] || "General Consultation";
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-PH', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
   if (!isClient) {
     return (
       <>
@@ -247,9 +365,13 @@ const UserDashboard: React.FC = () => {
         <PageContainer>
           <HeaderBar>
             <HeaderLeft>
-              <WelcomeSection>
-                <WelcomeTitle>Loading...</WelcomeTitle>
-              </WelcomeSection>
+              <Logo>
+                <LogoIcon>🏥</LogoIcon>
+                <LogoText>
+                  <ClinicName>RL Clinic</ClinicName>
+                  <LogoSubtext>Fursure Care - User Dashboard</LogoSubtext>
+                </LogoText>
+              </Logo>
             </HeaderLeft>
           </HeaderBar>
         </PageContainer>
@@ -261,7 +383,17 @@ const UserDashboard: React.FC = () => {
     <>
       <GlobalStyle />
       <PageContainer>
-        {/* Header with profile and hamburger menu */}
+        {/* Success Message */}
+        {showSuccessMessage && (
+          <SuccessNotification>
+            <SuccessIcon>✓</SuccessIcon>
+            <SuccessText>{successMessage}</SuccessText>
+            <CloseSuccessButton onClick={() => setShowSuccessMessage(false)}>
+              ×
+            </CloseSuccessButton>
+          </SuccessNotification>
+        )}
+
         <HeaderBar>
           <HeaderLeft>
             <MobileMenuButton onClick={() => setIsMenuOpen(!isMenuOpen)}>
@@ -272,20 +404,20 @@ const UserDashboard: React.FC = () => {
               </HamburgerIcon>
             </MobileMenuButton>
             
-            <WelcomeSection>
-              {loading ? (
-                <WelcomeTitle>Loading...</WelcomeTitle>
-              ) : (
-                <WelcomeTitle>
-                  Welcome back, {userProfile?.firstName}!
-                </WelcomeTitle>
-              )}
-              <WelcomeSubtitle>How can we help your pet today?</WelcomeSubtitle>
-            </WelcomeSection>
+            <Logo>
+              <LogoIcon>🏥</LogoIcon>
+              <LogoText>
+                <ClinicName>RL Clinic</ClinicName>
+                <LogoSubtext>Fursure Care - User Dashboard</LogoSubtext>
+              </LogoText>
+            </Logo>
           </HeaderLeft>
           
           <HeaderRight className={isMenuOpen ? "open" : ""}>
-            {/* Profile Section - Now on the right side */}
+            <UserInfo>
+              {loading ? "Loading..." : `${userProfile?.firstName || "User"} ${userProfile?.lastName || ""}`.trim()}
+            </UserInfo>
+            
             <ProfileContainer>
               <ProfileIconButton onClick={toggleProfileEdit}>
                 <ProfileAvatar>
@@ -295,16 +427,11 @@ const UserDashboard: React.FC = () => {
                     <DefaultAvatar>👤</DefaultAvatar>
                   )}
                 </ProfileAvatar>
-                <ProfileName>
-                  {loading ? "Loading..." : `${userProfile?.firstName} ${userProfile?.lastName}`}
-                </ProfileName>
-                <EditIcon>✏️</EditIcon>
               </ProfileIconButton>
 
-              {/* Profile Edit Modal */}
               {isEditingProfile && (
                 <ProfileModalOverlay onClick={() => setIsEditingProfile(false)}>
-                  <ProfileModal onClick={(e) => e.stopPropagation()}>
+                  <LargeProfileModal onClick={(e) => e.stopPropagation()}>
                     <ModalHeader>
                       <ModalTitle>Edit Profile</ModalTitle>
                       <CloseButton onClick={() => setIsEditingProfile(false)}>×</CloseButton>
@@ -357,14 +484,14 @@ const UserDashboard: React.FC = () => {
                     </ModalContent>
                     
                     <ModalActions>
-                      <CancelButton onClick={() => setIsEditingProfile(false)}>
+                      <CancelModalButton onClick={() => setIsEditingProfile(false)}>
                         Cancel
-                      </CancelButton>
+                      </CancelModalButton>
                       <SaveProfileButton onClick={saveProfileEdit}>
                         Save Changes
                       </SaveProfileButton>
                     </ModalActions>
-                  </ProfileModal>
+                  </LargeProfileModal>
                 </ProfileModalOverlay>
               )}
             </ProfileContainer>
@@ -373,40 +500,55 @@ const UserDashboard: React.FC = () => {
           </HeaderRight>
         </HeaderBar>
 
-        {/* Main content */}
         <Content>
-          {/* Navigation cards */}
+          <WelcomeSection>
+            <WelcomeTitle>
+              Welcome to Fursurecare, {userProfile?.firstName || userEmail?.split('@')[0] || "User"}!
+            </WelcomeTitle>
+            <WelcomeSubtitle>How can we help your pet today?</WelcomeSubtitle>
+          </WelcomeSection>
+
           <CardsGrid>
             <Card onClick={() => router.push("/petregistration")}>
               <CardIcon>🐾</CardIcon>
-              <CardTitle>Register Pet</CardTitle>
-              <CardText>Add your pet to get started with appointments</CardText>
+              <CardContent>
+                <CardTitle>Register Pet</CardTitle>
+                <CardText>Add your pet to get started with appointments</CardText>
+              </CardContent>
             </Card>
 
             <Card onClick={() => router.push("/appointment")}>
               <CardIcon>📅</CardIcon>
-              <CardTitle>Book Appointment</CardTitle>
-              <CardText>Schedule a new vet visit for your pet</CardText>
+              <CardContent>
+                <CardTitle>Book Appointment</CardTitle>
+                <CardText>Schedule a new vet visit for your pet</CardText>
+              </CardContent>
             </Card>
 
-            <Card onClick={() => router.push("/usermedicalrecord")}>
-              <CardIcon>📑</CardIcon>
-              <CardTitle>Medical Records</CardTitle>
-              <CardText>View your pet&apos;s health history</CardText>
+            <Card onClick={handleMedicalRecordsClick}>
+              <CardIcon>📋</CardIcon>
+              <CardContent>
+                <CardTitle>Medical Records & History</CardTitle>
+                <CardText>View your pet's health history and appointment records</CardText>
+                {completedAppointments.length > 0 && (
+                  <HistoryBadge>{completedAppointments.length} completed appointments</HistoryBadge>
+                )}
+              </CardContent>
             </Card>
           </CardsGrid>
 
-          {/* Appointments section */}
           <AppointmentsSection>
             <SectionHeader>
-              <SectionTitle>Your Appointments</SectionTitle>
-              {isClient && <AppointmentCount>{appointments.length} scheduled</AppointmentCount>}
+              <SectionTitleGroup>
+                <SectionTitle>Active Appointments</SectionTitle>
+                {isClient && <AppointmentCount>{appointments.length} scheduled</AppointmentCount>}
+              </SectionTitleGroup>
             </SectionHeader>
 
             {appointments.length === 0 ? (
               <NoAppointments>
                 <NoAppointmentsIcon>📅</NoAppointmentsIcon>
-                <NoAppointmentsText>No appointments scheduled yet</NoAppointmentsText>
+                <NoAppointmentsText>No active appointments</NoAppointmentsText>
                 <ScheduleButton onClick={() => router.push("/appointment")}>
                   Schedule an Appointment
                 </ScheduleButton>
@@ -417,80 +559,295 @@ const UserDashboard: React.FC = () => {
                   .filter(a => a.petName)
                   .map((appt) => (
                     <AppointmentCard key={appt.id}>
-                      {editingId === appt.id ? (
-                        <EditForm>
-                          <EditTitle>Edit Appointment</EditTitle>
-                          <FormGroup>
-                            <Label>Date:</Label>
-                            <DateInput
-                              type="date"
-                              value={editDate}
-                              onChange={(e) => setEditDate(e.target.value)}
-                              min={today}
-                            />
-                          </FormGroup>
-                          <FormGroup>
-                            <Label>Time Slot:</Label>
-                            <SelectInput
-                              value={editSlot}
-                              onChange={(e) => setEditSlot(e.target.value)}
-                            >
-                              <option value="">Select a time slot</option>
-                              {timeSlots.map(slot => {
-                                const isTaken = appointments.some(a =>
-                                  a.id !== appt.id &&
-                                  a.date === editDate &&
-                                  a.timeSlot === slot &&
-                                  a.status !== "Cancelled"
-                                );
-                                return (
-                                  <option key={slot} value={slot} disabled={isTaken}>
-                                    {slot} {isTaken ? "(Taken)" : ""}
-                                  </option>
-                                );
-                              })}
-                            </SelectInput>
-                          </FormGroup>
-                          <EditButtonRow>
-                            <SaveButton onClick={() => saveEdit(appt.id)}>Save Changes</SaveButton>
-                            <CancelEditButton onClick={cancelEdit}>Cancel</CancelEditButton>
-                          </EditButtonRow>
-                        </EditForm>
-                      ) : (
-                        <>
-                          <AppointmentHeader>
-                            <AppointmentInfo>
-                              <AppointmentDate>{appt.date || today}</AppointmentDate>
-                              <AppointmentTime>{appt.timeSlot}</AppointmentTime>
-                            </AppointmentInfo>
-                            <StatusBadge status={appt.status || "Pending"}>
-                              {appt.status || "Pending"}
-                            </StatusBadge>
-                          </AppointmentHeader>
+                      <AppointmentHeader>
+                        <AppointmentLeftSide>
+                          <AppointmentStatus>Pet: {appt.petName}</AppointmentStatus>
+                          <AppointmentInfo>
+                            <AppointmentLabel>Service:</AppointmentLabel>
+                            <AppointmentValue>{getAppointmentTypeLabel(appt.appointmentType)}</AppointmentValue>
+                          </AppointmentInfo>
+                          <AppointmentInfo>
+                            <AppointmentLabel>Date:</AppointmentLabel>
+                            <AppointmentValue>{formatDate(appt.date || today)}</AppointmentValue>
+                            <AppointmentSeparator>|</AppointmentSeparator>
+                            <AppointmentLabel>Time:</AppointmentLabel>
+                            <AppointmentValue>{appt.timeSlot}</AppointmentValue>
+                          </AppointmentInfo>
+                          <AppointmentInfo>
+                            <AppointmentLabel>Payment:</AppointmentLabel>
+                            <AppointmentValue>{appt.paymentMethod || "Not specified"}</AppointmentValue>
+                          </AppointmentInfo>
+                        </AppointmentLeftSide>
+                        <StatusBadge status={appt.status || "Pending"}>
+                          {appt.status || "Pending Payment"}
+                        </StatusBadge>
+                      </AppointmentHeader>
 
-                          <AppointmentDetails>
-                            <DetailItem>
-                              <DetailLabel>Pet:</DetailLabel>
-                              <DetailValue>{appt.petName}</DetailValue>
-                            </DetailItem>
-                            <DetailItem>
-                              <DetailLabel>Payment:</DetailLabel>
-                              <DetailValue>{appt.paymentMethod || "Not specified"}</DetailValue>
-                            </DetailItem>
-                          </AppointmentDetails>
-
-                          <ButtonRow>
-                            <EditButton onClick={() => startEditing(appt)}>Reschedule</EditButton>
-                            <CancelButton onClick={() => handleDelete(appt.id)}>Cancel</CancelButton>
-                          </ButtonRow>
-                        </>
-                      )}
+                      <ButtonRow>
+                        <EditButton onClick={() => openRescheduleModal(appt)}>Reschedule</EditButton>
+                        <DeleteButton onClick={() => openCancelModal(appt)}>Cancel</DeleteButton>
+                      </ButtonRow>
                     </AppointmentCard>
                   ))}
               </AppointmentsList>
             )}
           </AppointmentsSection>
         </Content>
+
+        {/* Medical Records Modal with Appointment History */}
+        {showMedicalRecordsModal && (
+          <ModalOverlay onClick={() => setShowMedicalRecordsModal(false)}>
+            <LargeMedicalModal onClick={(e) => e.stopPropagation()}>
+              <ModalHeader>
+                <ModalTitle>Medical Records & Appointment History</ModalTitle>
+                <CloseButton onClick={() => setShowMedicalRecordsModal(false)}>×</CloseButton>
+              </ModalHeader>
+              
+              <MedicalModalContent>
+                <MedicalRecordsSection>
+                  <SectionSubtitle>Medical Records</SectionSubtitle>
+                  <ViewRecordsButton onClick={() => {
+                    setShowMedicalRecordsModal(false);
+                    router.push("/usermedicalrecord");
+                  }}>
+                    View Full Medical Records
+                  </ViewRecordsButton>
+                </MedicalRecordsSection>
+
+                <AppointmentHistorySection>
+                  <HistorySectionHeader>
+                    <SectionSubtitle>Appointment History</SectionSubtitle>
+                    <HistoryCount>{completedAppointments.length} completed appointments</HistoryCount>
+                  </HistorySectionHeader>
+
+                  {completedAppointments.length === 0 ? (
+                    <NoHistoryMessage>
+                      <NoHistoryIcon>📚</NoHistoryIcon>
+                      <NoHistoryText>No appointment history yet</NoHistoryText>
+                    </NoHistoryMessage>
+                  ) : (
+                    <HistoryList>
+                      {completedAppointments.map((appt) => (
+                        <HistoryCard key={appt.id} onClick={() => openHistoryModal(appt)}>
+                          <HistoryCardHeader>
+                            <HistoryCardLeft>
+                              <PetName>{appt.petName}</PetName>
+                              <ServiceInfo>{getAppointmentTypeLabel(appt.appointmentType)}</ServiceInfo>
+                              <DateInfo>{formatDate(appt.date)} • {appt.timeSlot}</DateInfo>
+                            </HistoryCardLeft>
+                            <HistoryStatusBadge status={appt.status || "Completed"}>
+                              {appt.status === "Done" ? "✅ Completed" : 
+                               appt.status === "Not Attend" ? "❌ No Show" : 
+                               appt.status === "Cancelled" ? "🚫 Cancelled" : appt.status}
+                            </HistoryStatusBadge>
+                          </HistoryCardHeader>
+                          <ClickHint>Click for details</ClickHint>
+                        </HistoryCard>
+                      ))}
+                    </HistoryList>
+                  )}
+                </AppointmentHistorySection>
+              </MedicalModalContent>
+              
+              <ModalActions>
+                <CancelModalButton onClick={() => setShowMedicalRecordsModal(false)}>
+                  Close
+                </CancelModalButton>
+              </ModalActions>
+            </LargeMedicalModal>
+          </ModalOverlay>
+        )}
+
+        {/* Reschedule Modal */}
+        {showRescheduleModal && selectedAppointment && (
+          <ModalOverlay onClick={() => setShowRescheduleModal(false)}>
+            <ModalContainer onClick={(e) => e.stopPropagation()}>
+              <ModalHeader>
+                <ModalTitle>Reschedule Appointment</ModalTitle>
+                <CloseButton onClick={() => setShowRescheduleModal(false)}>×</CloseButton>
+              </ModalHeader>
+              
+              <ModalContent>
+                <AppointmentInfoModal>
+                  <InfoItem>
+                    <InfoLabel>Pet:</InfoLabel>
+                    <InfoValue>{selectedAppointment.petName}</InfoValue>
+                  </InfoItem>
+                  <InfoItem>
+                    <InfoLabel>Current Date:</InfoLabel>
+                    <InfoValue>{formatDate(selectedAppointment.date)}</InfoValue>
+                  </InfoItem>
+                  <InfoItem>
+                    <InfoLabel>Current Time:</InfoLabel>
+                    <InfoValue>{selectedAppointment.timeSlot}</InfoValue>
+                  </InfoItem>
+                </AppointmentInfoModal>
+
+                <FormGroup>
+                  <Label>New Date:</Label>
+                  <DateInput
+                    type="date"
+                    value={editDate}
+                    onChange={(e) => setEditDate(e.target.value)}
+                    min={today}
+                  />
+                </FormGroup>
+                
+                <FormGroup>
+                  <Label>New Time Slot:</Label>
+                  <SelectInput
+                    value={editSlot}
+                    onChange={(e) => setEditSlot(e.target.value)}
+                  >
+                    <option value="">Select a time slot</option>
+                    {timeSlots.map(slot => {
+                      const isTaken = appointments.some(a =>
+                        a.id !== selectedAppointment.id &&
+                        a.date === editDate &&
+                        a.timeSlot === slot &&
+                        a.status !== "Cancelled"
+                      );
+                      return (
+                        <option key={slot} value={slot} disabled={isTaken}>
+                          {slot} {isTaken ? "(Taken)" : ""}
+                        </option>
+                      );
+                    })}
+                  </SelectInput>
+                </FormGroup>
+              </ModalContent>
+              
+              <ModalActions>
+                <CancelModalButton onClick={() => setShowRescheduleModal(false)}>
+                  Cancel
+                </CancelModalButton>
+                <ConfirmButton onClick={saveEdit}>
+                  Confirm Reschedule
+                </ConfirmButton>
+              </ModalActions>
+            </ModalContainer>
+          </ModalOverlay>
+        )}
+
+        {/* Cancel Appointment Modal */}
+        {showCancelModal && selectedAppointment && (
+          <ModalOverlay onClick={() => setShowCancelModal(false)}>
+            <ModalContainer onClick={(e) => e.stopPropagation()}>
+              <ModalHeader>
+                <ModalTitle>Cancel Appointment</ModalTitle>
+                <CloseButton onClick={() => setShowCancelModal(false)}>×</CloseButton>
+              </ModalHeader>
+              
+              <ModalContent>
+                <WarningMessage>
+                  <WarningIcon>⚠️</WarningIcon>
+                  <WarningText>
+                    Are you sure you want to cancel this appointment? This action cannot be undone.
+                  </WarningText>
+                </WarningMessage>
+                
+                <AppointmentDetails>
+                  <DetailItem>
+                    <DetailLabel>Pet:</DetailLabel>
+                    <DetailValue>{selectedAppointment.petName}</DetailValue>
+                  </DetailItem>
+                  <DetailItem>
+                    <DetailLabel>Date:</DetailLabel>
+                    <DetailValue>{formatDate(selectedAppointment.date)}</DetailValue>
+                  </DetailItem>
+                  <DetailItem>
+                    <DetailLabel>Time:</DetailLabel>
+                    <DetailValue>{selectedAppointment.timeSlot}</DetailValue>
+                  </DetailItem>
+                  <DetailItem>
+                    <DetailLabel>Service:</DetailLabel>
+                    <DetailValue>{getAppointmentTypeLabel(selectedAppointment.appointmentType)}</DetailValue>
+                  </DetailItem>
+                </AppointmentDetails>
+              </ModalContent>
+              
+              <ModalActions>
+                <CancelModalButton onClick={() => setShowCancelModal(false)}>
+                  Keep Appointment
+                </CancelModalButton>
+                <DeleteModalButton onClick={() => handleDelete(selectedAppointment.id)}>
+                  Cancel Appointment
+                </DeleteModalButton>
+              </ModalActions>
+            </ModalContainer>
+          </ModalOverlay>
+        )}
+
+        {/* Appointment History Details Modal */}
+        {showHistoryModal && selectedAppointment && (
+          <ModalOverlay onClick={() => setShowHistoryModal(false)}>
+            <ModalContainer onClick={(e) => e.stopPropagation()}>
+              <ModalHeader>
+                <ModalTitle>Appointment Details</ModalTitle>
+                <CloseButton onClick={() => setShowHistoryModal(false)}>×</CloseButton>
+              </ModalHeader>
+              
+              <ModalContent>
+                <AppointmentInfoModal>
+                  <InfoItem>
+                    <InfoLabel>Pet Name:</InfoLabel>
+                    <InfoValue>{selectedAppointment.petName}</InfoValue>
+                  </InfoItem>
+                  <InfoItem>
+                    <InfoLabel>Service Type:</InfoLabel>
+                    <InfoValue>{getAppointmentTypeLabel(selectedAppointment.appointmentType)}</InfoValue>
+                  </InfoItem>
+                  <InfoItem>
+                    <InfoLabel>Appointment Date:</InfoLabel>
+                    <InfoValue>{formatDate(selectedAppointment.date)}</InfoValue>
+                  </InfoItem>
+                  <InfoItem>
+                    <InfoLabel>Time Slot:</InfoLabel>
+                    <InfoValue>{selectedAppointment.timeSlot}</InfoValue>
+                  </InfoItem>
+                  <InfoItem>
+                    <InfoLabel>Payment Method:</InfoLabel>
+                    <InfoValue>{selectedAppointment.paymentMethod || "Not specified"}</InfoValue>
+                  </InfoItem>
+                  <InfoItem>
+                    <InfoLabel>Status:</InfoLabel>
+                    <InfoValue>
+                      <HistoryStatusBadge status={selectedAppointment.status || "Completed"}>
+                        {selectedAppointment.status === "Done" ? "✅ Completed" : 
+                         selectedAppointment.status === "Not Attend" ? "❌ No Show" : 
+                         selectedAppointment.status === "Cancelled" ? "🚫 Cancelled" : selectedAppointment.status}
+                      </HistoryStatusBadge>
+                    </InfoValue>
+                  </InfoItem>
+                  {selectedAppointment.completedAt && (
+                    <InfoItem>
+                      <InfoLabel>Completed On:</InfoLabel>
+                      <InfoValue>{formatDate(selectedAppointment.completedAt)}</InfoValue>
+                    </InfoItem>
+                  )}
+                  {selectedAppointment.veterinarian && (
+                    <InfoItem>
+                      <InfoLabel>Veterinarian:</InfoLabel>
+                      <InfoValue>{selectedAppointment.veterinarian}</InfoValue>
+                    </InfoItem>
+                  )}
+                  {selectedAppointment.notes && (
+                    <InfoItem>
+                      <InfoLabel>Notes:</InfoLabel>
+                      <InfoValue>{selectedAppointment.notes}</InfoValue>
+                    </InfoItem>
+                  )}
+                </AppointmentInfoModal>
+              </ModalContent>
+              
+              <ModalActions>
+                <CancelModalButton onClick={() => setShowHistoryModal(false)}>
+                  Close
+                </CancelModalButton>
+              </ModalActions>
+            </ModalContainer>
+          </ModalOverlay>
+        )}
       </PageContainer>
     </>
   );
@@ -498,280 +855,101 @@ const UserDashboard: React.FC = () => {
 
 export default UserDashboard;
 
-/* ================== UPDATED PROFILE STYLES ================== */
-const ProfileContainer = styled.div`
-  position: relative;
-  display: flex;
-  align-items: center;
-  margin-right: 1.5rem;
-
-  @media (max-width: 768px) {
-    margin-right: 1rem;
-    margin-bottom: 1rem;
-  }
-`;
-
-const ProfileIconButton = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 0.8rem;
-  cursor: pointer;
-  padding: 0.5rem 1rem;
-  border-radius: 1.5rem;
-  transition: all 0.2s ease;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-
-  &:hover {
-    background: #f1f5f9;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-  }
-
-  @media (max-width: 768px) {
-    gap: 0.5rem;
-    padding: 0.4rem 0.8rem;
-  }
-`;
-
-const ProfileAvatar = styled.div`
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  overflow: hidden;
-  background: linear-gradient(135deg, #6BC1E1, #34B89C);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 2px solid #ffffff;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-
-  @media (max-width: 768px) {
-    width: 35px;
-    height: 35px;
-  }
-`;
-
-const ProfileImage = styled.img`
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-`;
-
-const DefaultAvatar = styled.div`
-  font-size: 1.2rem;
-  color: white;
-
-  @media (max-width: 768px) {
-    font-size: 1rem;
-  }
-`;
-
-const DefaultAvatarLarge = styled(DefaultAvatar)`
-  font-size: 3rem;
-`;
-
-const ProfileName = styled.span`
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: #2c3e50;
-  white-space: nowrap;
-
-  @media (max-width: 768px) {
-    font-size: 0.85rem;
-  }
-
-  @media (max-width: 480px) {
-    display: none;
-  }
-`;
-
-const EditIcon = styled.span`
-  font-size: 0.8rem;
-  opacity: 0.7;
-  transition: opacity 0.2s ease;
-  
-  ${ProfileIconButton}:hover & {
-    opacity: 1;
-  }
-`;
-
-const ProfileModalOverlay = styled.div`
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  padding: 1rem;
-`;
-
-const ProfileModal = styled.div`
-  background: white;
-  border-radius: 1rem;
-  width: 100%;
-  max-width: 450px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-  overflow: hidden;
-  animation: modalFadeIn 0.3s ease;
-
-  @keyframes modalFadeIn {
-    from {
-      opacity: 0;
-      transform: translateY(-20px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-`;
-
-const ModalHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.5rem;
-  border-bottom: 1px solid #e2e8f0;
-`;
-
-const ModalTitle = styled.h3`
-  margin: 0;
-  font-size: 1.4rem;
-  color: #2c3e50;
-`;
-
-const CloseButton = styled.button`
-  background: none;
-  border: none;
-  font-size: 1.5rem;
-  cursor: pointer;
-  color: #64748b;
-  padding: 0;
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-
-  &:hover {
-    background: #f1f5f9;
-    color: #334155;
-  }
-`;
-
-const ModalContent = styled.div`
-  padding: 1.5rem;
-`;
-
-const ProfileImageSection = styled.div`
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  margin-bottom: 1.5rem;
-`;
-
-const ProfileImagePreview = styled.div`
-  width: 100px;
-  height: 100px;
-  border-radius: 50%;
-  overflow: hidden;
-  margin-bottom: 1rem;
-  border: 3px solid #e2e8f0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #f8fafc;
-`;
-
-const ImageUploadLabel = styled.label`
-  padding: 0.5rem 1rem;
-  background: #f1f5f9;
-  color: #475569;
-  border-radius: 0.5rem;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: all 0.2s ease;
-  
-  &:hover {
-    background: #e2e8f0;
-  }
-`;
-
-const ImageUploadInput = styled.input`
-  display: none;
-`;
-
-const EmailDisplay = styled.p`
-  margin: 0;
-  padding: 0.75rem;
-  background: #f8fafc;
-  border-radius: 0.5rem;
-  color: #64748b;
-  font-size: 0.9rem;
-`;
-
-const ModalActions = styled.div`
-  display: flex;
-  justify-content: flex-end;
-  gap: 1rem;
-  padding: 1rem 1.5rem;
-  border-top: 1px solid #e2e8f0;
-`;
-
-const SaveProfileButton = styled.button`
-  background: linear-gradient(90deg, #34B89C, #6BC1E1);
-  color: white;
-  border: none;
-  padding: 0.7rem 1.5rem;
-  border-radius: 0.5rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-
-  &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(52, 184, 156, 0.3);
-  }
-`;
-
-/* ================== EXISTING RESPONSIVE STYLES ================== */
+// Styled Components
 const PageContainer = styled.div`
   display: flex;
   flex-direction: column;
   min-height: 100vh;
   width: 100%;
+  background: #f8f9fa;
+`;
+
+// Success Notification
+const SuccessNotification = styled.div`
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  background: #d4edda;
+  border: 1px solid #c3e6cb;
+  border-radius: 8px;
+  padding: 1rem 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  z-index: 1001;
+  animation: slideIn 0.3s ease;
+
+  @keyframes slideIn {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  @media (max-width: 768px) {
+    top: 10px;
+    right: 10px;
+    left: 10px;
+  }
+`;
+
+const SuccessIcon = styled.div`
+  background: #28a745;
+  color: white;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 0.9rem;
+`;
+
+const SuccessText = styled.span`
+  color: #155724;
+  font-weight: 600;
+  flex: 1;
+`;
+
+const CloseSuccessButton = styled.button`
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  color: #155724;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+
+  &:hover {
+    background: rgba(21, 87, 36, 0.1);
+  }
 `;
 
 const HeaderBar = styled.header`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1.2rem 2rem;
-  background: #ffffff;
-  box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.08);
+  padding: 1rem 2rem;
+  background: linear-gradient(135deg, #4ecdc4 0%, #44a08d 100%);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
   position: sticky;
   top: 0;
   z-index: 100;
-  flex-wrap: wrap;
-  gap: 1rem;
-
-  @media (max-width: 1024px) {
-    padding: 1.2rem 1.5rem;
-  }
 
   @media (max-width: 768px) {
     padding: 1rem;
     position: relative;
-  }
-
-  @media (max-width: 480px) {
-    padding: 0.8rem;
   }
 `;
 
@@ -782,8 +960,6 @@ const HeaderLeft = styled.div`
 
   @media (max-width: 768px) {
     gap: 1rem;
-    flex-direction: column;
-    align-items: flex-start;
   }
 `;
 
@@ -791,10 +967,7 @@ const HeaderRight = styled.div`
   display: flex;
   align-items: center;
   gap: 1.5rem;
-
-  @media (max-width: 1024px) {
-    gap: 1.2rem;
-  }
+  color: white;
 
   @media (max-width: 768px) {
     display: none;
@@ -809,12 +982,56 @@ const HeaderRight = styled.div`
   }
 `;
 
+const Logo = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: white;
+`;
+
+const LogoIcon = styled.div`
+  font-size: 2rem;
+  background: rgba(255, 255, 255, 0.2);
+  padding: 0.5rem;
+  border-radius: 10px;
+`;
+
+const LogoText = styled.div`
+  display: flex;
+  flex-direction: column;
+`;
+
+const ClinicName = styled.span`
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.2;
+`;
+
+const LogoSubtext = styled.span`
+  font-size: 0.85rem;
+  opacity: 0.9;
+  font-weight: 500;
+`;
+
+const UserInfo = styled.span`
+  font-size: 1rem;
+  font-weight: 600;
+  color: white;
+  margin-right: 1rem;
+
+  @media (max-width: 768px) {
+    margin-right: 0;
+    margin-bottom: 1rem;
+  }
+`;
+
 const MobileMenuButton = styled.button`
   display: none;
-  background: none;
+  background: rgba(255, 255, 255, 0.2);
   border: none;
   cursor: pointer;
   padding: 0.5rem;
+  border-radius: 5px;
   
   @media (max-width: 768px) {
     display: block;
@@ -830,9 +1047,9 @@ const HamburgerIcon = styled.div`
   height: 18px;
   
   span {
-    height: 2px;
+    height: 3px;
     width: 100%;
-    background-color: #2c3e50;
+    background-color: white;
     border-radius: 2px;
     transition: all 0.3s ease;
   }
@@ -850,177 +1067,186 @@ const HamburgerIcon = styled.div`
   }
 `;
 
-const WelcomeSection = styled.div`
+const ProfileContainer = styled.div`
+  position: relative;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+`;
 
-  @media (max-width: 768px) {
-    order: 2;
+const ProfileIconButton = styled.div`
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 10px;
+  transition: background-color 0.3s ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
   }
 `;
 
-const WelcomeTitle = styled.h2`
-  font-size: 1.8rem;
-  font-weight: bold;
-  background: linear-gradient(to right, #6bc1e1, #34b89c);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  margin: 0 0 0.3rem 0;
-  line-height: 1.2;
-
-  @media (max-width: 1024px) {
-    font-size: 1.6rem;
-  }
-
-  @media (max-width: 768px) {
-    font-size: 1.4rem;
-  }
-
-  @media (max-width: 480px) {
-    font-size: 1.2rem;
-  }
+const ProfileAvatar = styled.div`
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255, 255, 255, 0.3);
 `;
 
-const WelcomeSubtitle = styled.p`
-  font-size: 1rem;
-  color: #666;
-  margin: 0;
+const ProfileImage = styled.img`
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+`;
 
-  @media (max-width: 768px) {
-    font-size: 0.9rem;
-  }
+const DefaultAvatar = styled.div`
+  font-size: 1.2rem;
+  color: #4ecdc4;
+`;
 
-  @media (max-width: 480px) {
-    font-size: 0.8rem;
-  }
+const DefaultAvatarLarge = styled(DefaultAvatar)`
+  font-size: 4rem;
 `;
 
 const LogoutButton = styled.button`
-  background: linear-gradient(90deg, #34B89C, #6BC1E1);
-  color: #fff;
-  border: none;
-  padding: 0.7rem 1.5rem;
-  border-radius: 0.75rem;
-  font-size: 1rem;
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 0.6rem 1.2rem;
+  border-radius: 20px;
+  font-size: 0.9rem;
   cursor: pointer;
-  font-weight: 500;
-  transition: all 0.2s ease;
-  box-shadow: 0 4px 6px rgba(52, 184, 156, 0.2);
+  font-weight: 600;
+  transition: all 0.3s ease;
 
   &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 10px rgba(52, 184, 156, 0.3);
-  }
-  
-  @media (max-width: 1024px) {
-    padding: 0.6rem 1.2rem;
-    font-size: 0.9rem;
+    background: rgba(255, 255, 255, 0.3);
+    transform: translateY(-1px);
   }
 
   @media (max-width: 768px) {
     width: 100%;
-    padding: 0.8rem;
-    margin-top: 0.5rem;
   }
 `;
 
 const Content = styled.div`
   flex: 1;
+  padding: 2rem;
   display: flex;
   flex-direction: column;
-  gap: 2.5rem;
-  padding: 2.5rem;
-  overflow-y: auto;
+  gap: 2rem;
 
-  @media (max-width: 1024px) {
-    padding: 2rem;
-    gap: 2rem;
+  @media (max-width: 768px) {
+    padding: 1rem;
+    gap: 1.5rem;
   }
+`;
+
+const WelcomeSection = styled.div`
+  background: white;
+  padding: 2rem;
+  border-radius: 15px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  text-align: center;
+  border-top: 4px solid #4ecdc4;
 
   @media (max-width: 768px) {
     padding: 1.5rem;
-    gap: 1.5rem;
   }
+`;
 
-  @media (max-width: 480px) {
-    padding: 1rem;
-    gap: 1.2rem;
+const WelcomeTitle = styled.h1`
+  font-size: 2rem;
+  font-weight: 700;
+  color: #2c3e50;
+  margin: 0 0 0.5rem 0;
+
+  @media (max-width: 768px) {
+    font-size: 1.5rem;
+  }
+`;
+
+const WelcomeSubtitle = styled.p`
+  font-size: 1.1rem;
+  color: #7f8c8d;
+  margin: 0;
+
+  @media (max-width: 768px) {
+    font-size: 1rem;
   }
 `;
 
 const CardsGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 1.5rem;
-  margin-bottom: 1rem;
-
-  @media (max-width: 1200px) {
-    grid-template-columns: repeat(2, 1fr);
-  }
 
   @media (max-width: 768px) {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 1.2rem;
-  }
-  
-  @media (max-width: 580px) {
     grid-template-columns: 1fr;
+    gap: 1rem;
   }
 `;
 
 const Card = styled.div`
-  background: #ffffff;
-  border-radius: 1.2rem;
+  background: white;
+  border-radius: 15px;
   padding: 2rem;
-  box-shadow: 0px 6px 20px rgba(0, 0, 0, 0.08);
-  text-align: center;
-  transition: all 0.3s ease;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
   cursor: pointer;
-  border: 1px solid #eaeaea;
+  transition: all 0.3s ease;
+  border: 1px solid #e9ecef;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  border-top: 4px solid transparent;
 
   &:hover {
-    transform: translateY(-5px);
-    box-shadow: 0px 12px 30px rgba(0, 0, 0, 0.15);
-  }
-  
-  @media (max-width: 1024px) {
-    padding: 1.8rem;
+    transform: translateY(-3px);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    border-top-color: #4ecdc4;
   }
 
   @media (max-width: 768px) {
     padding: 1.5rem;
-    border-radius: 1rem;
-  }
-
-  @media (max-width: 480px) {
-    padding: 1.2rem;
+    gap: 1rem;
   }
 `;
 
 const CardIcon = styled.div`
-  font-size: 3rem;
-  margin-bottom: 1.2rem;
-  
-  @media (max-width: 1024px) {
-    font-size: 2.8rem;
-    margin-bottom: 1rem;
-  }
+  font-size: 2.5rem;
+  color: #4ecdc4;
+  background: linear-gradient(135deg, #e8f8f5 0%, #d4edda 100%);
+  padding: 1rem;
+  border-radius: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 80px;
+  height: 80px;
 
   @media (max-width: 768px) {
-    font-size: 2.5rem;
-    margin-bottom: 0.8rem;
+    font-size: 2rem;
+    min-width: 60px;
+    height: 60px;
+    padding: 0.8rem;
   }
+`;
+
+const CardContent = styled.div`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 `;
 
 const CardTitle = styled.h3`
   font-size: 1.3rem;
   font-weight: 600;
   color: #2c3e50;
-  margin-bottom: 0.8rem;
-  
-  @media (max-width: 1024px) {
-    font-size: 1.2rem;
-  }
+  margin: 0;
 
   @media (max-width: 768px) {
     font-size: 1.1rem;
@@ -1028,109 +1254,91 @@ const CardTitle = styled.h3`
 `;
 
 const CardText = styled.p`
-  font-size: 1rem;
-  color: #666;
-  line-height: 1.5;
-  
-  @media (max-width: 1024px) {
-    font-size: 0.95rem;
-  }
+  font-size: 0.95rem;
+  color: #6c757d;
+  margin: 0;
+  line-height: 1.4;
 
   @media (max-width: 768px) {
     font-size: 0.9rem;
   }
 `;
 
+const HistoryBadge = styled.div`
+  background: #4ecdc4;
+  color: white;
+  padding: 0.3rem 0.6rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  align-self: flex-start;
+  margin-top: 0.25rem;
+`;
+
 const AppointmentsSection = styled.div`
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-  margin-top: 1rem;
-
-  @media (max-width: 768px) {
-    gap: 1.2rem;
-  }
 `;
 
 const SectionHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.8rem;
   flex-wrap: wrap;
-  gap: 0.8rem;
+  gap: 1rem;
 `;
 
-const SectionTitle = styled.h3`
-  font-size: 1.6rem;
+const SectionTitleGroup = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+`;
+
+const SectionTitle = styled.h2`
+  font-size: 1.5rem;
   font-weight: 600;
   color: #2c3e50;
   margin: 0;
-  
-  @media (max-width: 1024px) {
-    font-size: 1.5rem;
-  }
 
   @media (max-width: 768px) {
     font-size: 1.3rem;
   }
-
-  @media (max-width: 480px) {
-    font-size: 1.2rem;
-  }
 `;
 
 const AppointmentCount = styled.span`
-  background: #e8f4ff;
-  color: #0077ff;
-  padding: 0.4rem 1rem;
-  border-radius: 1.2rem;
-  font-size: 0.9rem;
-  font-weight: 500;
-
-  @media (max-width: 480px) {
-    font-size: 0.8rem;
-    padding: 0.3rem 0.8rem;
-  }
+  background: #4ecdc4;
+  color: white;
+  padding: 0.4rem 0.8rem;
+  border-radius: 15px;
+  font-size: 0.85rem;
+  font-weight: 600;
 `;
 
 const AppointmentsList = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-  gap: 1.5rem;
-
-  @media (max-width: 1024px) {
-    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  }
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
 
   @media (max-width: 768px) {
     grid-template-columns: 1fr;
-    gap: 1.2rem;
   }
 `;
 
 const AppointmentCard = styled.div`
-  background: #ffffff;
-  padding: 2rem;
-  border-radius: 1.2rem;
-  box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.08);
+  background: white;
+  padding: 1.5rem;
+  border-radius: 15px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  border: 1px solid #e9ecef;
+  border-left: 4px solid #ffc107;
   display: flex;
   flex-direction: column;
-  gap: 1.2rem;
-  border: 1px solid #f0f0f0;
-  
-  @media (max-width: 1024px) {
-    padding: 1.8rem;
-  }
+  gap: 1rem;
 
   @media (max-width: 768px) {
-    padding: 1.5rem;
-    border-radius: 1rem;
-  }
-
-  @media (max-width: 480px) {
     padding: 1.2rem;
-    gap: 1rem;
   }
 `;
 
@@ -1138,413 +1346,647 @@ const AppointmentHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  gap: 1rem;
   flex-wrap: wrap;
-  gap: 0.8rem;
+`;
+
+const AppointmentLeftSide = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+`;
+
+const AppointmentStatus = styled.div`
+  font-weight: 600;
+  color: #2c3e50;
+  font-size: 1rem;
 `;
 
 const AppointmentInfo = styled.div`
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
 `;
 
-const AppointmentDate = styled.span`
-  font-size: 1.2rem;
+const AppointmentLabel = styled.span`
   font-weight: 600;
-  color: #2c3e50;
-  
-  @media (max-width: 1024px) {
-    font-size: 1.1rem;
-  }
-
-  @media (max-width: 768px) {
-    font-size: 1rem;
-  }
+  color: #6c757d;
+  font-size: 0.85rem;
 `;
 
-const AppointmentTime = styled.span`
-  font-size: 1rem;
-  color: #666;
-  background: #f7f9fc;
-  padding: 0.4rem 0.9rem;
-  border-radius: 0.75rem;
-  
-  @media (max-width: 1024px) {
-    font-size: 0.95rem;
-  }
+const AppointmentValue = styled.span`
+  color: #2c3e50;
+  font-size: 0.9rem;
+`;
 
-  @media (max-width: 768px) {
-    font-size: 0.9rem;
-  }
+const AppointmentSeparator = styled.span`
+  color: #dee2e6;
+  margin: 0 0.25rem;
 `;
 
 const StatusBadge = styled.span<{ status: string }>`
-  padding: 0.4rem 0.9rem;
-  border-radius: 0.75rem;
-  font-size: 0.9rem;
-  font-weight: 500;
+  padding: 0.4rem 0.8rem;
+  border-radius: 15px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
   background: ${props => {
     switch (props.status) {
-      case "Confirmed": return "#e7f6e9";
-      case "Cancelled": return "#feeceb";
-      case "Completed": return "#e8f4ff";
-      default: return "#fff4e6";
+      case "Confirmed": return "#d4edda";
+      case "Cancelled": return "#f8d7da";
+      case "Completed": return "#d1ecf1";
+      default: return "#fff3cd";
     }
   }};
   color: ${props => {
     switch (props.status) {
-      case "Confirmed": return "#28a745";
-      case "Cancelled": return "#dc3545";
-      case "Completed": return "#0077ff";
-      default: return "#ffc107";
+      case "Confirmed": return "#155724";
+      case "Cancelled": return "#721c24";
+      case "Completed": return "#0c5460";
+      default: return "#856404";
     }
   }};
-
-  @media (max-width: 480px) {
-    font-size: 0.8rem;
-    padding: 0.3rem 0.8rem;
-  }
 `;
 
-const AppointmentDetails = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 0.8rem;
-`;
-
-const DetailItem = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 0.8rem;
-  flex-wrap: wrap;
-`;
-
-const DetailLabel = styled.span`
+const HistoryStatusBadge = styled.span<{ status: string }>`
+  padding: 0.4rem 0.8rem;
+  border-radius: 15px;
+  font-size: 0.75rem;
   font-weight: 600;
-  color: #2c3e50;
-  min-width: 4rem;
-  font-size: 1rem;
-  
-  @media (max-width: 768px) {
-    min-width: 3.5rem;
-    font-size: 0.95rem;
-  }
-
-  @media (max-width: 480px) {
-    min-width: 3rem;
-    font-size: 0.9rem;
-  }
-`;
-
-const DetailValue = styled.span`
-  color: #666;
-  font-size: 1rem;
-  
-  @media (max-width: 768px) {
-    font-size: 0.95rem;
-  }
-
-  @media (max-width: 480px) {
-    font-size: 0.9rem;
-  }
+  white-space: nowrap;
+  background: ${props => {
+    switch (props.status) {
+      case "Done": return "#d4edda";
+      case "Not Attend": return "#fff3cd";
+      case "Cancelled": return "#f8d7da";
+      default: return "#e2e6ea";
+    }
+  }};
+  color: ${props => {
+    switch (props.status) {
+      case "Done": return "#155724";
+      case "Not Attend": return "#856404";
+      case "Cancelled": return "#721c24";
+      default: return "#6c757d";
+    }
+  }};
 `;
 
 const ButtonRow = styled.div`
   display: flex;
   gap: 1rem;
   margin-top: 0.5rem;
-  
+
   @media (max-width: 480px) {
     flex-direction: column;
-    gap: 0.8rem;
+    gap: 0.5rem;
   }
 `;
 
 const EditButton = styled.button`
-  background: #2563eb;
+  background: #4ecdc4;
   color: white;
   border: none;
-  padding: 0.8rem 1.2rem;
-  border-radius: 0.6rem;
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
   cursor: pointer;
-  font-size: 0.95rem;
-  font-weight: 500;
-  transition: all 0.2s ease;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: background-color 0.3s ease;
   flex: 1;
 
   &:hover {
-    background: #1d4ed8;
-    transform: translateY(-2px);
-  }
-  
-  @media (max-width: 1024px) {
-    padding: 0.7rem 1rem;
-    font-size: 0.9rem;
-  }
-
-  @media (max-width: 480px) {
-    width: 100%;
-    padding: 0.8rem;
+    background: #45b7b8;
   }
 `;
 
-const CancelButton = styled.button`
-  background: #dc3545;
+const DeleteButton = styled.button`
+  background: #e74c3c;
   color: white;
   border: none;
-  padding: 0.8rem 1.2rem;
-  border-radius: 0.6rem;
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
   cursor: pointer;
-  font-size: 0.95rem;
-  font-weight: 500;
-  transition: all 0.2s ease;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: background-color 0.3s ease;
   flex: 1;
 
   &:hover {
-    background: #b02a37;
-    transform: translateY(-2px);
-  }
-  
-  @media (max-width: 1024px) {
-    padding: 0.7rem 1rem;
-    font-size: 0.9rem;
-  }
-
-  @media (max-width: 480px) {
-    width: 100%;
-    padding: 0.8rem;
+    background: #c0392b;
   }
 `;
 
 const NoAppointments = styled.div`
   text-align: center;
-  padding: 3.5rem 2rem;
-  background: #ffffff;
-  border-radius: 1.2rem;
-  box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.08);
-  border: 1px solid #f0f0f0;
-  
-  @media (max-width: 1024px) {
-    padding: 3rem 1.5rem;
-  }
+  padding: 3rem 2rem;
+  background: white;
+  border-radius: 15px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  border: 1px solid #e9ecef;
+  border-top: 4px solid #4ecdc4;
 
   @media (max-width: 768px) {
-    padding: 2.5rem 1.2rem;
-    border-radius: 1rem;
-  }
-
-  @media (max-width: 480px) {
     padding: 2rem 1rem;
   }
 `;
 
 const NoAppointmentsIcon = styled.div`
-  font-size: 4rem;
-  margin-bottom: 1.5rem;
-  opacity: 0.7;
-  
-  @media (max-width: 1024px) {
-    font-size: 3.5rem;
-    margin-bottom: 1.2rem;
-  }
-
-  @media (max-width: 768px) {
-    font-size: 3rem;
-    margin-bottom: 1rem;
-  }
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  opacity: 0.5;
 `;
 
 const NoAppointmentsText = styled.p`
-  font-size: 1.2rem;
-  color: #666;
-  margin-bottom: 2rem;
-  
-  @media (max-width: 1024px) {
-    font-size: 1.1rem;
-    margin-bottom: 1.8rem;
-  }
-
-  @media (max-width: 768px) {
-    font-size: 1rem;
-    margin-bottom: 1.5rem;
-  }
+  font-size: 1.1rem;
+  color: #6c757d;
+  margin-bottom: 1.5rem;
 `;
 
 const ScheduleButton = styled.button`
-  background: linear-gradient(90deg, #34B89C, #6BC1E1);
+  background: #4ecdc4;
   color: white;
   border: none;
-  padding: 1rem 2rem;
-  border-radius: 0.75rem;
-  font-size: 1.1rem;
-  font-weight: 500;
+  padding: 0.8rem 1.5rem;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 6px rgba(52, 184, 156, 0.2);
+  transition: background-color 0.3s ease;
 
   &:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 6px 12px rgba(52, 184, 156, 0.3);
-  }
-  
-  @media (max-width: 1024px) {
-    padding: 0.9rem 1.8rem;
-    font-size: 1rem;
-  }
-
-  @media (max-width: 768px) {
-    padding: 0.8rem 1.5rem;
-    font-size: 0.95rem;
+    background: #45b7b8;
   }
 `;
 
-const EditForm = styled.div`
+// Medical Records Modal Components
+const LargeMedicalModal = styled.div`
+  background: white;
+  border-radius: 15px;
+  width: 95%;
+  max-width: 800px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+`;
+
+const MedicalModalContent = styled.div`
+  padding: 1.5rem;
   display: flex;
   flex-direction: column;
-  gap: 1.2rem;
+  gap: 2rem;
 `;
 
-const EditTitle = styled.h4`
+const MedicalRecordsSection = styled.div`
+  padding: 1.5rem;
+  background: #f8f9fa;
+  border-radius: 12px;
+  border-left: 4px solid #4ecdc4;
+  text-align: center;
+`;
+
+const SectionSubtitle = styled.h3`
   font-size: 1.2rem;
   font-weight: 600;
   color: #2c3e50;
-  margin: 0 0 0.5rem 0;
-  
-  @media (max-width: 768px) {
-    font-size: 1.1rem;
+  margin: 0 0 1rem 0;
+`;
+
+const ViewRecordsButton = styled.button`
+  background: #4ecdc4;
+  color: white;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+
+  &:hover {
+    background: #45b7b8;
   }
+`;
+
+const AppointmentHistorySection = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+`;
+
+const HistorySectionHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+`;
+
+const HistoryCount = styled.span`
+  background: #6c757d;
+  color: white;
+  padding: 0.4rem 0.8rem;
+  border-radius: 15px;
+  font-size: 0.85rem;
+  font-weight: 600;
+`;
+
+const NoHistoryMessage = styled.div`
+  text-align: center;
+  padding: 2rem;
+  background: #f8f9fa;
+  border-radius: 12px;
+  border: 1px solid #e9ecef;
+`;
+
+const NoHistoryIcon = styled.div`
+  font-size: 2.5rem;
+  margin-bottom: 1rem;
+  opacity: 0.5;
+`;
+
+const NoHistoryText = styled.p`
+  color: #6c757d;
+  margin: 0;
+  font-size: 1rem;
+`;
+
+const HistoryList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 400px;
+  overflow-y: auto;
+`;
+
+const HistoryCard = styled.div`
+  background: white;
+  padding: 1rem;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  border: 1px solid #e9ecef;
+  border-left: 4px solid #6c757d;
+  cursor: pointer;
+  transition: all 0.3s ease;
+
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  }
+`;
+
+const HistoryCardHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+`;
+
+const HistoryCardLeft = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+`;
+
+const PetName = styled.div`
+  font-weight: 600;
+  color: #2c3e50;
+  font-size: 0.95rem;
+`;
+
+const ServiceInfo = styled.div`
+  color: #4ecdc4;
+  font-size: 0.85rem;
+  font-weight: 500;
+`;
+
+const DateInfo = styled.div`
+  color: #6c757d;
+  font-size: 0.8rem;
+`;
+
+const ClickHint = styled.div`
+  font-size: 0.75rem;
+  color: #4ecdc4;
+  font-weight: 500;
+  text-align: center;
+  opacity: 0.7;
+`;
+
+// Modal Components
+const ModalOverlay = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+`;
+
+const ModalContainer = styled.div`
+  background: white;
+  border-radius: 15px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+`;
+
+const ModalHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #dee2e6;
+`;
+
+const ModalTitle = styled.h3`
+  margin: 0;
+  font-size: 1.3rem;
+  color: #2c3e50;
+  font-weight: 600;
+`;
+
+const CloseButton = styled.button`
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #6c757d;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+
+  &:hover {
+    background: #f8f9fa;
+    color: #2c3e50;
+  }
+`;
+
+const ModalContent = styled.div`
+  padding: 1.5rem;
+`;
+
+const ModalActions = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  padding: 1.5rem;
+  border-top: 1px solid #dee2e6;
 
   @media (max-width: 480px) {
-    font-size: 1rem;
+    flex-direction: column;
   }
+`;
+
+const CancelModalButton = styled.button`
+  background: #6c757d;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  flex: 1;
+
+  &:hover {
+    background: #5a6268;
+  }
+`;
+
+const ConfirmButton = styled.button`
+  background: #4ecdc4;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  flex: 1;
+
+  &:hover {
+    background: #45b7b8;
+  }
+`;
+
+const DeleteModalButton = styled.button`
+  background: #e74c3c;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  flex: 1;
+
+  &:hover {
+    background: #c0392b;
+  }
+`;
+
+const SaveProfileButton = styled(ConfirmButton)`
+`;
+
+const AppointmentInfoModal = styled.div`
+  background: #f8f9fa;
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+  border-left: 4px solid #4ecdc4;
+`;
+
+const InfoItem = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+`;
+
+const InfoLabel = styled.span`
+  font-weight: 600;
+  color: #495057;
+`;
+
+const InfoValue = styled.span`
+  color: #2c3e50;
+  font-weight: 500;
+`;
+
+const WarningMessage = styled.div`
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  background: #fff3cd;
+  border: 1px solid #ffeaa7;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+`;
+
+const WarningIcon = styled.div`
+  font-size: 1.5rem;
+  flex-shrink: 0;
+`;
+
+const WarningText = styled.p`
+  color: #856404;
+  margin: 0;
+  line-height: 1.4;
+`;
+
+const AppointmentDetails = styled.div`
+  background: #f8f9fa;
+  padding: 1rem;
+  border-radius: 8px;
+  border-left: 4px solid #e74c3c;
+`;
+
+const DetailItem = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+`;
+
+const DetailLabel = styled.span`
+  font-weight: 600;
+  color: #495057;
+`;
+
+const DetailValue = styled.span`
+  color: #2c3e50;
+  font-weight: 500;
 `;
 
 const FormGroup = styled.div`
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  margin-bottom: 1rem;
 `;
 
 const Label = styled.label`
   font-weight: 600;
-  color: #2c3e50;
-  font-size: 0.95rem;
-
-  @media (max-width: 480px) {
-    font-size: 0.9rem;
-  }
+  color: #495057;
+  font-size: 0.9rem;
 `;
 
 const DateInput = styled.input`
-  padding: 0.9rem 1rem;
-  border-radius: 0.6rem;
-  border: 1px solid #ddd;
-  font-size: 0.95rem;
-  transition: all 0.2s ease;
+  padding: 0.75rem;
+  border: 1px solid #ced4da;
+  border-radius: 8px;
+  font-size: 1rem;
   
   &:focus {
     outline: none;
-    border-color: #6BC1E1;
-    box-shadow: 0 0 0 3px rgba(107, 193, 225, 0.2);
-  }
-  
-  @media (max-width: 1024px) {
-    padding: 0.8rem;
-    font-size: 0.9rem;
-  }
-
-  @media (max-width: 768px) {
-    padding: 0.7rem;
+    border-color: #4ecdc4;
+    box-shadow: 0 0 0 2px rgba(78, 205, 196, 0.2);
   }
 `;
 
 const SelectInput = styled.select`
-  padding: 0.9rem 1rem;
-  border-radius: 0.6rem;
-  border: 1px solid #ddd;
-  font-size: 0.95rem;
-  transition: all 0.2s ease;
+  padding: 0.75rem;
+  border: 1px solid #ced4da;
+  border-radius: 8px;
+  font-size: 1rem;
+  background: white;
   
   &:focus {
     outline: none;
-    border-color: #6BC1E1;
-    box-shadow: 0 0 0 3px rgba(107, 193, 225, 0.2);
-  }
-  
-  @media (max-width: 1024px) {
-    padding: 0.8rem;
-    font-size: 0.9rem;
-  }
-
-  @media (max-width: 768px) {
-    padding: 0.7rem;
+    border-color: #4ecdc4;
+    box-shadow: 0 0 0 2px rgba(78, 205, 196, 0.2);
   }
 `;
 
-const EditButtonRow = styled.div`
+// Profile Modal Components
+const ProfileModalOverlay = styled(ModalOverlay)``;
+
+const LargeProfileModal = styled(ModalContainer)`
+  max-width: 600px;
+`;
+
+const ProfileImageSection = styled.div`
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 1.5rem;
   gap: 1rem;
-  margin-top: 0.8rem;
-  
-  @media (max-width: 480px) {
-    flex-direction: column;
-    gap: 0.8rem;
-  }
 `;
 
-const SaveButton = styled.button`
-  flex: 1;
-  background: linear-gradient(90deg, #34B89C, #6BC1E1);
+const ProfileImagePreview = styled.div`
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 3px solid #4ecdc4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f8f9fa;
+`;
+
+const ImageUploadLabel = styled.label`
+  padding: 0.6rem 1.2rem;
+  background: #4ecdc4;
   color: white;
-  border: none;
-  border-radius: 0.6rem;
-  font-weight: 500;
+  border-radius: 8px;
   cursor: pointer;
-  padding: 0.9rem 0;
-  transition: all 0.2s ease;
-  font-size: 0.95rem;
-
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: background-color 0.3s ease;
+  
   &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(52, 184, 156, 0.3);
-  }
-
-  @media (max-width: 480px) {
-    width: 100%;
+    background: #45b7b8;
   }
 `;
 
-const CancelEditButton = styled.button`
-  flex: 1;
-  background: #f1f1f1;
-  color: #666;
-  border: none;
-  border-radius: 0.6rem;
-  font-weight: 500;
-  cursor: pointer;
-  padding: 0.9rem 0;
-  transition: all 0.2s ease;
-  font-size: 0.95rem;
-
-  &:hover {
-    background: #e5e5e5;
-    transform: translateY(-2px);
-  }
-
-  @media (max-width: 480px) {
-    width: 100%;
-  }
+const ImageUploadInput = styled.input`
+  display: none;
 `;
 
 const EditInput = styled.input`
-  padding: 0.9rem 1rem;
-  border-radius: 0.6rem;
-  border: 1px solid #ddd;
-  font-size: 0.95rem;
-  transition: all 0.2s ease;
+  padding: 0.75rem;
+  border: 1px solid #ced4da;
+  border-radius: 8px;
+  font-size: 1rem;
+  
   &:focus {
     outline: none;
-    border-color: #6BC1E1;
-    box-shadow: 0 0 0 3px rgba(107, 193, 225, 0.2);
+    border-color: #4ecdc4;
+    box-shadow: 0 0 0 2px rgba(78, 205, 196, 0.2);
   }
+`;
+
+const EmailDisplay = styled.div`
+  padding: 0.75rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  color: #6c757d;
+  font-size: 1rem;
+  border: 1px solid #e9ecef;
 `;

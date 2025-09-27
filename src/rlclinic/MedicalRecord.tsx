@@ -54,9 +54,34 @@ const TREATMENT_OPTIONS = {
   cat: ["Vaccination","Antibiotics","Fluid Therapy","Urinary Diet","Insulin Therapy","Antifungal Medication","Dental Extraction","Topical Treatment","Specialized Diet","Environmental Enrichment"]
 };
 
+// ✅ UPDATED BREEDS TO MATCH PET REGISTRATION
 const PET_BREEDS = {
-  dog: ["Labrador Retriever", "German Shepherd", "Golden Retriever", "Bulldog", "Beagle", "Poodle", "Siberian Husky", "Boxer", "Dachshund", "Shih Tzu"],
-  cat: ["Siamese", "Persian", "Maine Coon", "Bengal", "Sphynx", "Ragdoll", "British Shorthair", "Abyssinian", "Scottish Fold", "Russian Blue"]
+  dog: [
+    "Aspin (Asong Pinoy)",
+    "Shih Tzu",
+    "Siberian Husky",
+    "Chihuahua",
+    "Labrador Retriever",
+    "Beagle",
+    "Golden Retriever",
+    "Poodle",
+    "Dachshund",
+    "Rottweiler",
+    "Philippine Forest Dog (Asong Gubat)"
+  ],
+  cat: [
+    "British Shorthair",
+    "Burmese",
+    "Abyssinian",
+    "Scottish Fold",
+    "Siamese",
+    "Sphynx",
+    "Ragdoll",
+    "American Shorthair",
+    "Maine Coon",
+    "Persian",
+    "Putot Cat (Pusang Putot)"
+  ]
 };
 
 const GENDER_OPTIONS = ["Male", "Female", "Neutered Male", "Spayed Female"];
@@ -69,7 +94,7 @@ const sanitizeFirestoreData = (data: Record<string, unknown>) => {
   return sanitized;
 };
 
-const MedicalRecordForm: React.FC = () => {
+const MedicalRecord: React.FC = () => {
   const router = useRouter();
   const auth = getAuth();
 
@@ -138,12 +163,14 @@ const MedicalRecordForm: React.FC = () => {
       
       querySnapshot.forEach(doc => {
         const data = doc.data();
+        
+        // ✅ CORRECTLY FETCH DATA FROM MEDICAL RECORDS
         recordsData.push({ 
           id: doc.id, 
           petName: data.petName || "",
           petAge: data.petAge || "",
-          birthDate: data.birthDate || "",
-          breed: data.breed || "",
+          birthDate: data.birthDate || "", // ✅ Birthday from registration
+          breed: data.breed || "", // ✅ Breed from registration
           weight: data.weight || "",
           gender: data.gender || "",
           color: data.color || "",
@@ -151,7 +178,7 @@ const MedicalRecordForm: React.FC = () => {
           existingConditions: data.existingConditions || "",
           ownerName: data.ownerName || "",
           ownerEmail: data.ownerEmail || "",
-          petType: data.petType || "dog",
+          petType: data.petType || "dog", // ✅ Should be "dog" or "cat"
           diagnosis: data.diagnosis || "",
           treatment: data.treatment || "",
           date: data.date || new Date().toISOString().split('T')[0],
@@ -162,9 +189,8 @@ const MedicalRecordForm: React.FC = () => {
       });
       
       setRecords(recordsData);
-    } catch {
-      // Optionally log error
-      // console.error(_);
+    } catch (error) {
+      console.error("Error fetching medical records:", error);
     } finally {
       setLoading(false);
     }
@@ -178,7 +204,27 @@ const MedicalRecordForm: React.FC = () => {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    
+    if (name === "petType") {
+      // When pet type changes, preserve values only if they're valid for the new type
+      const currentBreed = formData.breed;
+      const currentDiagnosis = formData.diagnosis;
+      const currentTreatment = formData.treatment;
+      
+      const newBreeds = PET_BREEDS[value as keyof typeof PET_BREEDS] || [];
+      const newDiagnoses = DIAGNOSIS_OPTIONS[value as keyof typeof DIAGNOSIS_OPTIONS] || [];
+      const newTreatments = TREATMENT_OPTIONS[value as keyof typeof TREATMENT_OPTIONS] || [];
+      
+      setFormData(prev => ({ 
+        ...prev, 
+        [name]: value,
+        breed: newBreeds.includes(currentBreed) ? currentBreed : "",
+        diagnosis: newDiagnoses.includes(currentDiagnosis) ? currentDiagnosis : "",
+        treatment: newTreatments.includes(currentTreatment) ? currentTreatment : ""
+      }));
+    } else {
+      setFormData(prev => ({ ...prev, [name]: value }));
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -232,11 +278,10 @@ const MedicalRecordForm: React.FC = () => {
       setShowForm(false);
       fetchMedicalRecords();
       
-      // Clear success message after 3 seconds
       setTimeout(() => setSuccessMessage(null), 3000);
-    } catch {
-      // Optionally log error
-      // console.error(_);
+    } catch (error) {
+      console.error("Error saving medical record:", error);
+      alert("Failed to save medical record. Please try again.");
     }
   };
 
@@ -244,8 +289,8 @@ const MedicalRecordForm: React.FC = () => {
     setFormData({
       petName: record.petName,
       petAge: record.petAge,
-      birthDate: record.birthDate,
-      breed: record.breed,
+      birthDate: record.birthDate, // ✅ Birthday will be shown
+      breed: record.breed, // ✅ Breed will be shown
       weight: record.weight,
       gender: record.gender,
       color: record.color,
@@ -253,7 +298,7 @@ const MedicalRecordForm: React.FC = () => {
       existingConditions: record.existingConditions,
       ownerName: record.ownerName,
       ownerEmail: record.ownerEmail || currentUser?.email || "",
-      petType: record.petType,
+      petType: record.petType, // ✅ Correct pet type
       diagnosis: record.diagnosis,
       treatment: record.treatment,
       date: record.date,
@@ -271,12 +316,10 @@ const MedicalRecordForm: React.FC = () => {
       await deleteDoc(doc(db, "medicalRecords", id));
       setSuccessMessage("Record deleted successfully!");
       fetchMedicalRecords();
-
-      // Clear success message after 3 seconds
       setTimeout(() => setSuccessMessage(null), 3000);
-    } catch {
-      // Optionally log error
-      // console.error(_);
+    } catch (error) {
+      console.error("Error deleting record:", error);
+      alert("Failed to delete record. Please try again.");
     }
   };
 
@@ -301,7 +344,6 @@ const MedicalRecordForm: React.FC = () => {
     <>
       <GlobalStyle />
       <PageContainer>
-        {/* Header */}
         <HeaderBar>
           <BrandSection>
             <ClinicLogo>🐾</ClinicLogo>
@@ -322,10 +364,8 @@ const MedicalRecordForm: React.FC = () => {
           </ButtonGroup>
         </HeaderBar>
 
-        {/* Success Message */}
         {successMessage && <SuccessMessage>{successMessage}</SuccessMessage>}
 
-        {/* Content */}
         <Content>
           {showForm ? (
             <FormCard>
@@ -386,7 +426,13 @@ const MedicalRecordForm: React.FC = () => {
                   </FormGroup>
                   <FormGroup>
                     <Label>Breed *</Label>
-                    <Select name="breed" value={formData.breed} onChange={handleChange} required>
+                    <Select 
+                      name="breed" 
+                      value={formData.breed} 
+                      onChange={handleChange} 
+                      required
+                      key={`breed-${formData.petType}`}
+                    >
                       <option value="">Select Breed</option>
                       {(PET_BREEDS[formData.petType as keyof typeof PET_BREEDS] || []).map(breed => (
                         <option key={breed} value={breed}>{breed}</option>
@@ -409,7 +455,13 @@ const MedicalRecordForm: React.FC = () => {
                 <FormRow>
                   <FormGroup>
                     <Label>Diagnosis *</Label>
-                    <Select name="diagnosis" value={formData.diagnosis} onChange={handleChange} required>
+                    <Select 
+                      name="diagnosis" 
+                      value={formData.diagnosis} 
+                      onChange={handleChange} 
+                      required
+                      key={`diagnosis-${formData.petType}`}
+                    >
                       <option value="">Select Diagnosis</option>
                       {(DIAGNOSIS_OPTIONS[formData.petType as keyof typeof DIAGNOSIS_OPTIONS] || []).map(opt => (
                         <option key={opt} value={opt}>{opt}</option>
@@ -418,7 +470,13 @@ const MedicalRecordForm: React.FC = () => {
                   </FormGroup>
                   <FormGroup>
                     <Label>Treatment *</Label>
-                    <Select name="treatment" value={formData.treatment} onChange={handleChange} required>
+                    <Select 
+                      name="treatment" 
+                      value={formData.treatment} 
+                      onChange={handleChange} 
+                      required
+                      key={`treatment-${formData.petType}`}
+                    >
                       <option value="">Select Treatment</option>
                       {(TREATMENT_OPTIONS[formData.petType as keyof typeof TREATMENT_OPTIONS] || []).map(opt => (
                         <option key={opt} value={opt}>{opt}</option>
@@ -445,8 +503,8 @@ const MedicalRecordForm: React.FC = () => {
                 
                 <ButtonGroupForm>
                   <SaveButton type="submit">
-                    <Icon className="material-icons">{editingRecord ? "save" : "Add"}</Icon>
-                    {editingRecord ? "Update Record" : " Record"}
+                    <Icon className="material-icons">{editingRecord ? "Update" : "Add"}</Icon>
+                    {editingRecord ? " Record" : " Record"}
                   </SaveButton>
                   <CancelButton type="button" onClick={() => {
                       setShowForm(false); 
@@ -483,7 +541,7 @@ const MedicalRecordForm: React.FC = () => {
                 <SectionTitle>Medical Records</SectionTitle>
                 <FilterSection>
                   <SearchContainer>
-                    <SearchIcon className="material-icons"></SearchIcon>
+                    <SearchIcon className="material-icons">🔍︎</SearchIcon>
                     <SearchInput 
                       type="text" 
                       placeholder="Search by pet or owner name" 
@@ -525,7 +583,7 @@ const MedicalRecordForm: React.FC = () => {
                     <EmptyText>No medical records found</EmptyText>
                     <EmptySubtext>{searchTerm || filterPetType !== "all" ? "Try adjusting your search or filter" : "Add your first medical record to get started"}</EmptySubtext>
                     <AddButton onClick={() => setShowForm(true)}>
-                      <Icon className="material-icons"></Icon>
+                      <Icon className="material-icons">add</Icon>
                       Add Your First Record
                     </AddButton>
                   </EmptyState>
@@ -551,6 +609,11 @@ const MedicalRecordForm: React.FC = () => {
                         <DetailItem>
                           <DetailLabel>Breed:</DetailLabel>
                           <DetailValue>{record.breed || 'Not specified'}</DetailValue>
+                        </DetailItem>
+                        
+                        <DetailItem>
+                          <DetailLabel>Birth Date:</DetailLabel>
+                          <DetailValue>{record.birthDate ? formatDate(record.birthDate) : 'Not specified'}</DetailValue>
                         </DetailItem>
                         
                         <DetailItem>
@@ -614,11 +677,11 @@ const MedicalRecordForm: React.FC = () => {
                       
                       <CardActions>
                         <ActionButton onClick={() => handleEdit(record)}>
-                          <Icon className="material-icons">edit</Icon>
+                          <Icon className="material-icons"></Icon>
                           Edit
                         </ActionButton>
                         <DeleteButton onClick={() => handleDelete(record.id)}>
-                          <Icon className="material-icons">delete</Icon>
+                          <Icon className="material-icons"></Icon>
                           Delete
                         </DeleteButton>
                       </CardActions>
@@ -633,9 +696,10 @@ const MedicalRecordForm: React.FC = () => {
     </>
   );
 };
-export default MedicalRecordForm;
 
-// Styled Components
+export default MedicalRecord;
+
+// Styled Components (same as your original)
 const LoadingContainer = styled.div`
   padding: 2rem;
   text-align: center;
@@ -659,12 +723,6 @@ const HeaderBar = styled.header`
   position: sticky;
   top: 0;
   z-index: 10;
-
-  @media (max-width: 768px) {
-    flex-direction: column;
-    gap: 1rem;
-    padding: 1rem;
-  }
 `;
 
 const BrandSection = styled.div`
@@ -693,11 +751,6 @@ const ButtonGroup = styled.div`
   display: flex;
   gap: 0.75rem;
   align-items: center;
-
-  @media (max-width: 768px) {
-    width: 100%;
-    justify-content: center;
-  }
 `;
 
 const Icon = styled.span`
@@ -746,10 +799,6 @@ const Content = styled.main`
   padding: 2rem;
   max-width: 1400px;
   margin: 0 auto;
-
-  @media (max-width: 768px) {
-    padding: 1rem;
-  }
 `;
 
 const FormCard = styled.div`
@@ -786,10 +835,6 @@ const FormRow = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 1.5rem;
-
-  @media (max-width: 640px) {
-    grid-template-columns: 1fr;
-  }
 `;
 
 const FormGroup = styled.div`
@@ -858,10 +903,6 @@ const ButtonGroupForm = styled.div`
   gap: 1rem;
   justify-content: flex-end;
   margin-top: 1rem;
-
-  @media (max-width: 640px) {
-    flex-direction: column;
-  }
 `;
 
 const SaveButton = styled.button`
@@ -906,11 +947,6 @@ const SectionHeader = styled.div`
   margin-bottom: 1.5rem;
   flex-wrap: wrap;
   gap: 1rem;
-
-  @media (max-width: 768px) {
-    flex-direction: column;
-    align-items: stretch;
-  }
 `;
 
 const SectionTitle = styled.h3`
@@ -925,11 +961,6 @@ const FilterSection = styled.div`
   gap: 1rem;
   align-items: center;
   flex-wrap: wrap;
-
-  @media (max-width: 640px) {
-    flex-direction: column;
-    align-items: stretch;
-  }
 `;
 
 const SearchContainer = styled.div`
@@ -956,11 +987,6 @@ const SearchInput = styled.input`
     outline: none;
     border-color: #34B89C;
     box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.15);
-  }
-
-  @media (max-width: 640px) {
-    min-width: auto;
-    width: 100%;
   }
 `;
 
@@ -1042,10 +1068,6 @@ const RecordsGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
   gap: 1.5rem;
-
-  @media (max-width: 640px) {
-    grid-template-columns: 1fr;
-  }
 `;
 
 const RecordCard = styled.div`
@@ -1092,8 +1114,9 @@ const PetTypeBadge = styled.span<{ $petType: string }>`
   border-radius: 9999px;
   font-size: 0.75rem;
   font-weight: 500; 
-  `;
-  const CardContent = styled.div`
+`;
+
+const CardContent = styled.div`
   flex: 1;
   display: flex;
   flex-direction: column;

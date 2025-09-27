@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import React from "react";
 import styled from "styled-components";
@@ -11,10 +11,14 @@ const HomePage: React.FC = () => {
     <PageContainer>
       {/* 🔸 HEADER */}
       <Header>
-        <Logo>
-          <LogoIcon>🐾</LogoIcon>
-          FurSureCare
-        </Logo>
+        <LogoContainer>
+  <LogoImage 
+    src="https://scontent.fmnl13-2.fna.fbcdn.net/v/t39.30808-1/308051699_1043145306431767_6902051210877649285_n.jpg?stp=dst-jpg_s200x200_tt6&_nc_cat=108&ccb=1-7&_nc_sid=2d3e12&_nc_eui2=AeH7C3PaObQLeqOOxA3pTYw1U6XSiAPBS_lTpdKIA8FL-aWJ6pOqX-tCsYAmdUOHVzzxg-T9gjpVH_1PkEO0urYZ&_nc_ohc=xiO-6bHn19MQ7kNvwEkp59E&_nc_oc=Adm1fwMp943RpgjOEbeTG6s-eHEwlDLYvHysazAyqypF5JEw60Y5N0LecgrNy_2BwGE&_nc_zt=24&_nc_ht=scontent.fmnl13-2.fna&_nc_gid=ZM5OiPjA9BZQNnbxU4tY8A&oh=00_AfZglHXcRLEkclOadt-sgeKKp5h7KdG-YejpCM-McTuEWw&oe=68DC09DB" 
+    alt="FurSureCare Logo" 
+  />
+  <LogoText>FurSureCare</LogoText>
+</LogoContainer>
+
         <Nav>
           <NavItem onClick={() => router.push("/login")}>Login</NavItem>
           <NavItemPrimary onClick={() => router.push("/createaccount")}>
@@ -103,8 +107,7 @@ const HomePage: React.FC = () => {
           <Testimonial>
             <Avatar>T</Avatar>
             <TestimonialText>
-              &quot;FurSureCare made managing my two dogs&apos; health records so much easier. 
-              The reminder system is fantastic! I never miss vaccination dates anymore.&quot;
+              
             </TestimonialText>
             <TestimonialAuthor>
               <strong>Maria S.</strong>
@@ -114,8 +117,7 @@ const HomePage: React.FC = () => {
           <Testimonial>
             <Avatar>J</Avatar>
             <TestimonialText>
-              &quot;As a first-time pet owner, this platform helped me stay on top of 
-              vaccinations and appointments. The vet can access records directly too!&quot;
+              
             </TestimonialText>
             <TestimonialAuthor>
               <strong>James T.</strong>
@@ -125,8 +127,7 @@ const HomePage: React.FC = () => {
           <Testimonial>
             <Avatar>R</Avatar>
             <TestimonialText>
-              &quot;I run a small pet rescue and FurSureCare has revolutionized how we 
-              track the health of our animals. It&apos;s been a game-changer for us!&quot;
+             
             </TestimonialText>
             <TestimonialAuthor>
               <strong>Rachel M.</strong>
@@ -177,7 +178,7 @@ const HomePage: React.FC = () => {
           <h2>Ready to give your pet the best care?</h2>
           <p>Join pet owners who trust FurSureCare with their furry family members</p>
           <ButtonGroup>
-            <CtaButton onClick={() => router.push("/register")}>
+            <CtaButton onClick={() => router.push("/createaccount")}>
               Create Your Account
             </CtaButton>
             <SecondaryButton onClick={() => router.push("/login")}>
@@ -191,10 +192,14 @@ const HomePage: React.FC = () => {
       <Footer>
         <FooterContent>
           <FooterSection>
-            <Logo>
-              <LogoIcon>🐾</LogoIcon>
-              FurSureCare
-            </Logo>
+            <LogoContainer>
+              <LogoImage src="https://scontent.fmnl13-2.fna.fbcdn.net/v/t39.30808-1/308051699_1043145306431767_6902051210877649285_n.jpg?stp=dst-jpg_s200x200_tt6&_nc_cat=108&ccb=1-7&_nc_sid=2d3e12&_nc_eui2=AeH7C3PaObQLeqOOxA3pTYw1U6XSiAPBS_lTpdKIA8FL-aWJ6pOqX-tCsYAmdUOHVzzxg-T9gjpVH_1PkEO0urYZ&_nc_ohc=xiO-6bHn19MQ7kNvwEkp59E&_nc_oc=Adm1fwMp943RpgjOEbeTG6s-eHEwlDLYvHysazAyqypF5JEw60Y5N0LecgrNy_2BwGE&_nc_zt=24&_nc_ht=scontent.fmnl13-2.fna&_nc_gid=ZM5OiPjA9BZQNnbxU4tY8A&oh=00_AfZglHXcRLEkclOadt-sgeKKp5h7KdG-YejpCM-McTuEWw&oe=68DC09DB"
+               alt="FurSureCare Logo" />
+              <LogoText>
+                <LogoIcon>🐾</LogoIcon>
+                FurSureCare
+              </LogoText>
+            </LogoContainer>
             <p>Providing exceptional care for your beloved pets since 2023.</p>
             <SocialLinks>
               <SocialLink>Facebook</SocialLink>
@@ -205,7 +210,7 @@ const HomePage: React.FC = () => {
           <FooterSection>
             <h4>Quick Links</h4>
             <FooterLink onClick={() => router.push("/login")}>Login</FooterLink>
-            <FooterLink onClick={() => router.push("/register")}>Register</FooterLink>
+            <FooterLink onClick={() => router.push("/createaccount")}>Register</FooterLink>
             <FooterLink>Services</FooterLink>
             <FooterLink>Pricing</FooterLink>
           </FooterSection>
@@ -214,13 +219,13 @@ const HomePage: React.FC = () => {
             <FooterLink>Blog</FooterLink>
             <FooterLink>FAQs</FooterLink>
             <FooterLink>Support Center</FooterLink>
-            <FooterLink>Pet Health Tips</FooterLink>
+            <FooterLink>Pet Health Tips</FooterLink>  
           </FooterSection>
           <FooterSection>
             <h4>Contact Us</h4>
-            <p>Email: info@fursurecare.com</p>
-            <p>Phone: (123) 456-7890</p>
-            <p>Address: 123 Pet Care Ave, City</p>
+            <p>Email: madulcedecahvez@gmail.com</p>
+            <p>Phone: 0906-484-1234/0916-621-5953</p>
+            <p>Address: 168 Unit A Bus Stop JP Laurel Hiway cor. V Dimayuga st. Brgy. 4, Tanauan, Philippines</p>
           </FooterSection>
         </FooterContent>
         <Copyright>
@@ -269,7 +274,24 @@ const Header = styled.header`
   }
 `;
 
-const Logo = styled.div`
+const LogoContainer = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+`;
+
+const LogoImage = styled.img`
+  width: 70px;
+  height:70px;
+  object-fit: contain;
+
+  @media (max-width: 480px) {
+    width: 32px;
+    height: 32px;
+  }
+`;
+
+const LogoText = styled.div`
   display: flex;
   align-items: center;
   font-size: 1.8rem;
@@ -417,6 +439,7 @@ const ButtonGroup = styled.div`
 
   @media (max-width: 768px) {
     flex-direction: column;
+    align-items: center;
   }
 `;
 
@@ -438,16 +461,20 @@ const HeroButton = styled.button`
     box-shadow: 0 6px 20px rgba(32, 201, 151, 0.5);
   }
 
-  @media (max-width: 480px) {
+  @media (max-width: 768px) {
     width: 100%;
+    max-width: 300px;
+  }
+
+  @media (max-width: 480px) {
     padding: 1.1rem;
   }
 `;
 
 const SecondaryButton = styled(HeroButton)`
   background: transparent;
-  color: #20c997;
-  border: 2px solid #20c997;
+  color: #000000;
+  border: 2px solid #ffffff;
   box-shadow: none;
 
   &:hover {
@@ -462,6 +489,11 @@ const FeatureList = styled.div`
   flex-wrap: wrap;
   gap: 1rem;
   margin-top: 1.5rem;
+  justify-content: center;
+
+  @media (max-width: 768px) {
+    justify-content: center;
+  }
 `;
 
 const FeatureItem = styled.span`
@@ -470,6 +502,10 @@ const FeatureItem = styled.span`
   background: rgba(32, 201, 151, 0.1);
   padding: 0.5rem 1rem;
   border-radius: 50px;
+  
+  @media (max-width: 480px) {
+    font-size: 0.9rem;
+  }
 `;
 
 const ImageContainer = styled.div`
@@ -479,6 +515,7 @@ const ImageContainer = styled.div`
 
   @media (max-width: 1024px) {
     max-width: 100%;
+    margin-top: 2rem;
   }
 `;
 
@@ -497,12 +534,21 @@ const ImageOverlay = styled.div`
   padding: 1rem 2rem;
   border-radius: 50px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+  
+  @media (max-width: 480px) {
+    padding: 0.8rem 1.5rem;
+    bottom: -15px;
+  }
 `;
 
 const OverlayText = styled.span`
   font-weight: 600;
   color: #20c997;
   font-size: 1rem;
+  
+  @media (max-width: 480px) {
+    font-size: 0.9rem;
+  }
 `;
 
 const SectionTitle = styled.h2`
@@ -532,6 +578,7 @@ const SectionSubtitle = styled.p`
 
   @media (max-width: 768px) {
     font-size: 1.1rem;
+    padding: 0 1rem;
   }
 `;
 
@@ -578,6 +625,18 @@ const Card = styled.div`
     transform: translateY(-10px);
     box-shadow: 0 15px 40px rgba(0,0,0,0.12);
   }
+  
+  @media (max-width: 480px) {
+    padding: 2rem 1.5rem;
+    
+    h3 {
+      font-size: 1.4rem;
+    }
+    
+    p {
+      font-size: 1rem;
+    }
+  }
 `;
 
 const CardIcon = styled.div`
@@ -608,6 +667,10 @@ const Testimonial = styled.div`
   padding: 2.5rem;
   box-shadow: 0 10px 30px rgba(0,0,0,0.08);
   position: relative;
+  
+  @media (max-width: 480px) {
+    padding: 2rem 1.5rem;
+  }
 `;
 
 const Avatar = styled.div`
@@ -689,6 +752,16 @@ const FeatureBlock = styled.div`
     font-size: 1rem;
     line-height: 1.5;
   }
+  
+  @media (max-width: 480px) {
+    flex-direction: column;
+    text-align: center;
+    padding: 1.5rem;
+    
+    h3 {
+      font-size: 1.2rem;
+    }
+  }
 `;
 
 const FeatureNumber = styled.span`
@@ -696,6 +769,10 @@ const FeatureNumber = styled.span`
   font-weight: 800;
   color: #20c997;
   opacity: 0.3;
+  
+  @media (max-width: 480px) {
+    font-size: 2rem;
+  }
 `;
 
 const CTASection = styled.section`
@@ -768,6 +845,8 @@ const FooterContent = styled.div`
 
   @media (max-width: 768px) {
     gap: 2rem;
+    grid-template-columns: 1fr;
+    text-align: center;
   }
 `;
 
@@ -802,6 +881,10 @@ const SocialLinks = styled.div`
   display: flex;
   gap: 1rem;
   margin-top: 1.5rem;
+  
+  @media (max-width: 768px) {
+    justify-content: center;
+  }
 `;
 
 const SocialLink = styled.span`
@@ -834,6 +917,11 @@ const FooterLinks = styled.div`
   display: flex;
   justify-content: center;
   gap: 1.5rem;
+  
+  @media (max-width: 480px) {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
   
   span {
     cursor: pointer;

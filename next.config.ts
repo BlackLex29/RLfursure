@@ -1,9 +1,19 @@
 // next.config.js
 import type { NextConfig } from "next";
 
+/** @type {import('next').NextConfig} */
 const nextConfig = {
-  // output: 'export',       // ✅ I-COMMENT OUT
-  // distDir: 'out',         // ✅ I-COMMENT OUT
-};
+  images: {
+    domains: ['scontent.fmnl13-4.fna.fbcdn.net'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'scontent.fmnl13-4.fna.fbcdn.net',
+        port: '',
+        pathname: '/**',
+      },
+    ],
+  },
+}
 
-export default nextConfig;
+module.exports = nextConfig

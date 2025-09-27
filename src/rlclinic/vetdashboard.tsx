@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { auth, db } from "../firebaseConfig";
 import { signOut } from "firebase/auth";
 import { 
@@ -13,12 +13,16 @@ import {
   orderBy,
   Timestamp,
   deleteDoc,
-  doc
+  doc,
+  limit,
+  startAfter,
+  DocumentSnapshot
 } from "firebase/firestore";
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 
-// Updated types to match the appointment booking component
+// Types
 interface Appointment {
   id: string;
   petName: string;
@@ -63,6 +67,9 @@ const VetDashboard: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userLoading, setUserLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [lastVisible, setLastVisible] = useState<DocumentSnapshot | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [logoError, setLogoError] = useState(false);
   const router = useRouter();
 
   // Handle sign out
@@ -76,7 +83,7 @@ const VetDashboard: React.FC = () => {
   };
 
   // Function to get display name
-  const getDisplayName = () => {
+  const getDisplayName = useCallback(() => {
     if (!currentUser) return 'User';
     
     if (currentUser.name && currentUser.name.trim()) {
@@ -87,7 +94,7 @@ const VetDashboard: React.FC = () => {
     }
     
     return currentUser.email || 'User';
-  };
+  }, [currentUser]);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -121,12 +128,12 @@ const VetDashboard: React.FC = () => {
     }
   }, [user]);
 
-  // Load ALL appointments
+  // Load appointments with pagination
   useEffect(() => {
     if (!currentUser) return;
     
     const appointmentsRef = collection(db, 'appointments');
-    const q = query(appointmentsRef, orderBy('createdAt', 'desc'));
+    const q = query(appointmentsRef, orderBy('createdAt', 'desc'), limit(20)); // Increased limit
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const appointmentsData: Appointment[] = [];
@@ -144,13 +151,55 @@ const VetDashboard: React.FC = () => {
           paymentMethod: data.paymentMethod || ''
         } as Appointment);
       });
+      
       setAppointments(appointmentsData);
+      setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
+      setHasMore(snapshot.docs.length === 20);
     });
     
     return () => unsubscribe();
   }, [currentUser]);
 
-  // Load unavailable slots - FIXED: Filter by current veterinarian
+  // Load more appointments
+  const loadMoreAppointments = async () => {
+    if (!currentUser || !lastVisible) return;
+    
+    try {
+      const appointmentsRef = collection(db, 'appointments');
+      const q = query(
+        appointmentsRef, 
+        orderBy('createdAt', 'desc'), 
+        startAfter(lastVisible),
+        limit(20)
+      );
+      
+      const snapshot = await getDocs(q);
+      const newAppointments: Appointment[] = [];
+      
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        newAppointments.push({ 
+          id: doc.id, 
+          ...data,
+          petName: data.petName || 'Unknown Pet',
+          clientName: data.clientName || 'Unknown Client',
+          date: data.date || '',
+          timeSlot: data.timeSlot || '',
+          appointmentType: data.appointmentType || 'General',
+          status: data.status || 'Pending',
+          paymentMethod: data.paymentMethod || ''
+        } as Appointment);
+      });
+      
+      setAppointments(prev => [...prev, ...newAppointments]);
+      setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
+      setHasMore(snapshot.docs.length === 20);
+    } catch (error) {
+      console.error('Error loading more appointments:', error);
+    }
+  };
+
+  // Load unavailable slots - Filter by current veterinarian
   useEffect(() => {
     if (!currentUser) return;
     
@@ -233,20 +282,6 @@ const VetDashboard: React.FC = () => {
     }
   };
 
-  const formatDate = (date: Date | string) => {
-    const dateObj = typeof date === 'string' ? new Date(date) : date;
-    return dateObj.toLocaleDateString('en-PH', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
-  };
-
-  const formatTime = (timeSlot: string) => {
-    return timeSlot || 'No time specified';
-  };
-
   const handleDateChange = (days: number) => {
     const newDate = new Date(selectedDate);
     newDate.setDate(selectedDate.getDate() + days);
@@ -260,22 +295,75 @@ const VetDashboard: React.FC = () => {
     return aptDate.toDateString() === selectedDate.toDateString();
   };
 
+  // Handle logo image error
+  const handleLogoError = () => {
+    setLogoError(true);
+  };
+
   if (loading || userLoading) {
     return (
       <div className="loading-container">
         <div className="loading-spinner"></div>
         <p>Loading dashboard...</p>
+        <style jsx>{`
+          .loading-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            gap: 1rem;
+            background: #f8fafc;
+          }
+          
+          .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #e2e8f0;
+            border-top: 4px solid #34B89C;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+          }
+          
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          
+          .loading-container p {
+            color: #64748b;
+            font-size: 1rem;
+          }
+        `}</style>
       </div>
     );
   }
 
   if (!user || !currentUser) {
     return (
-      <div className="vet-dashboard">
-        <div className="auth-error">
-          <h2>Authentication Required</h2>
-          <p>Please sign in to access the veterinary dashboard.</p>
-        </div>
+      <div className="auth-error">
+        <h2>Authentication Required</h2>
+        <p>Please sign in to access the veterinary dashboard.</p>
+        <style jsx>{`
+          .auth-error {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background: #f8fafc;
+            text-align: center;
+          }
+          
+          .auth-error h2 {
+            color: #dc2626;
+            margin-bottom: 1rem;
+          }
+          
+          .auth-error p {
+            color: #64748b;
+          }
+        `}</style>
       </div>
     );
   }
@@ -285,11 +373,34 @@ const VetDashboard: React.FC = () => {
       {/* Header */}
       <header className="dashboard-header">
         <div className="header-content">
-          <h1>Veterinary Dashboard</h1>
+          <div className="header-brand">
+            <div className="clinic-logo">
+              {/* RL Clinic Logo with Image */}
+              {!logoError ? (
+                <Image 
+                  src="https://scontent.fmnl13-4.fna.fbcdn.net/v/t39.30808-1/308051699_1043145306431767_6902051210877649285_n.jpg?stp=cp0_dst-jpg_s60x60_tt6&_nc_cat=108&ccb=1-7&_nc_sid=2d3e12&_nc_eui2=AeH7C3PaObQLeqOOxA3pTYw1U6XSiAPBS_lTpdKIA8FL-aWJ6pOqX-tCsYAmdUOHVzzxg-T9gjpVH_1PkEO0urYZ&_nc_ohc=_IGNUXrA7VIQ7kNvwGverts&_nc_oc=Adn4yGvlqEmBbcvJy9fpqzZS-lcsbho9b-UbpfXA5TVHNF-m2LsLZkoh5MgqG3kGpbY&_nc_zt=24&_nc_ht=scontent.fmnl13-4.fna&_nc_gid=tRLkyrhTTf7--ojWnn9Hfg&oh=00_AfaGNX7atT_-t5Le75P4n8BeLaWdzkJSkBB7ZgM9dQ9clQ&oe=68D7A4DB"
+                  alt="RL Clinic Logo" 
+                  className="logo-image"
+                  width={60}
+                  height={60}
+                  onError={handleLogoError}
+                />
+              ) : (
+                <div className="logo-fallback">🐾</div>
+              )}
+            </div>
+            <div className="clinic-info">
+              <h1>FursureCare</h1>
+              <p className="clinic-tagline">Professional Pet Care Dashboard</p>
+            </div>
+          </div>
           <div className="user-info">
-            <span>Welcome, Dr. {getDisplayName()}!</span>
+            <div className="user-details">
+              <span className="welcome-text">Welcome, Dr. {getDisplayName()}!</span>
+              <span className="user-role">{currentUser.role}</span>
+            </div>
             <div className="user-avatar">
-              {currentUser?.name?.charAt(0) || currentUser?.email?.charAt(0) || 'U'}
+              {currentUser?.name?.charAt(0)?.toUpperCase() || currentUser?.email?.charAt(0)?.toUpperCase() || 'U'}
             </div>
             <button onClick={handleSignOut} className="sign-out-btn">
               Sign Out
@@ -297,110 +408,169 @@ const VetDashboard: React.FC = () => {
           </div>
         </div>
       </header>
-     
+    
       <div className="dashboard-content">
         {/* Sidebar */}
         <aside className="sidebar">
-          <h3>Navigation</h3>
-          <button 
-            onClick={() => setActiveTab('appointments')}
-            className={`nav-btn ${activeTab === 'appointments' ? 'active' : ''}`}
-          >
-            <span className="nav-icon">📅</span>
-            All Appointments
-          </button>
-          {currentUser.role === 'veterinarian' && (
-            <button 
-              onClick={() => setActiveTab('unavailable')}
-              className={`nav-btn ${activeTab === 'unavailable' ? 'active' : ''}`}
-            >
-              <span className="nav-icon">🚫</span>
-              Set Unavailable
-            </button>
-          )}
+          <div className="sidebar-section">
+            <h3>Navigation</h3>
+            <nav className="nav-menu">
+              <button 
+                onClick={() => setActiveTab('appointments')}
+                className={`nav-btn ${activeTab === 'appointments' ? 'active' : ''}`}
+              >
+                <span className="nav-icon">📅</span>
+                <span className="nav-text">Appointments</span>
+                <span className="nav-badge">{appointments.length}</span>
+              </button>
+              {currentUser.role === 'veterinarian' && (
+                <button 
+                  onClick={() => setActiveTab('unavailable')}
+                  className={`nav-btn ${activeTab === 'unavailable' ? 'active' : ''}`}
+                >
+                  <span className="nav-icon">📋</span>
+                  <span className="nav-text">Availability</span>
+                  <span className="nav-badge">{unavailable.length}</span>
+                </button>
+              )}
+            </nav>
+          </div>
 
-          <div className="quick-stats">
-            <h4>Today&apos;s Stats</h4>
-            <div className="stat-card">
-              <div className="stat-number">{todaysAppointments.length}</div>
-              <div className="stat-label">Appointments Today</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-number">{todaysAppointments.filter(a => a.status === 'Pending').length}</div>
-              <div className="stat-label">Pending</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-number">{unavailable.length}</div>
-              <div className="stat-label">Unavailable Days</div>
+          <div className="sidebar-section">
+            <h4>Today&apos;s Overview</h4>
+            <div className="stats-grid">
+              <div className="stat-card primary">
+                <div className="stat-icon">📊</div>
+                <div className="stat-content">
+                  <div className="stat-number">{todaysAppointments.length}</div>
+                  <div className="stat-label">Today&apos;s Appointments</div>
+                </div>
+              </div>
+              <div className="stat-card warning">
+                <div className="stat-icon">⏳</div>
+                <div className="stat-content">
+                  <div className="stat-number">{todaysAppointments.filter(a => a.status === 'Pending').length}</div>
+                  <div className="stat-label">Pending</div>
+                </div>
+              </div>
+              <div className="stat-card success">
+                <div className="stat-icon">📋</div>
+                <div className="stat-content">
+                  <div className="stat-number">{unavailable.length}</div>
+                  <div className="stat-label">Unavailable Days</div>
+                </div>
+              </div>
             </div>
           </div>
         </aside>
 
-        {/* Main Content */}
+        {/* Main Content - Maximized */}
         <main className="main-content">
           {activeTab === 'appointments' ? (
-            <div className="content-card">
-              <div className="card-header">
-                <h2>All Appointments</h2>
-                <div className="date-navigation">
-                  <button 
-                    onClick={() => handleDateChange(-1)}
-                    className="nav-button"
-                  >
-                    ←
-                  </button>
-                  <span className="current-date">
-                    {formatDate(selectedDate)}
-                  </span>
-                  <button 
-                    onClick={() => handleDateChange(1)}
-                    className="nav-button"
-                  >
-                    →
-                  </button>
+            <div className="content-section">
+              <div className="section-header">
+                <div className="header-info">
+                  <h2>Appointment Schedule</h2>
+                  <p>Manage and view all scheduled appointments - {appointments.length} total appointments</p>
+                </div>
+                <div className="header-controls">
+                  <div className="date-navigation">
+                    <button 
+                      onClick={() => handleDateChange(-1)}
+                      className="nav-button"
+                    >
+                      ←
+                    </button>
+                    <span className="current-date">
+                      {selectedDate.toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })}
+                    </span>
+                    <button 
+                      onClick={() => handleDateChange(1)}
+                      className="nav-button"
+                    >
+                      →
+                    </button>
+                  </div>
                 </div>
               </div>
 
               {appointments.filter(isAppointmentForSelectedDate).length === 0 ? (
                 <div className="empty-state">
                   <div className="empty-icon">📅</div>
-                  <h3>No appointments scheduled for this day</h3>
-                  <p>Appointments booked by users will appear here.</p>
+                  <h3>No appointments scheduled for {selectedDate.toLocaleDateString()}</h3>
+                  <p>There are no appointments booked for this date.</p>
                 </div>
               ) : (
-                <div className="appointments-list">
+                <div className="appointments-grid maximized-grid">
                   {appointments
                     .filter(isAppointmentForSelectedDate)
                     .map(apt => (
                       <div key={apt.id} className={`appointment-card ${apt.status.toLowerCase()}`}>
-                        <div className="appointment-info">
-                          <div className="pet-name">{apt.petName}</div>
-                          <div className="owner">Client: {apt.clientName}</div>
-                          <div className="time">Time: {formatTime(apt.timeSlot)}</div>
-                          <div className="reason">Type: {apt.appointmentType}</div>
-                          <div className="payment">Payment: {apt.paymentMethod || 'Not specified'}</div>
-                        </div>
-                        <div className="appointment-status">
-                          <span className={`status-badge ${apt.status.toLowerCase()}`}>
+                        <div className="appointment-header">
+                          <div className="pet-info">
+                            <h4 className="pet-name">{apt.petName}</h4>
+                            <span className="pet-type">{apt.appointmentType}</span>
+                          </div>
+                          <div className={`status-badge ${apt.status.toLowerCase()}`}>
                             {apt.status}
-                          </span>
+                          </div>
+                        </div>
+                        <div className="appointment-details">
+                          <div className="detail-row">
+                            <span className="detail-label">Owner:</span>
+                            <span className="detail-value">{apt.clientName}</span>
+                          </div>
+                          <div className="detail-row">
+                            <span className="detail-label">Time:</span>
+                            <span className="detail-value">{apt.timeSlot || 'Not specified'}</span>
+                          </div>
+                          <div className="detail-row">
+                            <span className="detail-label">Payment:</span>
+                            <span className="detail-value payment-method">{apt.paymentMethod || 'Not specified'}</span>
+                          </div>
+                          <div className="detail-row">
+                            <span className="detail-label">Date:</span>
+                            <span className="detail-value">
+                              {new Date(apt.date).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric'
+                              })}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     ))
                   }
                 </div>
               )}
+              
+              {hasMore && (
+                <div className="load-more-container">
+                  <button onClick={loadMoreAppointments} className="load-more-btn">
+                    Load More Appointments ({appointments.length} loaded)
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
-            <div className="content-card">
-              <div className="card-header">
-                <h2>Set Unavailable Time</h2>
+            <div className="content-section">
+              <div className="section-header">
+                <div className="header-info">
+                  <h2>Availability Management</h2>
+                  <p>Set your unavailable dates and times - {unavailable.length} unavailable periods set</p>
+                </div>
                 {currentUser.role === 'veterinarian' && (
                   <button 
                     onClick={() => setShowUnavailableModal(true)}
-                    className="primary-button danger"
+                    className="primary-button success"
                   >
-                    <span className="button-icon">🚫</span>
+                    <span className="button-icon">📅</span>
                     Mark Unavailable
                   </button>
                 )}
@@ -408,29 +578,42 @@ const VetDashboard: React.FC = () => {
 
               {unavailable.length === 0 ? (
                 <div className="empty-state">
-                  <div className="empty-icon">🚫</div>
-                  <h3>No unavailable times set</h3>
+                  <div className="empty-icon">📋</div>
+                  <h3>No unavailable periods set</h3>
                   <p>Mark dates when you won&apos;t be available for appointments.</p>
                 </div>
               ) : (
-                <div>
-                  <h3>Your Unavailable Periods</h3>
-                  <div className="unavailable-list">
+                <div className="availability-section">
+                  <div className="section-subheader">
+                    <h3>Your Unavailable Periods</h3>
+                    <span className="subheader-count">{unavailable.length} periods</span>
+                  </div>
+                  <div className="unavailable-grid maximized-grid">
                     {unavailable.map(slot => (
-                      <div key={slot.id} className="unavailable-card">
-                        <div className="unavailable-icon">🚫</div>
+                      <div key={slot.id} className="unavailable-card success-card">
+                        <div className="unavailable-icon">📋</div>
                         <div className="unavailable-info">
-                          <div className="unavailable-date">{formatDate(slot.date)}</div>
+                          <div className="unavailable-date">
+                            {new Date(slot.date).toLocaleDateString('en-US', {
+                              weekday: 'long',
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric'
+                            })}
+                          </div>
                           <div className="unavailable-time">
-                            {slot.isAllDay ? 'All day' : `${slot.startTime} - ${slot.endTime}`}
+                            {slot.isAllDay ? '🕒 All day' : `🕒 ${slot.startTime} - ${slot.endTime}`}
+                          </div>
+                          <div className="unavailable-vet">
+                            👨‍⚕️ {slot.veterinarian}
                           </div>
                         </div>
                         <button 
-                          className="delete-unavailable-btn"
+                          className="delete-unavailable-btn success"
                           onClick={() => handleDeleteUnavailable(slot.id)}
                           disabled={deletingId === slot.id}
                         >
-                          {deletingId === slot.id ? 'Deleting...' : 'Delete'}
+                          {deletingId === slot.id ? 'Deleting...' : 'Remove'}
                         </button>
                       </div>
                     ))}
@@ -536,7 +719,7 @@ const VetDashboard: React.FC = () => {
               </button>
               <button
                 onClick={handleAddUnavailable}
-                className="primary-button danger"
+                className="primary-button success"
               >
                 Mark Unavailable
               </button>
@@ -548,43 +731,23 @@ const VetDashboard: React.FC = () => {
       <style jsx>{`
         .vet-dashboard {
           min-height: 100vh;
-          background: #f8fafc;
+          background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
           font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
           color: #334155;
-        }
-        
-        .loading-container {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          height: 100vh;
-          gap: 1rem;
-        }
-        
-        .loading-spinner {
-          width: 40px;
-          height: 40px;
-          border: 4px solid #e2e8f0;
-          border-top: 4px solid #34B89C;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
         }
         
         .dashboard-header {
           background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
           color: white;
-          padding: 1rem 0;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+          padding: 1.5rem 0;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+          position: sticky;
+          top: 0;
+          z-index: 100;
         }
         
         .header-content {
-          max-width: 1200px;
+          max-width: 95%;
           margin: 0 auto;
           padding: 0 2rem;
           display: flex;
@@ -592,22 +755,79 @@ const VetDashboard: React.FC = () => {
           align-items: center;
         }
         
-        .dashboard-header h1 {
+        .header-brand {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+        }
+        
+        .clinic-logo {
+          position: relative;
+          width: 60px;
+          height: 60px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          backdrop-filter: blur(10px);
+          background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .logo-image {
+          border-radius: 12px;
+          object-fit: cover;
+        }
+        
+        .logo-fallback {
+          display: flex;
+          font-size: 2rem;
+          width: 100%;
+          height: 100%;
+          align-items: center;
+          justify-content: center;
+          border-radius: 12px;
+          background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .clinic-info h1 {
           font-size: 1.8rem;
           font-weight: 700;
           margin: 0;
+          letter-spacing: -0.5px;
+        }
+        
+        .clinic-tagline {
+          font-size: 0.9rem;
+          opacity: 0.9;
+          margin: 0.2rem 0 0 0;
         }
         
         .user-info {
           display: flex;
           align-items: center;
           gap: 1rem;
+        }
+        
+        .user-details {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+        }
+        
+        .welcome-text {
           font-size: 1rem;
+          font-weight: 600;
+        }
+        
+        .user-role {
+          font-size: 0.8rem;
+          opacity: 0.8;
+          text-transform: capitalize;
         }
         
         .user-avatar {
-          width: 40px;
-          height: 40px;
+          width: 45px;
+          height: 45px;
           border-radius: 50%;
           background: rgba(255, 255, 255, 0.2);
           display: flex;
@@ -615,305 +835,587 @@ const VetDashboard: React.FC = () => {
           justify-content: center;
           color: white;
           font-weight: bold;
-          font-size: 1rem;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+          font-size: 1.1rem;
+          backdrop-filter: blur(10px);
+          border: 2px solid rgba(255, 255, 255, 0.3);
         }
 
         .sign-out-btn {
           background: rgba(255, 255, 255, 0.2);
           color: white;
-          border: none;
-          padding: 8px 16px;
-          border-radius: 6px;
+          border: 1px solid rgba(255, 255, 255, 0.3);
+          padding: 0.6rem 1.2rem;
+          border-radius: 8px;
           cursor: pointer;
           font-weight: 500;
-          transition: all 0.2s;
+          transition: all 0.3s;
+          backdrop-filter: blur(10px);
         }
 
         .sign-out-btn:hover {
           background: rgba(255, 255, 255, 0.3);
+          transform: translateY(-1px);
         }
         
         .dashboard-content {
-          display: flex;
-          max-width: 1200px;
+          display: grid;
+          grid-template-columns: 280px 1fr;
+          max-width: 95%;
           margin: 2rem auto;
           padding: 0 1rem;
-          gap: 1.5rem;
+          gap: 2rem;
+          min-height: calc(100vh - 120px);
         }
         
         .sidebar {
-          width: 280px;
           background: white;
-          border-radius: 12px;
+          border-radius: 16px;
           padding: 1.5rem;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          backdrop-filter: blur(10px);
           height: fit-content;
-          border: 1px solid #e2e8f0;
+          position: sticky;
+          top: 100px;
+        }
+        
+        .sidebar-section {
+          margin-bottom: 2rem;
+        }
+        
+        .sidebar-section:last-child {
+          margin-bottom: 0;
         }
         
         .sidebar h3 {
           color: #1e293b;
-          margin-bottom: 1.2rem;
-          font-size: 1.2rem;
+          margin-bottom: 1rem;
+          font-size: 1.1rem;
           font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+        
+        .sidebar h3::before {
+          content: '';
+          width: 4px;
+          height: 16px;
+          background: linear-gradient(135deg, #34B89C, #6BC1E1);
+          border-radius: 2px;
+        }
+        
+        .nav-menu {
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
         }
         
         .nav-btn {
           width: 100%;
-          padding: 0.8rem 1rem;
-          margin-bottom: 0.8rem;
+          padding: 1rem;
           background: #f8fafc;
           color: #475569;
           border: none;
-          border-radius: 8px;
+          border-radius: 12px;
           cursor: pointer;
           text-align: left;
           display: flex;
           align-items: center;
           gap: 0.8rem;
-          transition: all 0.2s;
+          transition: all 0.3s;
           font-size: 0.95rem;
           font-weight: 500;
+          position: relative;
         }
         
         .nav-btn:hover {
-          background: #34B89C;
+          background: linear-gradient(135deg, #34B89C, #6BC1E1);
           color: white;
           transform: translateY(-2px);
-          box-shadow: 0 4px 8px rgba(52, 184, 156, 0.3);
+          box-shadow: 0 8px 20px rgba(52, 184, 156, 0.3);
         }
         
         .nav-btn.active {
-          background: #34B89C;
+          background: linear-gradient(135deg, #34B89C, #6BC1E1);
           color: white;
-          box-shadow: 0 4px 8px rgba(52, 184, 156, 0.3);
+          box-shadow: 0 8px 20px rgba(52, 184, 156, 0.3);
         }
 
         .nav-icon {
-          font-size: 1.1rem;
+          font-size: 1.2rem;
         }
-        
-        .quick-stats {
-          margin-top: 1.5rem;
-          padding-top: 1.5rem;
-          border-top: 1px solid #e2e8f0;
+
+        .nav-text {
+          flex: 1;
         }
-        
-        .quick-stats h4 {
-          color: 1e293b;
-          margin-bottom: 1rem;
-          font-size: 1rem;
+
+        .nav-badge {
+          background: rgba(255, 255, 255, 0.3);
+          color: white;
+          padding: 0.2rem 0.6rem;
+          border-radius: 12px;
+          font-size: 0.8rem;
           font-weight: 600;
         }
         
-        .stat-card {
-          background: #f8fafc;
-          padding: 1rem;
-          border-radius: 8px;
-          margin-bottom: 0.8rem;
-          border-left: 4px solid #34B89C;
-          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+        .stats-grid {
+          display: flex;
+          flex-direction: column;
+          gap: 0.8rem;
         }
-
+        
+        .stat-card {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+          padding: 1rem;
+          border-radius: 12px;
+          background: #f8fafc;
+          transition: all 0.3s;
+        }
+        
+        .stat-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .stat-card.primary {
+          border-left: 4px solid #34B89C;
+        }
+        
+        .stat-card.warning {
+          border-left: 4px solid #f59e0b;
+        }
+        
+        .stat-card.success {
+          border-left: 4px solid #10b981;
+        }
+        
+        .stat-icon {
+          font-size: 1.5rem;
+          opacity: 0.8;
+        }
+        
+        .stat-content {
+          flex: 1;
+        }
+        
         .stat-number {
           font-size: 1.5rem;
           font-weight: 700;
           color: #1e293b;
+          line-height: 1;
           margin-bottom: 0.2rem;
         }
-
+        
         .stat-label {
-          font-size: 0.85rem;
+          font-size: 0.8rem;
           color: #64748b;
+          font-weight: 500;
         }
 
         .main-content {
-          flex: 1;
           background: white;
-          border-radius: 12px;
-          padding: 1.5rem;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-          border: 1px solid #e2e8f0;
+          border-radius: 16px;
+          padding: 2rem;
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          backdrop-filter: blur(10px);
+          min-height: 600px;
         }
 
-        .content-card {
-          margin-bottom: 1.5rem;
+        .content-section {
+          height: 100%;
         }
 
-        .card-header {
+        .section-header {
           display: flex;
           justify-content: space-between;
-          align-items: center;
-          margin-bottom: 1.5rem;
-          flex-wrap: wrap;
+          align-items: flex-start;
+          margin-bottom: 2rem;
           gap: 1rem;
         }
 
-        .card-header h2 {
-          font-size: 1.4rem;
-          font-weight: 600;
+        .header-info h2 {
+          font-size: 1.8rem;
+          font-weight: 700;
           color: #1e293b;
+          margin: 0 0 0.5rem 0;
+          letter-spacing: -0.5px;
+        }
+
+        .header-info p {
+          color: #64748b;
           margin: 0;
+          font-size: 1rem;
+        }
+
+        .header-controls {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
         }
 
         .date-navigation {
           display: flex;
           align-items: center;
-          gap: 0.8rem;
+          gap: 1rem;
+          background: #f8fafc;
+          padding: 0.5rem;
+          border-radius: 12px;
         }
 
         .nav-button {
-          background: #34B89C;
-          color: white;
+          background: white;
+          color: #34B89C;
           border: none;
           width: 36px;
           height: 36px;
-          border-radius: 50%;
+          border-radius: 10px;
           cursor: pointer;
-          font-size: 1rem;
+          font-size: 1.1rem;
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: all 0.2s;
+          transition: all 0.3s;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
         }
 
         .nav-button:hover {
-          background: #2a9d83;
+          background: #34B89C;
+          color: white;
           transform: scale(1.05);
         }
 
         .current-date {
           font-weight: 600;
           color: #334155;
-          min-width: 180px;
+          min-width: 250px;
           text-align: center;
+          font-size: 1rem;
         }
 
         .primary-button {
           background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
           color: white;
           border: none;
-          padding: 0.6rem 1.2rem;
-          border-radius: 8px;
+          padding: 0.8rem 1.5rem;
+          border-radius: 10px;
           cursor: pointer;
-          font-weight: 500;
-          transition: all 0.2s;
+          font-weight: 600;
+          transition: all 0.3s;
           display: flex;
           align-items: center;
           gap: 0.5rem;
           font-size: 0.9rem;
+          box-shadow: 0 4px 12px rgba(52, 184, 156, 0.3);
         }
 
         .primary-button:hover {
-          opacity: 0.9;
           transform: translateY(-2px);
-          box-shadow: 0 4px 8px rgba(52, 184, 156, 0.3);
+          box-shadow: 0 8px 20px rgba(52, 184, 156, 0.4);
+        }
+
+        .primary-button.success {
+          background: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+          box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
         }
 
         .secondary-button {
           background: #f1f5f9;
           color: #475569;
           border: none;
-          padding: 0.6rem 1.2rem;
-          border-radius: 8px;
+          padding: 0.8rem 1.5rem;
+          border-radius: 10px;
           cursor: pointer;
           font-weight: 500;
-          transition: all 0.2s;
+          transition: all 0.3s;
         }
 
         .secondary-button:hover {
           background: #e2e8f0;
-        }
-
-        .danger {
-          background: linear-gradient(135deg, #ef4444 0%, #f97316 100%);
+          transform: translateY(-1px);
         }
 
         .empty-state {
           text-align: center;
-          padding: 3rem 1rem;
+          padding: 4rem 2rem;
           color: #64748b;
         }
 
         .empty-icon {
-          font-size: 2.5rem;
+          font-size: 4rem;
           margin-bottom: 1rem;
-          opacity: 0.7;
+          opacity: 0.5;
         }
 
         .empty-state h3 {
           color: #475569;
           margin-bottom: 0.5rem;
           font-weight: 600;
+          font-size: 1.5rem;
         }
 
         .empty-state p {
           margin: 0;
-          font-size: 0.95rem;
+          font-size: 1rem;
+          max-width: 400px;
+          margin: 0 auto;
         }
 
-        .appointments-list {
-          display: flex;
-          flex-direction: column;
-          gap: 0.8rem;
+        .maximized-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+          gap: 1.5rem;
+          max-height: 60vh;
+          overflow-y: auto;
+          padding: 1rem;
         }
 
         .appointment-card {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
           background: #f8fafc;
-          border-radius: 8px;
-          padding: 1rem;
-          border-left: 4px solid #34B89C;
-          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
-          transition: all 0.2s;
+          border-radius: 16px;
+          padding: 1.5rem;
+          border-left: 6px solid #34B89C;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+          transition: all 0.3s;
+          position: relative;
+          overflow: hidden;
+          min-height: 140px;
+        }
+
+        .appointment-card::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 3px;
+          background: linear-gradient(90deg, #34B89C, #6BC1E1);
         }
 
         .appointment-card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08);
+          transform: translateY(-4px);
+          box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
         }
 
-        .appointment-info {
-          flex: 1;
+        .appointment-card.pending {
+          border-left-color: #f59e0b;
         }
 
-        .appointment-info > div {
-          margin-bottom: 0.3rem;
-          color: #475569;
-          font-size: 0.9rem;
+        .appointment-card.completed {
+          border-left-color: #10b981;
         }
 
-        .pet-name {
-          font-weight: 600;
-          font-size: 1.1rem;
-          margin-bottom: 0.4rem;
+        .appointment-card.cancelled {
+          border-left-color: #ef4444;
+        }
+
+        .appointment-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          margin-bottom: 1rem;
+        }
+
+        .pet-info h4 {
+          font-size: 1.2rem;
+          font-weight: 700;
           color: #1e293b;
+          margin: 0 0 0.3rem 0;
         }
 
-        .appointment-status .status-badge {
-          padding: 0.3rem 0.8rem;
+        .pet-type {
+          background: #e2e8f0;
+          color: #475569;
+          padding: 0.2rem 0.6rem;
           border-radius: 20px;
           font-size: 0.8rem;
           font-weight: 500;
+        }
+
+        .status-badge {
+          padding: 0.4rem 1rem;
+          border-radius: 20px;
+          font-size: 0.8rem;
+          font-weight: 600;
           text-transform: capitalize;
         }
 
         .status-badge.pending {
-          background: #dbeafe;
-          color: #1d4ed8;
+          background: #fef3c7;
+          color: #d97706;
         }
 
         .status-badge.completed {
-          background: #dcfce7;
-          color: #166534;
+          background: #d1fae5;
+          color: #065f46;
         }
 
         .status-badge.cancelled {
           background: #fee2e2;
-          color: #b91c1c;
+          color: #dc2626;
+        }
+
+        .appointment-details {
+          margin-bottom: 0;
+        }
+
+        .detail-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 0.5rem;
+          padding: 0.3rem 0;
+        }
+
+        .detail-label {
+          font-weight: 600;
+          color: #64748b;
+          font-size: 0.85rem;
+        }
+
+        .detail-value {
+          color: #1e293b;
+          font-weight: 500;
+          font-size: 0.9rem;
+        }
+
+        .payment-method {
+          background: #e0f2fe;
+          color: #0369a1;
+          padding: 0.2rem 0.5rem;
+          border-radius: 6px;
+          font-size: 0.8rem;
+        }
+
+        .load-more-container {
+          display: flex;
+          justify-content: center;
+          margin-top: 2rem;
+        }
+
+        .load-more-btn {
+          background: linear-gradient(135deg, #34B89C, #6BC1E1);
+          color: white;
+          border: none;
+          padding: 1rem 2rem;
+          border-radius: 10px;
+          cursor: pointer;
+          font-weight: 600;
+          transition: all 0.3s;
+          box-shadow: 0 4px 12px rgba(52, 184, 156, 0.3);
+        }
+
+        .load-more-btn:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 20px rgba(52, 184, 156, 0.4);
+        }
+
+        .availability-section {
+          margin-top: 1rem;
+        }
+
+        .section-subheader {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 1.5rem;
+        }
+
+        .section-subheader h3 {
+          color: #1e293b;
+          margin: 0;
+          font-size: 1.4rem;
+          font-weight: 600;
+        }
+
+        .subheader-count {
+          background: #10b981;
+          color: white;
+          padding: 0.4rem 0.8rem;
+          border-radius: 20px;
+          font-size: 0.9rem;
+          font-weight: 600;
+        }
+
+        .unavailable-card {
+          display: flex;
+          align-items: center;
+          background: #f0fdf4;
+          border-radius: 12px;
+          padding: 1.5rem;
+          border-left: 4px solid #10b981;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+          transition: all 0.3s;
+          gap: 1rem;
+          min-height: 100px;
+        }
+
+        .unavailable-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 20px rgba(16, 185, 129, 0.2);
+        }
+
+        .success-card {
+          background: #f0fdf4;
+          border-left-color: #10b981;
+        }
+
+        .unavailable-icon {
+          font-size: 1.8rem;
+          opacity: 0.8;
+        }
+
+        .unavailable-info {
+          flex: 1;
+        }
+
+        .unavailable-date {
+          font-weight: 600;
+          color: #1e293b;
+          margin-bottom: 0.3rem;
+          font-size: 1rem;
+        }
+
+        .unavailable-time {
+          color: #64748b;
+          font-size: 0.9rem;
+          margin-bottom: 0.2rem;
+        }
+
+        .unavailable-vet {
+          color: #059669;
+          font-size: 0.85rem;
+          font-weight: 500;
+        }
+
+        .delete-unavailable-btn {
+          background: #10b981;
+          color: white;
+          border: none;
+          padding: 0.6rem 1rem;
+          border-radius: 8px;
+          font-size: 0.85rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.3s;
+          white-space: nowrap;
+        }
+
+        .delete-unavailable-btn:hover:not(:disabled) {
+          background: #059669;
+          transform: translateY(-1px);
+        }
+
+        .delete-unavailable-btn.success {
+          background: #10b981;
+        }
+
+        .delete-unavailable-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
         }
 
         .modal-overlay {
@@ -926,16 +1428,28 @@ const VetDashboard: React.FC = () => {
           justify-content: center;
           z-index: 1000;
           padding: 1rem;
+          backdrop-filter: blur(5px);
         }
 
         .modal {
           background: white;
-          border-radius: 12px;
+          border-radius: 20px;
           width: 500px;
-          max-width: 100%;
-          padding: 1.5rem;
-          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-          animation: fadeIn 0.3s ease-in-out;
+          max-width: 95%;
+          padding: 2rem;
+          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+          animation: modalSlideIn 0.3s ease-out;
+        }
+
+        @keyframes modalSlideIn {
+          from {
+            opacity: 0;
+            transform: translateY(-30px) scale(0.9);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+          }
         }
 
         .modal-header {
@@ -948,163 +1462,151 @@ const VetDashboard: React.FC = () => {
         .modal-header h2 {
           color: #1e293b;
           margin: 0;
-          font-size: 1.3rem;
+          font-size: 1.4rem;
+          font-weight: 700;
         }
 
         .close-btn {
           border: none;
-          background: transparent;
-          font-size: 1.5rem;
-          cursor: pointer;
+          background: #f1f5f9;
           color: #64748b;
-          transition: all 0.2s;
+          width: 32px;
+          height: 32px;
+          border-radius: 8px;
+          cursor: pointer;
+          font-size: 1.2rem;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.3s;
         }
 
         .close-btn:hover {
-          color: #1e293b;
+          background: #e2e8f0;
+          color: #374151;
+        }
+
+        .modal-body {
+          margin-bottom: 2rem;
         }
 
         .form-group {
-          margin-bottom: 1rem;
+          margin-bottom: 1.5rem;
         }
 
         .form-group label {
           display: block;
-          margin-bottom: 0.4rem;
-          font-weight: 500;
+          margin-bottom: 0.5rem;
+          font-weight: 600;
           color: #374151;
           font-size: 0.9rem;
         }
 
         .form-input {
           width: 100%;
-          padding: 0.6rem 0.8rem;
-          border-radius: 6px;
-          border: 1px solid #d1d5db;
+          padding: 0.8rem 1rem;
+          border-radius: 10px;
+          border: 2px solid #e2e8f0;
           font-size: 0.95rem;
-          transition: all 0.2s;
+          transition: all 0.3s;
+          background: #f8fafc;
         }
 
         .form-input:focus {
           outline: none;
           border-color: #34B89C;
-          box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.2);
+          background: white;
+          box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.1);
         }
 
         .checkbox-label {
           display: flex !important;
           align-items: center;
-          gap: 0.6rem;
+          gap: 0.8rem;
           cursor: pointer;
-          font-weight: 400;
+          font-weight: 500;
+          color: #374151;
         }
 
         .modal-actions {
           display: flex;
           justify-content: flex-end;
-          gap: 0.8rem;
-          margin-top: 1.5rem;
+          gap: 1rem;
         }
 
-        .unavailable-list {
-          display: flex;
-          flex-direction: column;
-          gap: 0.8rem;
-        }
-
-        .unavailable-card {
-          display: flex;
-          align-items: center;
-          background: #f8fafc;
-          border-radius: 8px;
-          padding: 1rem;
-          border-left: 4px solid #ef4444;
-          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
-          transition: all 0.2s;
-          justify-content: space-between;
-        }
-
-        .unavailable-card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08);
-        }
-
-        .unavailable-icon {
-          font-size: 1.3rem;
-          margin-right: 1rem;
-          opacity: 0.7;
-        }
-
-        .unavailable-info {
-          flex: 1;
-        }
-
-        .unavailable-info > div {
-          margin-bottom: 0.3rem;
-          color: #475569;
-          font-size: 0.9rem;
-        }
-
-        .unavailable-date {
-          font-weight: 600;
-          margin-bottom: 0.4rem;
-          color: #1e293b;
-        }
-
-        .delete-unavailable-btn {
-          background: #ef4444;
-          color: white;
-          border: none;
-          padding: 0.5rem 1rem;
-          border-radius: 6px;
-          font-size: 0.85rem;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.2s;
-          white-space: nowrap;
-        }
-
-        .delete-unavailable-btn:hover:not(:disabled) {
-          background: #dc2626;
-        }
-
-        .delete-unavailable-btn:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-        }
-
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(-10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-
-        @media (max-width: 768px) {
+        @media (max-width: 1024px) {
           .dashboard-content {
-            flex-direction: column;
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
           }
           
           .sidebar {
-            width: 100%;
+            position: static;
+            order: 2;
           }
           
-          .card-header {
+          .maximized-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        @media (max-width: 768px) {
+          .header-content {
             flex-direction: column;
-            align-items: flex-start;
+            gap: 1rem;
+            text-align: center;
+          }
+          
+          .header-brand {
+            justify-content: center;
+          }
+          
+          .user-info {
+            justify-content: center;
+          }
+          
+          .section-header {
+            flex-direction: column;
+            gap: 1rem;
+          }
+          
+          .header-controls {
+            width: 100%;
+            justify-content: center;
           }
           
           .date-navigation {
             width: 100%;
-            justify-content: center;
+            justify-content: space-between;
           }
+          
+          .modal {
+            padding: 1.5rem;
+          }
+          
+          .modal-actions {
+            flex-direction: column;
+          }
+        }
 
-          .unavailable-card {
+        @media (max-width: 480px) {
+          .dashboard-content {
+            padding: 0 0.5rem;
+            margin: 1rem auto;
+          }
+          
+          .main-content {
+            padding: 1.5rem;
+          }
+          
+          .appointment-card {
+            padding: 1rem;
+          }
+          
+          .appointment-header {
             flex-direction: column;
             align-items: flex-start;
-            gap: 1rem;
-          }
-
-          .delete-unavailable-btn {
-            width: 100%;
+            gap: 0.5rem;
           }
         }
       `}</style>
