@@ -35,7 +35,7 @@ interface Appointment {
   appointmentType: string;
   price?: number;
   paymentMethod?: string;
-  createdAt?: any;
+  createdAt?: unknown;
 }
 
 interface Unavailable {
@@ -322,7 +322,7 @@ const PetSelector: React.FC<{
     <SectionTitle>
       <SectionIcon>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-          <path fillRule="evenodd" d="M12 6.75a5.25 5.25 0 016.775-5.025.75.75 0 01.313 1.248l-3.32 3.319c.063.475.276.934.627 1.33.35.389.820.729 1.382.963.56.235 1.217.389 1.925.389a.75.75 0 010 1.5c-.898 0-1.7-.192-2.375-.509A5.221 5.221 0 0115.75 8.25c0-.65-.126-1.275-.356-1.85l-2.57 2.57a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06l2.57-2.57a5.25 5.25 0 00-1.834 2.606A5.25 5.25 0 0112 6.75z" clipRule="evenodd" />
+          <path fillRule="evenodd" d="M12 6.75a5.25 5.25 0 016.775-5.025.75.75 0 01.313 1.248l-3.32 3.319c.063.475.276.934.627 1.33.35.389.820.729 1.382.963.56.235 1.217.389 1.925.389a.75.75 0 010 1.5c-.898 0-1.7-.192-2.375-.509A5.221 5.221 0 0115.75 8.25c0-.65-.126-1.275-.356-1.85l-2.57 2.57a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06l2.57-2.57a5.25 5.25 0 00-1.834 2.606A5.25 5.25 0 0012 6.75z" clipRule="evenodd" />
         </svg>
       </SectionIcon>
       Select Your Pet
@@ -586,40 +586,13 @@ const ReceiptScreen: React.FC<{
   );
 };
 
-// 🔹 Success Screen Component (kept for cash payments)
-const SuccessScreen: React.FC<{
-  countdown: number;
-  onSkip: () => void;
-}> = ({ countdown, onSkip }) => (
-  <SuccessContainer>
-    <SuccessIcon>✅</SuccessIcon>
-    <SuccessTitle>Appointment Confirmed!</SuccessTitle>
-    <SuccessMessage>
-      Your appointment has been successfully booked.
-    </SuccessMessage>
-    <MerchantInfo>
-      <MerchantName>PetCare Veterinary Clinic</MerchantName>
-      <MerchantDetails>Thank you for choosing our services!</MerchantDetails>
-    </MerchantInfo>
-    <CountdownContainer>
-      <CountdownText>
-        Redirecting to dashboard in {countdown} seconds...
-      </CountdownText>
-      <SkipButton onClick={onSkip}>
-        Go to Dashboard Now
-      </SkipButton>
-    </CountdownContainer>
-  </SuccessContainer>
-);
-
 // 🔹 Payment Processing Function
 const processPayment = async (
   appointmentId: string, 
   amount: number, 
   appointmentType: string, 
   petName: string, 
-  paymentMethod: string,
-  onPaymentSuccess: () => void
+  paymentMethod: string
 ): Promise<boolean> => {
   try {
     if (paymentMethod === "Cash") {
@@ -712,10 +685,8 @@ const AppointmentPage: React.FC = () => {
   const [bookingState, dispatch] = useReducer(bookingReducer, initialState);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showPaymentMethods, setShowPaymentMethods] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
   const [completedAppointment, setCompletedAppointment] = useState<Appointment | null>(null);
-  const [countdown, setCountdown] = useState(10);
 
   // 🔹 Fix hydration by setting client-side only values after mount
   useEffect(() => {
@@ -785,24 +756,12 @@ const AppointmentPage: React.FC = () => {
     }
   }, [router, isClient]);
 
-  // 🔹 Countdown timer for success screen
-  useEffect(() => {
-    if (showSuccess && countdown > 0) {
-      const timer = setTimeout(() => {
-        setCountdown(countdown - 1);
-      }, 1000);
-      return () => clearTimeout(timer);
-    } else if (showSuccess && countdown === 0) {
-      router.push("/userdashboard");
-    }
-  }, [showSuccess, countdown, router]);
-
   // 🔹 FIXED: Set first pet as default when pets are loaded
   useEffect(() => {
     if (pets.length > 0 && !bookingState.selectedPet) {
       dispatch({ type: 'SET_PET', payload: pets[0].id });
     }
-  }, [pets, bookingState.selectedPet]); // ✅ Fixed: Added pets dependency
+  }, [pets, bookingState.selectedPet]);
 
   // Send notification to doctors
   const sendNotificationToDoctor = useCallback(async (appointmentData: AppointmentNotificationData) => {
@@ -895,8 +854,7 @@ const AppointmentPage: React.FC = () => {
         selectedPrice, 
         selectedAppointmentType, 
         selectedPetData?.name || "Pet",
-        paymentMethod,
-        () => setShowSuccess(true)
+        paymentMethod
       );
 
       if (paymentMethod === "Cash" || !isRedirecting) {
@@ -921,10 +879,6 @@ const AppointmentPage: React.FC = () => {
            pets.length > 0 && !isDateUnavailable(selectedDate);
   }, [bookingState, pets.length, isDateUnavailable]);
 
-  const handleSkipCountdown = () => {
-    router.push("/userdashboard");
-  };
-
   const handleViewReceipt = () => {
     // Here you could implement a print function or detailed receipt view
     window.print();
@@ -940,19 +894,6 @@ const AppointmentPage: React.FC = () => {
         <GlobalStyle />
         <Wrapper>
           <LoadingSpinner>Loading appointment data...</LoadingSpinner>
-        </Wrapper>
-      </>
-    );
-  }
-
-  if (showSuccess) {
-    return (
-      <>
-        <GlobalStyle />
-        <Wrapper>
-          <Card>
-            <SuccessScreen countdown={countdown} onSkip={handleSkipCountdown} />
-          </Card>
         </Wrapper>
       </>
     );
@@ -1481,135 +1422,7 @@ const LoadingSpinner = styled.div`
   font-weight: 600;
 `;
 
-// 🔹 Success Screen Styled Components
-const SuccessContainer = styled.div`
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 60px 40px;
-  text-align: center;
-  animation: ${fadeIn} 0.8s ease-out;
-  
-  @media (max-width: 768px) {
-    padding: 40px 20px;
-  }
-`;
-
-const SuccessIcon = styled.div`
-  font-size: 80px;
-  margin-bottom: 20px;
-  animation: ${pulse} 2s infinite;
-  
-  @media (max-width: 768px) {
-    font-size: 60px;
-  }
-`;
-
-const SuccessTitle = styled.h2`
-  font-size: 32px;
-  font-weight: 700;
-  color: #27AE60;
-  margin: 0 0 16px 0;
-  
-  @media (max-width: 768px) {
-    font-size: 24px;
-  }
-`;
-
-const SuccessMessage = styled.p`
-  font-size: 18px;
-  color: #2c3e50;
-  margin: 0 0 32px 0;
-  line-height: 1.6;
-  max-width: 500px;
-  
-  @media (max-width: 768px) {
-    font-size: 16px;
-    margin-bottom: 24px;
-  }
-`;
-
-const MerchantInfo = styled.div`
-  background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
-  color: white;
-  padding: 24px 32px;
-  border-radius: 16px;
-  margin-bottom: 32px;
-  box-shadow: 0 8px 32px rgba(52, 184, 156, 0.3);
-  cursor: pointer;
-  transition: all 0.3s ease;
-  
-  &:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 12px 40px rgba(52, 184, 156, 0.4);
-  }
-  
-  @media (max-width: 768px) {
-    padding: 20px 24px;
-    margin-bottom: 24px;
-  }
-`;
-
-const MerchantName = styled.h3`
-  font-size: 24px;
-  font-weight: 700;
-  margin: 0 0 8px 0;
-  
-  @media (max-width: 768px) {
-    font-size: 20px;
-  }
-`;
-
-const MerchantDetails = styled.p`
-  font-size: 16px;
-  margin: 0;
-  opacity: 0.9;
-  
-  @media (max-width: 768px) {
-    font-size: 14px;
-  }
-`;
-
-const CountdownContainer = styled.div`
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-`;
-
-const CountdownText = styled.p`
-  font-size: 16px;
-  color: #7f8c8d;
-  margin: 0;
-  font-weight: 500;
-`;
-
-const SkipButton = styled.button`
-  padding: 12px 32px;
-  border: 2px solid #34B89C;
-  border-radius: 25px;
-  background: white;
-  color: #34B89C;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  font-size: 16px;
-  
-  &:hover {
-    background: #34B89C;
-    color: white;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(52, 184, 156, 0.3);
-  }
-  
-  @media (max-width: 768px) {
-    padding: 10px 24px;
-    font-size: 14px;
-  }
-`;
-
-// 🔹 NEW: Receipt Screen Styled Components
+// 🔹 Receipt Screen Styled Components
 const ReceiptContainer = styled.div`
   display: flex;
   flex-direction: column;

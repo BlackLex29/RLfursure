@@ -42,6 +42,7 @@ interface UserProfile {
   lastName: string;
   email: string;
   profilePicture?: string;
+  twoFactorEnabled?: boolean;
 }
 
 const timeSlots = [
@@ -67,23 +68,20 @@ const UserDashboard: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isClient, setIsClient] = useState(false);
   
-  // Profile editing state
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [editFirstName, setEditFirstName] = useState("");
   const [editLastName, setEditLastName] = useState("");
   const [profilePictureUrl, setProfilePictureUrl] = useState("");
   const [profilePictureFile, setProfilePictureFile] = useState<File | null>(null);
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
 
-  // Modal states
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<AppointmentType | null>(null);
-
-  // Medical Records modal state
   const [showMedicalRecordsModal, setShowMedicalRecordsModal] = useState(false);
+  const [showHistorySidebar, setShowHistorySidebar] = useState(false);
 
-  // Success message states
   const [showSuccessMessage, setShowSuccessMessage] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
 
@@ -91,7 +89,6 @@ const UserDashboard: React.FC = () => {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
-  // Show success message
   const showSuccess = (message: string) => {
     setSuccessMessage(message);
     setShowSuccessMessage(true);
@@ -128,29 +125,34 @@ const UserDashboard: React.FC = () => {
           setEditFirstName(profileData.firstName || userEmail.split('@')[0]);
           setEditLastName(profileData.lastName || "");
           setProfilePictureUrl(profileData.profilePicture || "");
+          setTwoFactorEnabled(profileData.twoFactorEnabled || false);
         } else {
           const defaultProfile: UserProfile = {
             firstName: userEmail.split('@')[0],
             lastName: "",
-            email: userEmail
+            email: userEmail,
+            twoFactorEnabled: false
           };
           await setDoc(doc(db, "users", userId), defaultProfile);
           setUserProfile(defaultProfile);
           setEditFirstName(defaultProfile.firstName);
           setEditLastName("");
           setProfilePictureUrl("");
+          setTwoFactorEnabled(false);
         }
       } catch (error) {
         console.error("Error fetching user profile:", error);
         const defaultProfile: UserProfile = {
           firstName: userEmail.split('@')[0],
           lastName: "",
-          email: userEmail
+          email: userEmail,
+          twoFactorEnabled: false
         };
         setUserProfile(defaultProfile);
         setEditFirstName(defaultProfile.firstName);
         setEditLastName("");
         setProfilePictureUrl("");
+        setTwoFactorEnabled(false);
       } finally {
         setLoading(false);
       }
@@ -158,7 +160,6 @@ const UserDashboard: React.FC = () => {
 
     fetchUserProfile();
 
-    // Query for active appointments (excluding completed ones)
     const activeQuery = query(
       collection(db, "appointments"),
       where("clientName", "==", userEmail)
@@ -168,7 +169,6 @@ const UserDashboard: React.FC = () => {
       const data: AppointmentType[] = [];
       snapshot.forEach((doc) => {
         const appointmentData = { id: doc.id, ...(doc.data() as Omit<AppointmentType, 'id'>) };
-        // Filter out completed appointments (Done, Not Attend, Cancelled)
         if (!["Done", "Not Attend", "Cancelled"].includes(appointmentData.status || "")) {
           data.push(appointmentData);
         }
@@ -177,7 +177,6 @@ const UserDashboard: React.FC = () => {
       setAppointments(data);
     });
 
-    // Query for completed appointments (for history)
     const completedQuery = query(
       collection(db, "appointments"),
       where("clientName", "==", userEmail)
@@ -187,12 +186,10 @@ const UserDashboard: React.FC = () => {
       const data: AppointmentType[] = [];
       snapshot.forEach((doc) => {
         const appointmentData = { id: doc.id, ...(doc.data() as Omit<AppointmentType, 'id'>) };
-        // Only include completed appointments
         if (["Done", "Not Attend", "Cancelled"].includes(appointmentData.status || "")) {
           data.push(appointmentData);
         }
       });
-      // Sort by completion date (most recent first)
       data.sort((a, b) => {
         const dateA = a.completedAt || a.date;
         const dateB = b.completedAt || b.date;
@@ -206,6 +203,17 @@ const UserDashboard: React.FC = () => {
       completedUnsub();
     };
   }, [userEmail, userId]);
+
+  // Debug useEffect
+  useEffect(() => {
+    console.log("Current edit states:", {
+      editFirstName,
+      editLastName,
+      profilePictureUrl,
+      profilePictureFile: profilePictureFile?.name || 'No file',
+      isEditingProfile
+    });
+  }, [editFirstName, editLastName, profilePictureUrl, profilePictureFile, isEditingProfile]);
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -244,6 +252,10 @@ const UserDashboard: React.FC = () => {
     setShowMedicalRecordsModal(true);
   };
 
+  const handleHistoryClick = () => {
+    setShowHistorySidebar(true);
+  };
+
   const saveEdit = async () => {
     if (!selectedAppointment || !editDate || !editSlot) {
       return alert("Please select date and time slot.");
@@ -272,7 +284,6 @@ const UserDashboard: React.FC = () => {
     }
   };
 
-  // Profile editing functions
   const toggleProfileEdit = () => {
     if (isEditingProfile) {
       saveProfileEdit();
@@ -281,6 +292,7 @@ const UserDashboard: React.FC = () => {
       setEditFirstName(userProfile?.firstName || userEmail?.split('@')[0] || "");
       setEditLastName(userProfile?.lastName || "");
       setProfilePictureUrl(userProfile?.profilePicture || "");
+      setTwoFactorEnabled(userProfile?.twoFactorEnabled || false);
       setProfilePictureFile(null);
     }
   };
@@ -288,31 +300,87 @@ const UserDashboard: React.FC = () => {
   const uploadImageToStorage = async (file: File): Promise<string> => {
     if (!userId) throw new Error("No user ID");
     
-    const storageRef = ref(storage, `profile-pictures/${userId}/${file.name}`);
+    // Create a unique filename
+    const fileExtension = file.name.split('.').pop();
+    const fileName = `profile-picture-${Date.now()}.${fileExtension}`;
+    
+    const storageRef = ref(storage, `profile-pictures/${userId}/${fileName}`);
     const snapshot = await uploadBytes(storageRef, file);
     const downloadURL = await getDownloadURL(snapshot.ref);
     return downloadURL;
   };
 
+  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    console.log("File selected:", file); // Debug log
+    
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        alert('Please select an image file (JPEG, PNG, etc.)');
+        event.target.value = ''; // Reset input
+        return;
+      }
+
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        alert('Please select an image smaller than 5MB');
+        event.target.value = ''; // Reset input
+        return;
+      }
+
+      setProfilePictureFile(file);
+      
+      // Create preview URL
+      const imageUrl = URL.createObjectURL(file);
+      console.log("Preview URL created:", imageUrl); // Debug log
+      setProfilePictureUrl(imageUrl);
+    }
+  };
+
   const saveProfileEdit = async () => {
-    if (!userId) return;
+    if (!userId) {
+      console.error("No user ID found");
+      return;
+    }
 
     try {
       let imageUrl = profilePictureUrl;
       
+      console.log("Saving profile...", { 
+        editFirstName, 
+        editLastName, 
+        profilePictureFile: !!profilePictureFile,
+        currentImageUrl: profilePictureUrl 
+      });
+
+      // Upload new image if selected
       if (profilePictureFile) {
-        imageUrl = await uploadImageToStorage(profilePictureFile);
+        try {
+          console.log("Uploading new image...");
+          imageUrl = await uploadImageToStorage(profilePictureFile);
+          console.log("Image uploaded successfully:", imageUrl);
+        } catch (error) {
+          console.error("Error uploading image:", error);
+          alert("Failed to upload profile picture. Please try again.");
+          return;
+        }
       }
 
       const updatedProfile = {
         firstName: editFirstName.trim() || userEmail?.split('@')[0] || "User",
         lastName: editLastName.trim(),
         email: userEmail || "",
-        profilePicture: imageUrl
+        profilePicture: imageUrl,
+        twoFactorEnabled: twoFactorEnabled,
+        updatedAt: new Date().toISOString()
       };
+
+      console.log("Updating Firestore with:", updatedProfile);
 
       await updateDoc(doc(db, "users", userId), updatedProfile);
       
+      // Update local state
       setUserProfile(prevProfile => ({
         ...prevProfile!,
         ...updatedProfile
@@ -320,20 +388,23 @@ const UserDashboard: React.FC = () => {
       
       setIsEditingProfile(false);
       setProfilePictureFile(null);
-      showSuccess("Profile updated successfully!");
+      
+      console.log("Profile updated successfully");
+      showSuccess(`Profile updated successfully! 2FA is now ${twoFactorEnabled ? 'enabled' : 'disabled'}.`);
+      
     } catch (error) {
       console.error("Error updating profile:", error);
-      alert("Failed to update profile.");
+      alert("Failed to update profile. Please try again.");
     }
   };
 
-  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      setProfilePictureFile(file);
-      const imageUrl = URL.createObjectURL(file);
-      setProfilePictureUrl(imageUrl);
-    }
+  const cancelProfileEdit = () => {
+    setIsEditingProfile(false);
+    setEditFirstName(userProfile?.firstName || userEmail?.split('@')[0] || "");
+    setEditLastName(userProfile?.lastName || "");
+    setProfilePictureUrl(userProfile?.profilePicture || "");
+    setTwoFactorEnabled(userProfile?.twoFactorEnabled || false);
+    setProfilePictureFile(null);
   };
 
   const getAppointmentTypeLabel = (type?: string) => {
@@ -383,14 +454,11 @@ const UserDashboard: React.FC = () => {
     <>
       <GlobalStyle />
       <PageContainer>
-        {/* Success Message */}
         {showSuccessMessage && (
           <SuccessNotification>
             <SuccessIcon>✓</SuccessIcon>
             <SuccessText>{successMessage}</SuccessText>
-            <CloseSuccessButton onClick={() => setShowSuccessMessage(false)}>
-              ×
-            </CloseSuccessButton>
+            <CloseSuccessButton onClick={() => setShowSuccessMessage(false)}>×</CloseSuccessButton>
           </SuccessNotification>
         )}
 
@@ -430,11 +498,11 @@ const UserDashboard: React.FC = () => {
               </ProfileIconButton>
 
               {isEditingProfile && (
-                <ProfileModalOverlay onClick={() => setIsEditingProfile(false)}>
+                <ProfileModalOverlay onClick={cancelProfileEdit}>
                   <LargeProfileModal onClick={(e) => e.stopPropagation()}>
                     <ModalHeader>
                       <ModalTitle>Edit Profile</ModalTitle>
-                      <CloseButton onClick={() => setIsEditingProfile(false)}>×</CloseButton>
+                      <CloseButton onClick={cancelProfileEdit}>×</CloseButton>
                     </ModalHeader>
                     
                     <ModalContent>
@@ -455,6 +523,9 @@ const UserDashboard: React.FC = () => {
                             id="profile-pic"
                           />
                         </ImageUploadLabel>
+                        {profilePictureFile && (
+                          <ImageUploadHint>New image selected: {profilePictureFile.name}</ImageUploadHint>
+                        )}
                       </ProfileImageSection>
                       
                       <FormGroup>
@@ -462,7 +533,10 @@ const UserDashboard: React.FC = () => {
                         <EditInput
                           type="text"
                           value={editFirstName}
-                          onChange={(e) => setEditFirstName(e.target.value)}
+                          onChange={(e) => {
+                            console.log("First name changed:", e.target.value);
+                            setEditFirstName(e.target.value);
+                          }}
                           placeholder="First name"
                         />
                       </FormGroup>
@@ -472,7 +546,10 @@ const UserDashboard: React.FC = () => {
                         <EditInput
                           type="text"
                           value={editLastName}
-                          onChange={(e) => setEditLastName(e.target.value)}
+                          onChange={(e) => {
+                            console.log("Last name changed:", e.target.value);
+                            setEditLastName(e.target.value);
+                          }}
                           placeholder="Last name"
                         />
                       </FormGroup>
@@ -481,10 +558,33 @@ const UserDashboard: React.FC = () => {
                         <Label>Email</Label>
                         <EmailDisplay>{userEmail}</EmailDisplay>
                       </FormGroup>
+
+                      <SecuritySection>
+                        <SecurityTitle>🔐 Security Settings</SecurityTitle>
+                        <TwoFactorContainer>
+                          <TwoFactorInfo>
+                            <TwoFactorLabel>Two-Factor Authentication (2FA)</TwoFactorLabel>
+                            <TwoFactorDescription>
+                              {twoFactorEnabled 
+                                ? "✅ Enabled - Verification code will be sent to your email on each login" 
+                                : "⚠️ Disabled - Enable 2FA for extra security"}
+                            </TwoFactorDescription>
+                          </TwoFactorInfo>
+                          <ToggleSwitch>
+                            <ToggleInput
+                              type="checkbox"
+                              id="2fa-toggle"
+                              checked={twoFactorEnabled}
+                              onChange={(e) => setTwoFactorEnabled(e.target.checked)}
+                            />
+                            <ToggleSlider className={twoFactorEnabled ? "active" : ""} />
+                          </ToggleSwitch>
+                        </TwoFactorContainer>
+                      </SecuritySection>
                     </ModalContent>
                     
                     <ModalActions>
-                      <CancelModalButton onClick={() => setIsEditingProfile(false)}>
+                      <CancelModalButton onClick={cancelProfileEdit}>
                         Cancel
                       </CancelModalButton>
                       <SaveProfileButton onClick={saveProfileEdit}>
@@ -499,6 +599,56 @@ const UserDashboard: React.FC = () => {
             <LogoutButton onClick={handleLogout}>Logout</LogoutButton>
           </HeaderRight>
         </HeaderBar>
+
+        <HistorySidebarToggle onClick={handleHistoryClick}>
+          <HistoryIcon>📋</HistoryIcon>
+          <HistoryText>History</HistoryText>
+          {completedAppointments.length > 0 && (
+            <HistoryBadgeSmall>{completedAppointments.length}</HistoryBadgeSmall>
+          )}
+        </HistorySidebarToggle>
+
+        {showHistorySidebar && (
+          <>
+            <SidebarOverlay onClick={() => setShowHistorySidebar(false)} />
+            <HistorySidebar>
+              <SidebarHeader>
+                <SidebarTitle>Appointment History</SidebarTitle>
+                <SidebarCloseButton onClick={() => setShowHistorySidebar(false)}>×</SidebarCloseButton>
+              </SidebarHeader>
+              
+              <SidebarContent>
+                {completedAppointments.length === 0 ? (
+                  <NoHistoryMessage>
+                    <NoHistoryIcon>📚</NoHistoryIcon>
+                    <NoHistoryText>No appointment history yet</NoHistoryText>
+                  </NoHistoryMessage>
+                ) : (
+                  <SidebarHistoryList>
+                    {completedAppointments.map((appt) => (
+                      <SidebarHistoryCard key={appt.id} onClick={() => {
+                        setShowHistorySidebar(false);
+                        openHistoryModal(appt);
+                      }}>
+                        <SidebarCardHeader>
+                          <PetName>{appt.petName}</PetName>
+                          <SidebarStatusBadge status={appt.status || "Completed"}>
+                            {appt.status === "Done" ? "✅" : 
+                            appt.status === "Not Attend" ? "❌" : 
+                            appt.status === "Cancelled" ? "🚫" : "✅"}
+                          </SidebarStatusBadge>
+                        </SidebarCardHeader>
+                        <ServiceInfo>{getAppointmentTypeLabel(appt.appointmentType)}</ServiceInfo>
+                        <DateInfo>{formatDate(appt.date)} • {appt.timeSlot}</DateInfo>
+                        <ClickHint>Click for details</ClickHint>
+                      </SidebarHistoryCard>
+                    ))}
+                  </SidebarHistoryList>
+                )}
+              </SidebarContent>
+            </HistorySidebar>
+          </>
+        )}
 
         <Content>
           <WelcomeSection>
@@ -528,11 +678,8 @@ const UserDashboard: React.FC = () => {
             <Card onClick={handleMedicalRecordsClick}>
               <CardIcon>📋</CardIcon>
               <CardContent>
-                <CardTitle>Medical Records & History</CardTitle>
-                <CardText>View your pet's health history and appointment records</CardText>
-                {completedAppointments.length > 0 && (
-                  <HistoryBadge>{completedAppointments.length} completed appointments</HistoryBadge>
-                )}
+                <CardTitle>Medical Records</CardTitle>
+                <CardText>View your pets health records and documents</CardText>
               </CardContent>
             </Card>
           </CardsGrid>
@@ -594,71 +741,35 @@ const UserDashboard: React.FC = () => {
           </AppointmentsSection>
         </Content>
 
-        {/* Medical Records Modal with Appointment History */}
         {showMedicalRecordsModal && (
           <ModalOverlay onClick={() => setShowMedicalRecordsModal(false)}>
-            <LargeMedicalModal onClick={(e) => e.stopPropagation()}>
+            <ModalContainer onClick={(e) => e.stopPropagation()}>
               <ModalHeader>
-                <ModalTitle>Medical Records & Appointment History</ModalTitle>
+                <ModalTitle>Medical Records</ModalTitle>
                 <CloseButton onClick={() => setShowMedicalRecordsModal(false)}>×</CloseButton>
               </ModalHeader>
               
-              <MedicalModalContent>
+              <ModalContent>
                 <MedicalRecordsSection>
-                  <SectionSubtitle>Medical Records</SectionSubtitle>
+                  <SectionSubtitle>View Medical Records</SectionSubtitle>
                   <ViewRecordsButton onClick={() => {
                     setShowMedicalRecordsModal(false);
                     router.push("/usermedicalrecord");
                   }}>
-                    View Full Medical Records
+                    Open Medical Records
                   </ViewRecordsButton>
                 </MedicalRecordsSection>
-
-                <AppointmentHistorySection>
-                  <HistorySectionHeader>
-                    <SectionSubtitle>Appointment History</SectionSubtitle>
-                    <HistoryCount>{completedAppointments.length} completed appointments</HistoryCount>
-                  </HistorySectionHeader>
-
-                  {completedAppointments.length === 0 ? (
-                    <NoHistoryMessage>
-                      <NoHistoryIcon>📚</NoHistoryIcon>
-                      <NoHistoryText>No appointment history yet</NoHistoryText>
-                    </NoHistoryMessage>
-                  ) : (
-                    <HistoryList>
-                      {completedAppointments.map((appt) => (
-                        <HistoryCard key={appt.id} onClick={() => openHistoryModal(appt)}>
-                          <HistoryCardHeader>
-                            <HistoryCardLeft>
-                              <PetName>{appt.petName}</PetName>
-                              <ServiceInfo>{getAppointmentTypeLabel(appt.appointmentType)}</ServiceInfo>
-                              <DateInfo>{formatDate(appt.date)} • {appt.timeSlot}</DateInfo>
-                            </HistoryCardLeft>
-                            <HistoryStatusBadge status={appt.status || "Completed"}>
-                              {appt.status === "Done" ? "✅ Completed" : 
-                               appt.status === "Not Attend" ? "❌ No Show" : 
-                               appt.status === "Cancelled" ? "🚫 Cancelled" : appt.status}
-                            </HistoryStatusBadge>
-                          </HistoryCardHeader>
-                          <ClickHint>Click for details</ClickHint>
-                        </HistoryCard>
-                      ))}
-                    </HistoryList>
-                  )}
-                </AppointmentHistorySection>
-              </MedicalModalContent>
+              </ModalContent>
               
               <ModalActions>
                 <CancelModalButton onClick={() => setShowMedicalRecordsModal(false)}>
                   Close
                 </CancelModalButton>
               </ModalActions>
-            </LargeMedicalModal>
+            </ModalContainer>
           </ModalOverlay>
         )}
 
-        {/* Reschedule Modal */}
         {showRescheduleModal && selectedAppointment && (
           <ModalOverlay onClick={() => setShowRescheduleModal(false)}>
             <ModalContainer onClick={(e) => e.stopPropagation()}>
@@ -729,13 +840,12 @@ const UserDashboard: React.FC = () => {
           </ModalOverlay>
         )}
 
-        {/* Cancel Appointment Modal */}
         {showCancelModal && selectedAppointment && (
           <ModalOverlay onClick={() => setShowCancelModal(false)}>
             <ModalContainer onClick={(e) => e.stopPropagation()}>
               <ModalHeader>
                 <ModalTitle>Cancel Appointment</ModalTitle>
-                <CloseButton onClick={() => setShowCancelModal(false)}>×</CloseButton>
+                <CloseButton onClick={() => setShowCancelModal(false)}>x</CloseButton>
               </ModalHeader>
               
               <ModalContent>
@@ -778,7 +888,6 @@ const UserDashboard: React.FC = () => {
           </ModalOverlay>
         )}
 
-        {/* Appointment History Details Modal */}
         {showHistoryModal && selectedAppointment && (
           <ModalOverlay onClick={() => setShowHistoryModal(false)}>
             <ModalContainer onClick={(e) => e.stopPropagation()}>
@@ -814,8 +923,8 @@ const UserDashboard: React.FC = () => {
                     <InfoValue>
                       <HistoryStatusBadge status={selectedAppointment.status || "Completed"}>
                         {selectedAppointment.status === "Done" ? "✅ Completed" : 
-                         selectedAppointment.status === "Not Attend" ? "❌ No Show" : 
-                         selectedAppointment.status === "Cancelled" ? "🚫 Cancelled" : selectedAppointment.status}
+                        selectedAppointment.status === "Not Attend" ? "❌ No Show" : 
+                        selectedAppointment.status === "Cancelled" ? "🚫 Cancelled" : selectedAppointment.status}
                       </HistoryStatusBadge>
                     </InfoValue>
                   </InfoItem>
@@ -855,32 +964,138 @@ const UserDashboard: React.FC = () => {
 
 export default UserDashboard;
 
-// Styled Components
+// STYLED COMPONENTS - WITH FIXED INPUT STYLING
+const ImageUploadHint = styled.div`
+  font-size: 0.8rem;
+  color: #4ecdc4;
+  font-weight: 600;
+  text-align: center;
+  margin-top: 0.5rem;
+`;
+
 const PageContainer = styled.div`
   display: flex;
   flex-direction: column;
   min-height: 100vh;
   width: 100%;
   background: #f8f9fa;
+  position: relative;
+  
+  &::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-image: radial-gradient(circle at 2px 2px, rgba(78, 205, 196, 0.03) 1px, transparent 0);
+    background-size: 50px 50px;
+    pointer-events: none;
+    z-index: 0;
+  }
 `;
 
-// Success Notification
-const SuccessNotification = styled.div`
+const HistorySidebarToggle = styled.div`
   position: fixed;
-  top: 20px;
   right: 20px;
-  background: #d4edda;
-  border: 1px solid #c3e6cb;
-  border-radius: 8px;
-  padding: 1rem 1.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: linear-gradient(135deg, #4ecdc4 0%, #44a08d 100%);
+  color: white;
+  padding: 1.2rem 1rem;
+  border-radius: 30px 0 0 30px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(78, 205, 196, 0.3);
+  z-index: 99;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 1rem;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-  z-index: 1001;
-  animation: slideIn 0.3s ease;
+  gap: 0.6rem;
+  transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  border: 3px solid white;
+  
+  &:hover {
+    transform: translateY(-50%) translateX(-8px);
+    box-shadow: 0 12px 32px rgba(78, 205, 196, 0.4);
+    padding-right: 1.5rem;
+  }
 
-  @keyframes slideIn {
+  @media (max-width: 768px) {
+    right: 10px;
+    padding: 1rem 0.8rem;
+    border-radius: 24px 0 0 24px;
+  }
+`;
+
+const HistoryIcon = styled.div`
+  font-size: 1.6rem;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+`;
+
+const HistoryText = styled.span`
+  font-size: 0.8rem;
+  font-weight: 700;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  letter-spacing: 1px;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  
+  @media (max-width: 768px) {
+    writing-mode: horizontal-tb;
+    text-orientation: initial;
+    font-size: 0.7rem;
+  }
+`;
+
+const HistoryBadgeSmall = styled.div`
+  background: white;
+  color: #4ecdc4;
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 0.3rem 0.6rem;
+  border-radius: 12px;
+  min-width: 24px;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  animation: pulse 2s infinite;
+  
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+  }
+`;
+
+const SidebarOverlay = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 999;
+  animation: fadeIn 0.3s ease;
+  
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+`;
+
+const HistorySidebar = styled.div`
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 420px;
+  background: white;
+  z-index: 1000;
+  box-shadow: -8px 0 32px rgba(0,0,0,0.15);
+  display: flex;
+  flex-direction: column;
+  animation: slideInFromRight 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+  @keyframes slideInFromRight {
     from {
       transform: translateX(100%);
       opacity: 0;
@@ -892,47 +1107,198 @@ const SuccessNotification = styled.div`
   }
 
   @media (max-width: 768px) {
-    top: 10px;
-    right: 10px;
-    left: 10px;
+    width: 100%;
+    max-width: 380px;
+  }
+
+  @media (max-width: 480px) {
+    width: 100%;
+    max-width: none;
+  }
+`;
+
+const SidebarHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.8rem;
+  background: linear-gradient(135deg, #4ecdc4 0%, #44a08d 100%);
+  color: white;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+`;
+
+const SidebarTitle = styled.h2`
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+`;
+
+const SidebarCloseButton = styled.button`
+  background: rgba(255, 255, 255, 0.25);
+  border: none;
+  color: white;
+  font-size: 1.8rem;
+  cursor: pointer;
+  padding: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+  font-weight: 300;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.35);
+    transform: rotate(90deg);
+  }
+`;
+
+const SidebarContent = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.2rem;
+  
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: #f1f1f1;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: #4ecdc4;
+    border-radius: 4px;
+  }
+`;
+
+const SidebarHistoryList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+`;
+
+const SidebarHistoryCard = styled.div`
+  background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+  padding: 1.2rem;
+  border-radius: 16px;
+  border: 2px solid #e9ecef;
+  border-left: 5px solid #6c757d;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+  &:hover {
+    background: white;
+    transform: translateX(-5px);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+    border-left-color: #4ecdc4;
+  }
+`;
+
+const SidebarCardHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.6rem;
+`;
+
+const SidebarStatusBadge = styled.span<{ status: string }>`
+  font-size: 1.2rem;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: ${props => {
+    switch (props.status) {
+      case "Done": return "#d4edda";
+      case "Not Attend": return "#fff3cd";
+      case "Cancelled": return "#f8d7da";
+      default: return "#e2e6ea";
+    }
+  }};
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+`;
+
+const SuccessNotification = styled.div`
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+  border: 2px solid #28a745;
+  border-radius: 16px;
+  padding: 1.2rem 1.6rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  box-shadow: 0 8px 24px rgba(40, 167, 69, 0.25);
+  z-index: 1001;
+  animation: slideInBounce 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+  @keyframes slideInBounce {
+    0% {
+      transform: translateX(400px);
+      opacity: 0;
+    }
+    60% {
+      transform: translateX(-10px);
+      opacity: 1;
+    }
+    100% {
+      transform: translateX(0);
+    }
+  }
+
+  @media (max-width: 768px) {
+    top: 12px;
+    right: 12px;
+    left: 12px;
   }
 `;
 
 const SuccessIcon = styled.div`
-  background: #28a745;
+  background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
   color: white;
-  width: 24px;
-  height: 24px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: bold;
-  font-size: 0.9rem;
+  font-size: 1.1rem;
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
 `;
 
 const SuccessText = styled.span`
   color: #155724;
   font-weight: 600;
   flex: 1;
+  font-size: 0.95rem;
 `;
 
 const CloseSuccessButton = styled.button`
-  background: none;
+  background: rgba(21, 87, 36, 0.1);
   border: none;
-  font-size: 1.2rem;
+  font-size: 1.5rem;
   color: #155724;
   cursor: pointer;
   padding: 0;
-  width: 24px;
-  height: 24px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
+  transition: all 0.3s ease;
 
   &:hover {
-    background: rgba(21, 87, 36, 0.1);
+    background: rgba(21, 87, 36, 0.2);
+    transform: rotate(90deg) scale(1.1);
   }
 `;
 
@@ -940,16 +1306,17 @@ const HeaderBar = styled.header`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem 2rem;
+  padding: 1.2rem 2.5rem;
   background: linear-gradient(135deg, #4ecdc4 0%, #44a08d 100%);
-  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 20px rgba(78, 205, 196, 0.25);
   position: sticky;
   top: 0;
   z-index: 100;
 
   @media (max-width: 768px) {
-    padding: 1rem;
+    padding: 1.2rem;
     position: relative;
+    flex-wrap: wrap;
   }
 `;
 
@@ -959,7 +1326,8 @@ const HeaderLeft = styled.div`
   gap: 1.5rem;
 
   @media (max-width: 768px) {
-    gap: 1rem;
+    width: 100%;
+    justify-content: space-between;
   }
 `;
 
@@ -978,6 +1346,18 @@ const HeaderRight = styled.div`
     
     &.open {
       display: flex;
+      animation: slideDown 0.3s ease;
+    }
+  }
+  
+  @keyframes slideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
     }
   }
 `;
@@ -985,15 +1365,22 @@ const HeaderRight = styled.div`
 const Logo = styled.div`
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.9rem;
   color: white;
 `;
 
 const LogoIcon = styled.div`
-  font-size: 2rem;
-  background: rgba(255, 255, 255, 0.2);
-  padding: 0.5rem;
-  border-radius: 10px;
+  font-size: 2.2rem;
+  background: rgba(255, 255, 255, 0.25);
+  padding: 0.7rem;
+  border-radius: 14px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  transition: all 0.3s ease;
+  
+  &:hover {
+    transform: scale(1.05) rotate(-5deg);
+  }
 `;
 
 const LogoText = styled.div`
@@ -1002,15 +1389,18 @@ const LogoText = styled.div`
 `;
 
 const ClinicName = styled.span`
-  font-size: 1.5rem;
-  font-weight: 700;
+  font-size: 1.6rem;
+  font-weight: 800;
   line-height: 1.2;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  letter-spacing: -0.5px;
 `;
 
 const LogoSubtext = styled.span`
-  font-size: 0.85rem;
-  opacity: 0.9;
-  font-weight: 500;
+  font-size: 0.8rem;
+  opacity: 0.95;
+  font-weight: 600;
+  letter-spacing: 0.3px;
 `;
 
 const UserInfo = styled.span`
@@ -1018,24 +1408,30 @@ const UserInfo = styled.span`
   font-weight: 600;
   color: white;
   margin-right: 1rem;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.1);
 
   @media (max-width: 768px) {
     margin-right: 0;
-    margin-bottom: 1rem;
+    margin-bottom: 0.5rem;
   }
 `;
 
 const MobileMenuButton = styled.button`
   display: none;
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.25);
   border: none;
   cursor: pointer;
-  padding: 0.5rem;
-  border-radius: 5px;
+  padding: 0.6rem;
+  border-radius: 10px;
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+  
+  &:hover {
+    background: rgba(255, 255, 255, 0.35);
+  }
   
   @media (max-width: 768px) {
     display: block;
-    align-self: flex-end;
   }
 `;
 
@@ -1043,19 +1439,19 @@ const HamburgerIcon = styled.div`
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  width: 24px;
-  height: 18px;
+  width: 26px;
+  height: 20px;
   
   span {
     height: 3px;
     width: 100%;
     background-color: white;
-    border-radius: 2px;
+    border-radius: 3px;
     transition: all 0.3s ease;
   }
   
   &.open span:nth-child(1) {
-    transform: rotate(45deg) translate(6px, 6px);
+    transform: rotate(45deg) translate(7px, 7px);
   }
   
   &.open span:nth-child(2) {
@@ -1063,7 +1459,7 @@ const HamburgerIcon = styled.div`
   }
   
   &.open span:nth-child(3) {
-    transform: rotate(-45deg) translate(6px, -6px);
+    transform: rotate(-45deg) translate(7px, -7px);
   }
 `;
 
@@ -1075,25 +1471,33 @@ const ProfileContainer = styled.div`
 
 const ProfileIconButton = styled.div`
   cursor: pointer;
-  padding: 0.5rem;
-  border-radius: 10px;
-  transition: background-color 0.3s ease;
+  padding: 0.4rem;
+  border-radius: 12px;
+  transition: all 0.3s ease;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.15);
+    transform: translateY(-2px);
   }
 `;
 
 const ProfileAvatar = styled.div`
-  width: 40px;
-  height: 40px;
+  width: 46px;
+  height: 46px;
   border-radius: 50%;
   overflow: hidden;
   background: white;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  border: 3px solid rgba(255, 255, 255, 0.4);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  transition: all 0.3s ease;
+  
+  ${ProfileIconButton}:hover & {
+    border-color: rgba(255, 255, 255, 0.6);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.25);
+  }
 `;
 
 const ProfileImage = styled.img`
@@ -1103,28 +1507,32 @@ const ProfileImage = styled.img`
 `;
 
 const DefaultAvatar = styled.div`
-  font-size: 1.2rem;
+  font-size: 1.4rem;
   color: #4ecdc4;
 `;
 
 const DefaultAvatarLarge = styled(DefaultAvatar)`
-  font-size: 4rem;
+  font-size: 4.5rem;
 `;
 
 const LogoutButton = styled.button`
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.25);
   color: white;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  padding: 0.6rem 1.2rem;
-  border-radius: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  padding: 0.7rem 1.4rem;
+  border-radius: 25px;
   font-size: 0.9rem;
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 700;
   transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.1);
 
   &:hover {
-    background: rgba(255, 255, 255, 0.3);
-    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.35);
+    border-color: rgba(255, 255, 255, 0.6);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
   }
 
   @media (max-width: 768px) {
@@ -1134,45 +1542,71 @@ const LogoutButton = styled.button`
 
 const Content = styled.div`
   flex: 1;
-  padding: 2rem;
+  padding: 2.5rem;
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 2.5rem;
+  position: relative;
+  z-index: 1;
 
   @media (max-width: 768px) {
-    padding: 1rem;
-    gap: 1.5rem;
+    padding: 1.2rem;
+    gap: 1.8rem;
   }
 `;
 
 const WelcomeSection = styled.div`
   background: white;
-  padding: 2rem;
-  border-radius: 15px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  padding: 2.8rem;
+  border-radius: 24px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.08);
   text-align: center;
-  border-top: 4px solid #4ecdc4;
+  border-top: 5px solid #4ecdc4;
+  position: relative;
+  overflow: hidden;
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(78,205,196,0.05) 0%, transparent 70%);
+    animation: rotate 20s linear infinite;
+  }
+  
+  @keyframes rotate {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
 
   @media (max-width: 768px) {
-    padding: 1.5rem;
+    padding: 2rem;
   }
 `;
 
 const WelcomeTitle = styled.h1`
-  font-size: 2rem;
-  font-weight: 700;
+  font-size: 2.3rem;
+  font-weight: 800;
   color: #2c3e50;
-  margin: 0 0 0.5rem 0;
+  margin: 0 0 0.6rem 0;
+  position: relative;
+  z-index: 1;
+  letter-spacing: -0.8px;
 
   @media (max-width: 768px) {
-    font-size: 1.5rem;
+    font-size: 1.7rem;
   }
 `;
 
 const WelcomeSubtitle = styled.p`
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   color: #7f8c8d;
   margin: 0;
+  position: relative;
+  z-index: 1;
+  font-weight: 500;
 
   @media (max-width: 768px) {
     font-size: 1rem;
@@ -1182,56 +1616,80 @@ const WelcomeSubtitle = styled.p`
 const CardsGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 1.5rem;
+  gap: 1.8rem;
 
   @media (max-width: 768px) {
     grid-template-columns: 1fr;
-    gap: 1rem;
+    gap: 1.2rem;
   }
 `;
 
 const Card = styled.div`
   background: white;
-  border-radius: 15px;
-  padding: 2rem;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  border-radius: 20px;
+  padding: 2.2rem;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
   cursor: pointer;
-  transition: all 0.3s ease;
-  border: 1px solid #e9ecef;
+  transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  border: 2px solid #e9ecef;
   display: flex;
   align-items: center;
-  gap: 1.5rem;
-  border-top: 4px solid transparent;
+  gap: 1.6rem;
+  position: relative;
+  overflow: hidden;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 5px;
+    background: linear-gradient(90deg, #4ecdc4, #44a08d);
+    transform: scaleX(0);
+    transition: transform 0.3s ease;
+  }
 
   &:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-    border-top-color: #4ecdc4;
+    transform: translateY(-8px);
+    box-shadow: 0 16px 40px rgba(78, 205, 196, 0.2);
+    border-color: #4ecdc4;
+    
+    &::before {
+      transform: scaleX(1);
+    }
   }
 
   @media (max-width: 768px) {
-    padding: 1.5rem;
-    gap: 1rem;
+    padding: 1.8rem;
+    gap: 1.2rem;
   }
 `;
 
 const CardIcon = styled.div`
-  font-size: 2.5rem;
+  font-size: 2.8rem;
   color: #4ecdc4;
   background: linear-gradient(135deg, #e8f8f5 0%, #d4edda 100%);
-  padding: 1rem;
-  border-radius: 15px;
+  padding: 1.3rem;
+  border-radius: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 80px;
-  height: 80px;
+  min-width: 85px;
+  height: 85px;
+  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.2);
+  transition: all 0.3s ease;
+  
+  ${Card}:hover & {
+    transform: scale(1.1) rotate(-5deg);
+    box-shadow: 0 6px 20px rgba(78, 205, 196, 0.3);
+  }
 
   @media (max-width: 768px) {
-    font-size: 2rem;
-    min-width: 60px;
-    height: 60px;
-    padding: 0.8rem;
+    font-size: 2.2rem;
+    min-width: 70px;
+    height: 70px;
+    padding: 1rem;
   }
 `;
 
@@ -1239,17 +1697,18 @@ const CardContent = styled.div`
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.6rem;
 `;
 
 const CardTitle = styled.h3`
-  font-size: 1.3rem;
-  font-weight: 600;
+  font-size: 1.4rem;
+  font-weight: 700;
   color: #2c3e50;
   margin: 0;
+  letter-spacing: -0.3px;
 
   @media (max-width: 768px) {
-    font-size: 1.1rem;
+    font-size: 1.2rem;
   }
 `;
 
@@ -1257,28 +1716,18 @@ const CardText = styled.p`
   font-size: 0.95rem;
   color: #6c757d;
   margin: 0;
-  line-height: 1.4;
+  line-height: 1.5;
+  font-weight: 500;
 
   @media (max-width: 768px) {
     font-size: 0.9rem;
   }
 `;
 
-const HistoryBadge = styled.div`
-  background: #4ecdc4;
-  color: white;
-  padding: 0.3rem 0.6rem;
-  border-radius: 12px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  align-self: flex-start;
-  margin-top: 0.25rem;
-`;
-
 const AppointmentsSection = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1.8rem;
 `;
 
 const SectionHeader = styled.div`
@@ -1292,33 +1741,35 @@ const SectionHeader = styled.div`
 const SectionTitleGroup = styled.div`
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 1.2rem;
   flex-wrap: wrap;
 `;
 
 const SectionTitle = styled.h2`
-  font-size: 1.5rem;
-  font-weight: 600;
+  font-size: 1.7rem;
+  font-weight: 700;
   color: #2c3e50;
   margin: 0;
+  letter-spacing: -0.5px;
 
   @media (max-width: 768px) {
-    font-size: 1.3rem;
+    font-size: 1.4rem;
   }
 `;
 
 const AppointmentCount = styled.span`
   background: #4ecdc4;
   color: white;
-  padding: 0.4rem 0.8rem;
-  border-radius: 15px;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
 `;
 
 const AppointmentsList = styled.div`
   display: grid;
-  gap: 1rem;
+  gap: 1.3rem;
   grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
 
   @media (max-width: 768px) {
@@ -1328,17 +1779,23 @@ const AppointmentsList = styled.div`
 
 const AppointmentCard = styled.div`
   background: white;
-  padding: 1.5rem;
-  border-radius: 15px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-  border: 1px solid #e9ecef;
-  border-left: 4px solid #ffc107;
+  padding: 1.8rem;
+  border-radius: 20px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+  border: 2px solid #e9ecef;
+  border-left: 6px solid #ffc107;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.2rem;
+  transition: all 0.3s ease;
+
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.12);
+  }
 
   @media (max-width: 768px) {
-    padding: 1.2rem;
+    padding: 1.4rem;
   }
 `;
 
@@ -1353,14 +1810,14 @@ const AppointmentHeader = styled.div`
 const AppointmentLeftSide = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.6rem;
   flex: 1;
 `;
 
 const AppointmentStatus = styled.div`
-  font-weight: 600;
+  font-weight: 700;
   color: #2c3e50;
-  font-size: 1rem;
+  font-size: 1.05rem;
 `;
 
 const AppointmentInfo = styled.div`
@@ -1379,6 +1836,7 @@ const AppointmentLabel = styled.span`
 const AppointmentValue = styled.span`
   color: #2c3e50;
   font-size: 0.9rem;
+  font-weight: 500;
 `;
 
 const AppointmentSeparator = styled.span`
@@ -1387,11 +1845,12 @@ const AppointmentSeparator = styled.span`
 `;
 
 const StatusBadge = styled.span<{ status: string }>`
-  padding: 0.4rem 0.8rem;
-  border-radius: 15px;
-  font-size: 0.75rem;
-  font-weight: 600;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 700;
   white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
   background: ${props => {
     switch (props.status) {
       case "Confirmed": return "#d4edda";
@@ -1411,11 +1870,12 @@ const StatusBadge = styled.span<{ status: string }>`
 `;
 
 const HistoryStatusBadge = styled.span<{ status: string }>`
-  padding: 0.4rem 0.8rem;
-  border-radius: 15px;
-  font-size: 0.75rem;
-  font-weight: 600;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 700;
   white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
   background: ${props => {
     switch (props.status) {
       case "Done": return "#d4edda";
@@ -1441,7 +1901,7 @@ const ButtonRow = styled.div`
 
   @media (max-width: 480px) {
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.8rem;
   }
 `;
 
@@ -1449,16 +1909,19 @@ const EditButton = styled.button`
   background: #4ecdc4;
   color: white;
   border: none;
-  padding: 0.6rem 1.2rem;
-  border-radius: 8px;
+  padding: 0.75rem 1.4rem;
+  border-radius: 12px;
   cursor: pointer;
-  font-size: 0.85rem;
-  font-weight: 600;
-  transition: background-color 0.3s ease;
+  font-size: 0.9rem;
+  font-weight: 700;
+  transition: all 0.3s ease;
   flex: 1;
+  box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
 
   &:hover {
     background: #45b7b8;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(78, 205, 196, 0.4);
   }
 `;
 
@@ -1466,287 +1929,259 @@ const DeleteButton = styled.button`
   background: #e74c3c;
   color: white;
   border: none;
-  padding: 0.6rem 1.2rem;
-  border-radius: 8px;
+  padding: 0.75rem 1.4rem;
+  border-radius: 12px;
   cursor: pointer;
-  font-size: 0.85rem;
-  font-weight: 600;
-  transition: background-color 0.3s ease;
+  font-size: 0.9rem;
+  font-weight: 700;
+  transition: all 0.3s ease;
   flex: 1;
+  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3);
 
   &:hover {
     background: #c0392b;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(231, 76, 60, 0.4);
   }
 `;
 
 const NoAppointments = styled.div`
   text-align: center;
-  padding: 3rem 2rem;
+  padding: 3.5rem 2rem;
   background: white;
-  border-radius: 15px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-  border: 1px solid #e9ecef;
-  border-top: 4px solid #4ecdc4;
+  border-radius: 24px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+  border: 2px solid #e9ecef;
+  border-top: 5px solid #4ecdc4;
 
   @media (max-width: 768px) {
-    padding: 2rem 1rem;
+    padding: 2.5rem 1.5rem;
   }
 `;
 
 const NoAppointmentsIcon = styled.div`
-  font-size: 3rem;
-  margin-bottom: 1rem;
-  opacity: 0.5;
+  font-size: 4rem;
+  margin-bottom: 1.5rem;
+  opacity: 0.6;
+  filter: grayscale(0.3);
 `;
 
 const NoAppointmentsText = styled.p`
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   color: #6c757d;
-  margin-bottom: 1.5rem;
+  margin-bottom: 2rem;
+  font-weight: 500;
 `;
 
 const ScheduleButton = styled.button`
   background: #4ecdc4;
   color: white;
   border: none;
-  padding: 0.8rem 1.5rem;
-  border-radius: 8px;
+  padding: 1rem 2rem;
+  border-radius: 12px;
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.3);
 
   &:hover {
     background: #45b7b8;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(78, 205, 196, 0.4);
   }
 `;
 
-// Medical Records Modal Components
-const LargeMedicalModal = styled.div`
-  background: white;
-  border-radius: 15px;
-  width: 95%;
-  max-width: 800px;
-  max-height: 90vh;
-  overflow-y: auto;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-`;
-
-const MedicalModalContent = styled.div`
-  padding: 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 2rem;
-`;
-
 const MedicalRecordsSection = styled.div`
-  padding: 1.5rem;
-  background: #f8f9fa;
-  border-radius: 12px;
-  border-left: 4px solid #4ecdc4;
+  padding: 2rem;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border-radius: 16px;
+  border-left: 5px solid #4ecdc4;
   text-align: center;
 `;
 
 const SectionSubtitle = styled.h3`
-  font-size: 1.2rem;
-  font-weight: 600;
+  font-size: 1.3rem;
+  font-weight: 700;
   color: #2c3e50;
-  margin: 0 0 1rem 0;
+  margin: 0 0 1.5rem 0;
+  letter-spacing: -0.3px;
 `;
 
 const ViewRecordsButton = styled.button`
   background: #4ecdc4;
   color: white;
   border: none;
-  padding: 0.8rem 1.5rem;
-  border-radius: 8px;
+  padding: 1rem 2rem;
+  border-radius: 12px;
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.3);
 
   &:hover {
     background: #45b7b8;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(78, 205, 196, 0.4);
   }
-`;
-
-const AppointmentHistorySection = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-`;
-
-const HistorySectionHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 1rem;
-`;
-
-const HistoryCount = styled.span`
-  background: #6c757d;
-  color: white;
-  padding: 0.4rem 0.8rem;
-  border-radius: 15px;
-  font-size: 0.85rem;
-  font-weight: 600;
 `;
 
 const NoHistoryMessage = styled.div`
   text-align: center;
-  padding: 2rem;
+  padding: 3rem 2rem;
   background: #f8f9fa;
-  border-radius: 12px;
-  border: 1px solid #e9ecef;
+  border-radius: 16px;
+  border: 2px solid #e9ecef;
 `;
 
 const NoHistoryIcon = styled.div`
-  font-size: 2.5rem;
-  margin-bottom: 1rem;
+  font-size: 3rem;
+  margin-bottom: 1.5rem;
   opacity: 0.5;
 `;
 
 const NoHistoryText = styled.p`
   color: #6c757d;
   margin: 0;
-  font-size: 1rem;
-`;
-
-const HistoryList = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  max-height: 400px;
-  overflow-y: auto;
-`;
-
-const HistoryCard = styled.div`
-  background: white;
-  padding: 1rem;
-  border-radius: 10px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-  border: 1px solid #e9ecef;
-  border-left: 4px solid #6c757d;
-  cursor: pointer;
-  transition: all 0.3s ease;
-
-  &:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-  }
-`;
-
-const HistoryCardHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 1rem;
-  margin-bottom: 0.5rem;
-`;
-
-const HistoryCardLeft = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  flex: 1;
+  font-size: 1.05rem;
+  font-weight: 500;
 `;
 
 const PetName = styled.div`
-  font-weight: 600;
+  font-weight: 700;
   color: #2c3e50;
-  font-size: 0.95rem;
+  font-size: 1rem;
+  letter-spacing: -0.2px;
 `;
 
 const ServiceInfo = styled.div`
   color: #4ecdc4;
-  font-size: 0.85rem;
-  font-weight: 500;
+  font-size: 0.9rem;
+  font-weight: 600;
 `;
 
 const DateInfo = styled.div`
   color: #6c757d;
-  font-size: 0.8rem;
+  font-size: 0.85rem;
+  font-weight: 500;
 `;
 
 const ClickHint = styled.div`
   font-size: 0.75rem;
   color: #4ecdc4;
-  font-weight: 500;
+  font-weight: 600;
   text-align: center;
-  opacity: 0.7;
+  opacity: 0.8;
+  margin-top: 0.3rem;
 `;
 
-// Modal Components
 const ModalOverlay = styled.div`
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
   padding: 1rem;
+  animation: fadeIn 0.3s ease;
+  
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
 `;
 
 const ModalContainer = styled.div`
   background: white;
-  border-radius: 15px;
+  border-radius: 24px;
   width: 90%;
-  max-width: 500px;
+  max-width: 540px;
   max-height: 90vh;
   overflow-y: auto;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  animation: slideUp 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  
+  @keyframes slideUp {
+    from {
+      transform: translateY(50px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+  
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 0 24px 24px 0;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: #4ecdc4;
+    border-radius: 4px;
+  }
 `;
 
 const ModalHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1.5rem;
-  border-bottom: 1px solid #dee2e6;
+  padding: 2rem;
+  border-bottom: 2px solid #e9ecef;
 `;
 
 const ModalTitle = styled.h3`
   margin: 0;
-  font-size: 1.3rem;
+  font-size: 1.5rem;
   color: #2c3e50;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: -0.5px;
 `;
 
 const CloseButton = styled.button`
-  background: none;
+  background: #f8f9fa;
   border: none;
-  font-size: 1.5rem;
+  font-size: 1.8rem;
   cursor: pointer;
   color: #6c757d;
   padding: 0;
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
+  transition: all 0.3s ease;
+  font-weight: 300;
 
   &:hover {
-    background: #f8f9fa;
+    background: #e9ecef;
     color: #2c3e50;
+    transform: rotate(90deg);
   }
 `;
 
 const ModalContent = styled.div`
-  padding: 1.5rem;
+  padding: 2rem;
 `;
 
 const ModalActions = styled.div`
   display: flex;
   justify-content: flex-end;
   gap: 1rem;
-  padding: 1.5rem;
-  border-top: 1px solid #dee2e6;
+  padding: 2rem;
+  border-top: 2px solid #e9ecef;
 
   @media (max-width: 480px) {
     flex-direction: column;
@@ -1757,15 +2192,18 @@ const CancelModalButton = styled.button`
   background: #6c757d;
   color: white;
   border: none;
-  padding: 0.75rem 1.5rem;
-  border-radius: 8px;
-  font-weight: 600;
+  padding: 0.85rem 1.8rem;
+  border-radius: 12px;
+  font-weight: 700;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  transition: all 0.3s ease;
   flex: 1;
+  box-shadow: 0 4px 12px rgba(108, 117, 125, 0.3);
 
   &:hover {
     background: #5a6268;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(108, 117, 125, 0.4);
   }
 `;
 
@@ -1773,15 +2211,18 @@ const ConfirmButton = styled.button`
   background: #4ecdc4;
   color: white;
   border: none;
-  padding: 0.75rem 1.5rem;
-  border-radius: 8px;
-  font-weight: 600;
+  padding: 0.85rem 1.8rem;
+  border-radius: 12px;
+  font-weight: 700;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  transition: all 0.3s ease;
   flex: 1;
+  box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
 
   &:hover {
     background: #45b7b8;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(78, 205, 196, 0.4);
   }
 `;
 
@@ -1789,179 +2230,214 @@ const DeleteModalButton = styled.button`
   background: #e74c3c;
   color: white;
   border: none;
-  padding: 0.75rem 1.5rem;
-  border-radius: 8px;
-  font-weight: 600;
+  padding: 0.85rem 1.8rem;
+  border-radius: 12px;
+  font-weight: 700;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  transition: all 0.3s ease;
   flex: 1;
+  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3);
 
   &:hover {
     background: #c0392b;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(231, 76, 60, 0.4);
   }
 `;
 
-const SaveProfileButton = styled(ConfirmButton)`
-`;
+const SaveProfileButton = styled(ConfirmButton)``;
 
 const AppointmentInfoModal = styled.div`
-  background: #f8f9fa;
-  padding: 1rem;
-  border-radius: 8px;
-  margin-bottom: 1.5rem;
-  border-left: 4px solid #4ecdc4;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  padding: 1.5rem;
+  border-radius: 16px;
+  margin-bottom: 1.8rem;
+  border-left: 5px solid #4ecdc4;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 `;
 
 const InfoItem = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.8rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid #dee2e6;
 
   &:last-child {
     margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
   }
 `;
 
 const InfoLabel = styled.span`
-  font-weight: 600;
+  font-weight: 700;
   color: #495057;
+  font-size: 0.95rem;
 `;
 
 const InfoValue = styled.span`
   color: #2c3e50;
-  font-weight: 500;
+  font-weight: 600;
+  font-size: 0.95rem;
 `;
 
 const WarningMessage = styled.div`
   display: flex;
   align-items: flex-start;
-  gap: 1rem;
-  background: #fff3cd;
-  border: 1px solid #ffeaa7;
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 1.5rem;
+  gap: 1.2rem;
+  background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+  border: 2px solid #ffc107;
+  border-radius: 16px;
+  padding: 1.5rem;
+  margin-bottom: 1.8rem;
+  box-shadow: 0 4px 12px rgba(255, 193, 7, 0.2);
 `;
 
 const WarningIcon = styled.div`
-  font-size: 1.5rem;
+  font-size: 2rem;
   flex-shrink: 0;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
 `;
 
 const WarningText = styled.p`
   color: #856404;
   margin: 0;
-  line-height: 1.4;
+  line-height: 1.6;
+  font-weight: 600;
+  font-size: 0.95rem;
 `;
 
 const AppointmentDetails = styled.div`
-  background: #f8f9fa;
-  padding: 1rem;
-  border-radius: 8px;
-  border-left: 4px solid #e74c3c;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  padding: 1.5rem;
+  border-radius: 16px;
+  border-left: 5px solid #e74c3c;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 `;
 
 const DetailItem = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.8rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid #dee2e6;
 
   &:last-child {
     margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
   }
 `;
 
 const DetailLabel = styled.span`
-  font-weight: 600;
+  font-weight: 700;
   color: #495057;
+  font-size: 0.95rem;
 `;
 
 const DetailValue = styled.span`
   color: #2c3e50;
-  font-weight: 500;
+  font-weight: 600;
+  font-size: 0.95rem;
 `;
 
 const FormGroup = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
+  gap: 0.7rem;
+  margin-bottom: 1.5rem;
 `;
 
 const Label = styled.label`
-  font-weight: 600;
+  font-weight: 700;
   color: #495057;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
 `;
 
 const DateInput = styled.input`
-  padding: 0.75rem;
-  border: 1px solid #ced4da;
-  border-radius: 8px;
+  padding: 0.9rem;
+  border: 2px solid #ced4da;
+  border-radius: 12px;
   font-size: 1rem;
+  transition: all 0.3s ease;
+  background: white;
+  width: 100%;
   
   &:focus {
     outline: none;
     border-color: #4ecdc4;
-    box-shadow: 0 0 0 2px rgba(78, 205, 196, 0.2);
+    box-shadow: 0 0 0 4px rgba(78, 205, 196, 0.15);
   }
 `;
 
 const SelectInput = styled.select`
-  padding: 0.75rem;
-  border: 1px solid #ced4da;
-  border-radius: 8px;
+  padding: 0.9rem;
+  border: 2px solid #ced4da;
+  border-radius: 12px;
   font-size: 1rem;
   background: white;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  width: 100%;
   
   &:focus {
     outline: none;
     border-color: #4ecdc4;
-    box-shadow: 0 0 0 2px rgba(78, 205, 196, 0.2);
+    box-shadow: 0 0 0 4px rgba(78, 205, 196, 0.15);
   }
 `;
 
-// Profile Modal Components
 const ProfileModalOverlay = styled(ModalOverlay)``;
 
 const LargeProfileModal = styled(ModalContainer)`
-  max-width: 600px;
+  max-width: 640px;
 `;
 
 const ProfileImageSection = styled.div`
   display: flex;
   flex-direction: column;
   align-items: center;
-  margin-bottom: 1.5rem;
-  gap: 1rem;
+  margin-bottom: 2rem;
+  gap: 1.2rem;
 `;
 
 const ProfileImagePreview = styled.div`
-  width: 120px;
-  height: 120px;
+  width: 140px;
+  height: 140px;
   border-radius: 50%;
   overflow: hidden;
-  border: 3px solid #4ecdc4;
+  border: 4px solid #4ecdc4;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #f8f9fa;
+  box-shadow: 0 8px 24px rgba(78, 205, 196, 0.3);
+  transition: all 0.3s ease;
+  
+  &:hover {
+    transform: scale(1.05);
+    box-shadow: 0 12px 32px rgba(78, 205, 196, 0.4);
+  }
 `;
 
 const ImageUploadLabel = styled.label`
-  padding: 0.6rem 1.2rem;
+  padding: 0.8rem 1.6rem;
   background: #4ecdc4;
   color: white;
-  border-radius: 8px;
+  border-radius: 12px;
   cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 600;
-  transition: background-color 0.3s ease;
+  font-size: 0.95rem;
+  font-weight: 700;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
   
   &:hover {
     background: #45b7b8;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(78, 205, 196, 0.4);
   }
 `;
 
@@ -1969,24 +2445,135 @@ const ImageUploadInput = styled.input`
   display: none;
 `;
 
+// FIXED EditInput component with proper styling
 const EditInput = styled.input`
-  padding: 0.75rem;
-  border: 1px solid #ced4da;
-  border-radius: 8px;
+  padding: 0.9rem;
+  border: 2px solid #ced4da;
+  border-radius: 12px;
   font-size: 1rem;
+  transition: all 0.3s ease;
+  background: white;
+  width: 100%;
   
   &:focus {
     outline: none;
     border-color: #4ecdc4;
-    box-shadow: 0 0 0 2px rgba(78, 205, 196, 0.2);
+    box-shadow: 0 0 0 4px rgba(78, 205, 196, 0.15);
   }
+  
+  // Ensure the input is clickable and typeable
+  pointer-events: auto;
+  opacity: 1;
 `;
 
 const EmailDisplay = styled.div`
-  padding: 0.75rem;
+  padding: 0.9rem;
   background: #f8f9fa;
-  border-radius: 8px;
+  border-radius: 12px;
   color: #6c757d;
   font-size: 1rem;
-  border: 1px solid #e9ecef;
+  border: 2px solid #e9ecef;
+  font-weight: 500;
+  width: 100%;
+`;
+
+const SecuritySection = styled.div`
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  padding: 2rem;
+  border-radius: 16px;
+  margin-top: 2rem;
+  border: 2px solid #dee2e6;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+`;
+
+const SecurityTitle = styled.h4`
+  margin: 0 0 1.5rem 0;
+  font-size: 1.2rem;
+  color: #2c3e50;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+`;
+
+const TwoFactorContainer = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1.2rem;
+  background: white;
+  padding: 1.5rem;
+  border-radius: 12px;
+  border: 2px solid #dee2e6;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+`;
+
+const TwoFactorInfo = styled.div`
+  flex: 1;
+`;
+
+const TwoFactorLabel = styled.div`
+  font-weight: 700;
+  color: #2c3e50;
+  margin-bottom: 0.4rem;
+  font-size: 1rem;
+`;
+
+const TwoFactorDescription = styled.div`
+  font-size: 0.85rem;
+  color: #6c757d;
+  line-height: 1.5;
+  font-weight: 500;
+`;
+
+const ToggleSwitch = styled.label`
+  position: relative;
+  display: inline-block;
+  width: 64px;
+  height: 36px;
+  flex-shrink: 0;
+  cursor: pointer;
+`;
+
+const ToggleInput = styled.input`
+  opacity: 0;
+  width: 0;
+  height: 0;
+
+  &:checked + span {
+    background-color: #4ecdc4;
+  }
+
+  &:checked + span:before {
+    transform: translateX(28px);
+  }
+`;
+
+const ToggleSlider = styled.span`
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: 0.4s;
+  border-radius: 36px;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+
+  &:before {
+    position: absolute;
+    content: "";
+    height: 28px;
+    width: 28px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: 0.4s;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  }
+
+  &.active {
+    background-color: #4ecdc4;
+    box-shadow: 0 0 0 2px rgba(78, 205, 196, 0.2);
+  }
 `;

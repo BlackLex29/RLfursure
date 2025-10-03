@@ -216,6 +216,8 @@ const Input = styled.input`
   border-radius: 8px;
   font-size: 14px;
   transition: border-color 0.2s ease;
+  width: 100%;
+  height: 48px; /* Fixed height for consistency */
   
   &:focus {
     outline: none;
@@ -236,6 +238,7 @@ const PasswordInputContainer = styled.div`
   position: relative;
   display: flex;
   align-items: center;
+  width: 100%;
 `;
 
 const PasswordToggle = styled.button`
@@ -247,6 +250,11 @@ const PasswordToggle = styled.button`
   font-size: 16px;
   padding: 4px;
   color: #718096;
+  height: 32px;
+  width: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   
   &:hover {
     color: #4A5568;
@@ -321,6 +329,10 @@ const Button = styled.button`
   font-size: 16px;
   cursor: pointer;
   transition: all 0.2s ease;
+  height: 48px; /* Same height as input fields */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   
   &:hover:not(:disabled) {
     background: #3BB5AD;
@@ -349,6 +361,10 @@ const SecondaryButton = styled.button`
   font-weight: 500;
   font-size: 14px;
   transition: all 0.2s ease;
+  height: 48px; /* Same height as other buttons */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   
   &:hover:not(:disabled) {
     background: #4ECDC4;
@@ -383,6 +399,7 @@ const GoogleButton = styled.button`
   cursor: pointer;
   transition: all 0.2s ease;
   width: 100%;
+  height: 48px; /* Same height as other buttons */
   
   &:hover:not(:disabled) {
     background: #F9FAFB;
@@ -613,9 +630,6 @@ export const Createaccount = () => {
     return Math.floor(100000 + Math.random() * 900000).toString();
   };
 
-  const verifyOTP = (enteredOtp: string, expectedOtp: string): boolean => {
-    return enteredOtp === expectedOtp;
-  };
 
   const sanitizeInput = (input: string): string => {
     return input.trim();
@@ -625,64 +639,73 @@ export const Createaccount = () => {
     return EMAIL_REGEX.test(email.toLowerCase());
   };
 
-  // Send OTP Email Function via API Route
-// Ultra-safe version with no type errors
-const sendOTPEmail = async (email: string, name: string): Promise<{ success: boolean; otp?: string }> => {
+  // Send Email OTP Function via API Route
+// Add this state at the top with other states
+const [otpData, setOtpData] = useState<{hash: string; expiresAt: number} | null>(null);
+
+// Update sendEmailOTP function
+const sendEmailOTP = async (email: string, name: string): Promise<{ success: boolean }> => {
   try {
-    console.log('🔄 Sending OTP to:', email);
-    
-    const response = await fetch('/api/send-otp', {
+    const response = await fetch('/api/send-email-otp', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
-        email: email.toLowerCase(), 
-        name: sanitizeInput(name) 
-      }),
+        email: email.toLowerCase(),
+        name: sanitizeInput(name)
+      })
     });
 
     const responseData = await response.json();
     
     if (!response.ok) {
-      // Very safe error message extraction
-      let errorMessage = `Server error: ${response.status}`;
-      
-      if (responseData && typeof responseData === 'object') {
-        if (typeof responseData.error === 'string') {
-          errorMessage = responseData.error;
-        } else if (typeof responseData.message === 'string') {
-          errorMessage = responseData.message;
-        }
-      }
-      
-      throw new Error(errorMessage);
+      throw new Error(responseData.error || `Server error: ${response.status}`);
     }
 
-    // Check if response has otp field
-    const otp = (responseData && typeof responseData === 'object' && typeof responseData.otp === 'string') 
-      ? responseData.otp 
-      : undefined;
+    if (responseData?.success) {
+      // Store the hash and expiry
+      setOtpData({
+        hash: responseData.otpHash,
+        expiresAt: responseData.expiresAt
+      });
+      setInfo(`Verification OTP sent to ${email}. Please check your inbox and spam folder.`);
+      return { success: true };
+    }
+    
+    throw new Error(responseData.error || 'Failed to send OTP');
+  } catch (err: unknown) {
+    console.error('Error sending OTP:', err);
+    throw err instanceof Error ? err : new Error('Failed to send OTP');
+  }
+};
 
-    return { 
-      success: true, 
-      otp: otp 
-    };
-    
-  } catch (error) {
-    console.error('❌ OTP Send Error:', error);
-    
-    // Handle any type of error safely
-    if (error instanceof Error) {
-      throw error; // Just re-throw the original error
+// Update verifyEmailOTP function
+const verifyEmailOTP = async (email: string, otp: string): Promise<{ success: boolean }> => {
+  try {
+    if (!otpData) {
+      throw new Error('OTP data not found. Please request a new code.');
     }
+
+    const response = await fetch('/api/verify-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        email: email.toLowerCase(),
+        otp,
+        otpHash: otpData.hash,
+        expiresAt: otpData.expiresAt
+      })
+    });
+
+    const responseData = await response.json();
     
-    // Handle non-Error objects
-    if (typeof error === 'string') {
-      throw new Error(error);
+    if (!response.ok) {
+      throw new Error(responseData.error || 'Verification failed');
     }
-    
-    throw new Error('Failed to send OTP. Please try again.');
+
+    return { success: responseData.success };
+  } catch (err: unknown) {
+    console.error('Error verifying OTP:', err);
+    throw err instanceof Error ? err : new Error('Failed to verify OTP');
   }
 };
   // Database Functions
@@ -697,6 +720,21 @@ const sendOTPEmail = async (email: string, name: string): Promise<{ success: boo
       return !querySnapshot.empty;
     } catch (err) {
       console.error("Error checking phone number:", err);
+      return false;
+    }
+  };
+
+  const checkEmailExists = async (email: string): Promise<boolean> => {
+    try {
+      if (!email) return false;
+      
+      const usersRef = collection(db, "users");
+      const q = query(usersRef, where("email", "==", email.toLowerCase()));
+      const querySnapshot = await getDocs(q);
+      
+      return !querySnapshot.empty;
+    } catch (err) {
+      console.error("Error checking email:", err);
       return false;
     }
   };
@@ -794,143 +832,147 @@ const sendOTPEmail = async (email: string, name: string): Promise<{ success: boo
   };
 
   // OTP Handler Functions
-const handleSendOTP = async (): Promise<void> => {
-  setError("");
-  setInfo("");
-  setLoading(true);
-  
-  try {
-    const otpCode = generateOTP();
-    
-    otpRef.current = otpCode;
-    otpEmailRef.current = formData.email.toLowerCase();
-    
-    await sendOTPEmail(
-      formData.email, 
-      otpCode, 
-      `${formData.firstname} ${formData.lastname}`
-    );
-    
-    setOtpSent(true);
-    setInfo(`📧 Verification OTP sent to ${formData.email}. Please check your inbox and spam folder.`);
-    setResendCooldown(60);
-    
-  } catch (err: unknown) {
-    console.error("Error sending OTP:", err);
-    if (err instanceof Error) {
-      setError(err.message);
-    } else {
-      setError("Failed to send OTP. Please try again.");
-    }
-  } finally {
-    setLoading(false);
-  }
-};
-const handleResendOTP = async (): Promise<void> => {
-  if (resendCooldown > 0) return;
-  
-  setOtpLoading(true);
-  setError("");
-  setInfo("");
-  
-  try {
-    const otpCode = generateOTP();
-    
-    otpRef.current = otpCode;
-    
-    await sendOTPEmail(
-      formData.email, 
-      otpCode, 
-      `${formData.firstname} ${formData.lastname}`
-    );
-    
-    setInfo("📧 OTP resent successfully! Please check your inbox and spam folder.");
-    setResendCooldown(60);
-  } catch (err: unknown) {
-    console.error("Resend OTP error:", err);
-    if (err instanceof Error) {
-      setError(err.message);
-    } else {
-      setError("Failed to resend OTP. Please try again.");
-    }
-  } finally {
-    setOtpLoading(false);
-  }
-};
-  const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
-    e.preventDefault();
+  const handleSendOTP = async (): Promise<void> => {
     setError("");
     setInfo("");
-    setOtpLoading(true);
+    setLoading(true);
     
     try {
-      const storedOtp = otpRef.current;
-      const storedEmail = otpEmailRef.current;
-      
-      if (!storedOtp || storedEmail !== formData.email.toLowerCase()) {
-        setError("OTP expired or invalid. Please request a new one.");
+      // Check if email already exists
+      const emailExists = await checkEmailExists(formData.email);
+      if (emailExists) {
+        setError("This email is already registered. Please sign in instead.");
         return;
       }
+
+      const otpCode = generateOTP();
       
-      const isValid = verifyOTP(otp, storedOtp);
+      otpRef.current = otpCode;
+      otpEmailRef.current = formData.email.toLowerCase();
       
-      if (!isValid) {
-        setError("Invalid OTP. Please check and try again.");
-        return;
-      }
-      
-      console.log('Creating user with email and password...');
-      
-      const userCredential = await createUserWithEmailAndPassword(
-        auth, 
-        formData.email.toLowerCase(), 
-        formData.password
+      await sendEmailOTP(
+        formData.email, 
+        `${formData.firstname} ${formData.lastname}`
       );
       
-      const user = userCredential.user;
-      console.log('User created:', user.uid);
-      
-      await updateProfile(user, {
-        displayName: `${sanitizeInput(formData.firstname)} ${sanitizeInput(formData.lastname)}`
-      });
-      
-      await completeAccountCreation({
-        uid: user.uid,
-        email: formData.email.toLowerCase(),
-        firstname: formData.firstname,
-        lastname: formData.lastname,
-        phone: formData.phone
-      });
+      setOtpSent(true);
+      setInfo(`📧 Verification OTP sent to ${formData.email}. Please check your inbox and spam folder.`);
+      setResendCooldown(60);
       
     } catch (err: unknown) {
-      console.error("OTP verification error:", err);
-      
-      if (isAuthError(err)) {
-        switch (err.code) {
-          case 'auth/email-already-in-use':
-            setError("This email is already registered. Please sign in instead.");
-            break;
-          case 'auth/invalid-email':
-            setError("Invalid email address format.");
-            break;
-          case 'auth/weak-password':
-            setError("Password is too weak. Please choose a stronger password.");
-            break;
-          case 'auth/network-request-failed':
-            setError("Network error. Please check your internet connection.");
-            break;
-          default:
-            setError(err.message || "Failed to create account. Please try again.");
-        }
-      } else if (err instanceof Error) {
-        setError(err.message || "Failed to create account. Please try again.");
+      console.error("Error sending OTP:", err);
+      if (err instanceof Error) {
+        setError(err.message);
       } else {
-        setError("An unexpected error occurred. Please try again.");
+        setError("Failed to send OTP. Please try again.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendOTP = async (): Promise<void> => {
+    if (resendCooldown > 0) return;
+    
+    setOtpLoading(true);
+    setError("");
+    setInfo("");
+    
+    try {
+      const otpCode = generateOTP();
+      
+      otpRef.current = otpCode;
+      
+      await sendEmailOTP(
+        formData.email, 
+        `${formData.firstname} ${formData.lastname}`
+      );
+      
+      setInfo("📧 OTP resent successfully! Please check your inbox and spam folder.");
+      setResendCooldown(60);
+    } catch (err: unknown) {
+      console.error("Resend OTP error:", err);
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Failed to resend OTP. Please try again.");
       }
     } finally {
       setOtpLoading(false);
     }
   };
+
+const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
+  e.preventDefault();
+  setError("");
+  setInfo("");
+  setOtpLoading(true);
+  
+  try {
+    console.log('🔍 OTP Data:', otpData);
+    console.log('🔍 Email:', formData.email);
+    console.log('🔍 OTP entered:', otp);
+    
+    // Verify OTP using API
+    const verificationResult = await verifyEmailOTP(formData.email, otp);
+    
+    if (!verificationResult.success) {
+      setError("Invalid OTP. Please check and try again.");
+      return;
+    }
+    
+    console.log('✅ OTP verified, creating user...');
+    
+    const userCredential = await createUserWithEmailAndPassword(
+      auth, 
+      formData.email.toLowerCase(), 
+      formData.password
+    );
+    
+    const user = userCredential.user;
+    console.log('User created:', user.uid);
+    
+    await updateProfile(user, {
+      displayName: `${sanitizeInput(formData.firstname)} ${sanitizeInput(formData.lastname)}`
+    });
+    
+    await completeAccountCreation({
+      uid: user.uid,
+      email: formData.email.toLowerCase(),
+      firstname: formData.firstname,
+      lastname: formData.lastname,
+      phone: formData.phone
+    });
+    
+  } catch (err: unknown) {
+    console.error("OTP verification error:", err);
+    
+    if (isAuthError(err)) {
+      switch (err.code) {
+        case 'auth/email-already-in-use':
+          setError("This email is already registered. Please sign in instead.");
+          break;
+        case 'auth/invalid-email':
+          setError("Invalid email address format.");
+          break;
+        case 'auth/weak-password':
+          setError("Password is too weak. Please choose a stronger password.");
+          break;
+        case 'auth/network-request-failed':
+          setError("Network error. Please check your internet connection.");
+          break;
+        default:
+          setError(err.message || "Failed to create account. Please try again.");
+      }
+    } else if (err instanceof Error) {
+      setError(err.message || "Failed to create account. Please try again.");
+    } else {
+      setError("An unexpected error occurred. Please try again.");
+    }
+  } finally {
+    setOtpLoading(false);
+  }
+};  
 
   const handleCancelOTP = (): void => {
     setOtpSent(false);
@@ -1175,7 +1217,7 @@ const handleResendOTP = async (): Promise<void> => {
           <Link href="/" passHref>
             <LogoContainer>
              <LogoImage 
-              src="https://scontent.fmnl13-4.fna.fbcdn.net/v/t39.30808-6/308051699_1043145306431767_6902051210877649285_n.jpg?_nc_cat=108&ccb=1-7&_nc_sid=6ee11a&_nc_eui2=AeH7C3PaObQLeqOOxA3pTYw1U6XSiAPBS_lTpdKIA8FL-aWJ6pOqX-tCsYAmdUOHVzzxg-T9gjpVH_1PkEO0urYZ&_nc_ohc=c0pRYSw4KrsQ7kNvwHE5hTL&_nc_oc=AdnvMYaefSnLD_BwDZly3HzWrlUVGkQ679uNFhrON8Jd2UeyPFELDF-ZgFiqTpl5QFA&_nc_zt=23&_nc_ht=scontent.fmnl13-4.fna&_nc_gid=GOsLrMoCfHtNYu3UarKtXQ&oh=00_AfYkkXSbQmUWBw5G7PQZzCYGBVqYBsWLo3ZYe87ifPKIyA&oe=68D30859" 
+              src="https://scontent.fmnl13-4.fna.fbcdn.net/v/t39.30808-6/308051699_1043145306431767_6902051210877649285_n.jpg?_nc_cat=108&ccb=1-7&_nc_sid=6ee11a&_nc_eui2=AeH7C3PaObQLeqOOxA3pTYw1U6XSiAPBS_lTpdKIA8FL-aWJ6pOqX-tCsYAmdUOHVzzxg-T9gjpVH_1PkEO0urYZ&_nc_ohc=c0pRYSw4KrsQ7kNvwHE5hTL&_nc_oc=AdnvMYaefSnLD_BwDZly3HzWrlUVGkQ679uNFhrON8Jd2UeyPFELDF-ZgFiqTml5QFA&_nc_zt=23&_nc_ht=scontent.fmnl13-4.fna&_nc_gid=GOsLrMoCfHtNYu3UarKtXQ&oh=00_AfYkkXSbQmUWBw5G7PQZzCYGBVqYBsWLo3ZYe87ifPKIyA&oe=68D30859" 
               alt="FurSureCare Logo" 
   onError={(e) => {
     // Fallback if image fails to load
@@ -1359,22 +1401,6 @@ const handleResendOTP = async (): Promise<void> => {
                   Please enter it below to complete your registration.
                 </VerificationText>
                 
-                {/* Development OTP Display - Remove in production */}
-                {process.env.NODE_ENV === 'development' && otpRef.current && (
-                  <div style={{
-                    background: '#fff3cd', 
-                    border: '1px solid #ffc107', 
-                    borderRadius: '8px', 
-                    padding: '15px', 
-                    margin: '15px 0', 
-                    textAlign: 'center'
-                  }}>
-                    <strong style={{color: '#856404'}}>
-                      Development Mode - OTP: {otpRef.current}
-                    </strong>
-                  </div>
-                )}
-                
                 <VerificationEmail>
                   📧 {formData.email}
                 </VerificationEmail>
@@ -1453,4 +1479,4 @@ const handleResendOTP = async (): Promise<void> => {
     );
   };
   
-  export default Createaccount;
+  export default Createaccount; 
