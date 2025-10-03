@@ -96,12 +96,13 @@ const VetDashboard: React.FC = () => {
     return currentUser.email || 'User';
   }, [currentUser]);
 
-  // Redirect if not authenticated
-  useEffect(() => {
-    if (!loading && !user) {
+  // Redirect if not authenticated (but wait for user data to load)
+   useEffect(() => {
+    if (!loading && !user && !userLoading) {
       router.push('/login');
     }
-  }, [user, loading, router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, loading, userLoading]);
 
   // Fetch current user data
   useEffect(() => {
@@ -133,7 +134,7 @@ const VetDashboard: React.FC = () => {
     if (!currentUser) return;
     
     const appointmentsRef = collection(db, 'appointments');
-    const q = query(appointmentsRef, orderBy('createdAt', 'desc'), limit(20)); // Increased limit
+    const q = query(appointmentsRef, orderBy('createdAt', 'desc'), limit(20));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const appointmentsData: Appointment[] = [];
@@ -210,7 +211,6 @@ const VetDashboard: React.FC = () => {
       const unavailableData: Unavailable[] = [];
       snapshot.forEach((doc) => {
         const data = doc.data();
-        // Only show unavailable slots for the current veterinarian
         if (data.veterinarian === currentUser.name) {
           unavailableData.push({ 
             id: doc.id, 
@@ -266,7 +266,6 @@ const VetDashboard: React.FC = () => {
     }
   };
 
-  // Function to delete unavailable slot
   const handleDeleteUnavailable = async (id: string) => {
     if (!confirm("Are you sure you want to remove this unavailable date?")) return;
     
@@ -288,14 +287,12 @@ const VetDashboard: React.FC = () => {
     setSelectedDate(newDate);
   };
 
-  // Helper function to check if appointment is for selected date
   const isAppointmentForSelectedDate = (appointment: Appointment) => {
     if (!appointment.date) return false;
     const aptDate = new Date(appointment.date);
     return aptDate.toDateString() === selectedDate.toDateString();
   };
 
-  // Handle logo image error
   const handleLogoError = () => {
     setLogoError(true);
   };
@@ -339,29 +336,43 @@ const VetDashboard: React.FC = () => {
     );
   }
 
-  if (!user || !currentUser) {
+  if (!user) {
+    return null;
+  }
+
+  if (!currentUser) {
     return (
-      <div className="auth-error">
-        <h2>Authentication Required</h2>
-        <p>Please sign in to access the veterinary dashboard.</p>
+      <div className="loading-container">
+        <div className="loading-spinner"></div>
+        <p>Loading user data...</p>
         <style jsx>{`
-          .auth-error {
+          .loading-container {
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             height: 100vh;
+            gap: 1rem;
             background: #f8fafc;
-            text-align: center;
           }
           
-          .auth-error h2 {
-            color: #dc2626;
-            margin-bottom: 1rem;
+          .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #e2e8f0;
+            border-top: 4px solid #34B89C;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
           }
           
-          .auth-error p {
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          
+          .loading-container p {
             color: #64748b;
+            font-size: 1rem;
           }
         `}</style>
       </div>
@@ -370,12 +381,10 @@ const VetDashboard: React.FC = () => {
 
   return (
     <div className="vet-dashboard">
-      {/* Header */}
       <header className="dashboard-header">
         <div className="header-content">
           <div className="header-brand">
             <div className="clinic-logo">
-              {/* RL Clinic Logo with Image */}
               {!logoError ? (
                 <Image 
                   src="https://scontent.fmnl13-4.fna.fbcdn.net/v/t39.30808-1/308051699_1043145306431767_6902051210877649285_n.jpg?stp=cp0_dst-jpg_s60x60_tt6&_nc_cat=108&ccb=1-7&_nc_sid=2d3e12&_nc_eui2=AeH7C3PaObQLeqOOxA3pTYw1U6XSiAPBS_lTpdKIA8FL-aWJ6pOqX-tCsYAmdUOHVzzxg-T9gjpVH_1PkEO0urYZ&_nc_ohc=_IGNUXrA7VIQ7kNvwGverts&_nc_oc=Adn4yGvlqEmBbcvJy9fpqzZS-lcsbho9b-UbpfXA5TVHNF-m2LsLZkoh5MgqG3kGpbY&_nc_zt=24&_nc_ht=scontent.fmnl13-4.fna&_nc_gid=tRLkyrhTTf7--ojWnn9Hfg&oh=00_AfaGNX7atT_-t5Le75P4n8BeLaWdzkJSkBB7ZgM9dQ9clQ&oe=68D7A4DB"
@@ -410,7 +419,6 @@ const VetDashboard: React.FC = () => {
       </header>
     
       <div className="dashboard-content">
-        {/* Sidebar */}
         <aside className="sidebar">
           <div className="sidebar-section">
             <h3>Navigation</h3>
@@ -464,7 +472,6 @@ const VetDashboard: React.FC = () => {
           </div>
         </aside>
 
-        {/* Main Content - Maximized */}
         <main className="main-content">
           {activeTab === 'appointments' ? (
             <div className="content-section">
@@ -625,7 +632,6 @@ const VetDashboard: React.FC = () => {
         </main>
       </div>
 
-      {/* Unavailable Modal */}
       {showUnavailableModal && currentUser.role === 'veterinarian' && (
         <div className="modal-overlay">
           <div className="modal">
@@ -904,6 +910,16 @@ const VetDashboard: React.FC = () => {
           background: linear-gradient(135deg, #34B89C, #6BC1E1);
           border-radius: 2px;
         }
+
+        .sidebar h4 {
+          color: #1e293b;
+          margin-bottom: 1rem;
+          font-size: 1.1rem;
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
         
         .nav-menu {
           display: flex;
@@ -1122,6 +1138,10 @@ const VetDashboard: React.FC = () => {
           box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
         }
 
+        .button-icon {
+          font-size: 1.1rem;
+        }
+
         .secondary-button {
           background: #f1f5f9;
           color: #475569;
@@ -1171,6 +1191,10 @@ const VetDashboard: React.FC = () => {
           max-height: 60vh;
           overflow-y: auto;
           padding: 1rem;
+        }
+
+        .appointments-grid {
+          max-height: none;
         }
 
         .appointment-card {
@@ -1223,6 +1247,10 @@ const VetDashboard: React.FC = () => {
           font-size: 1.2rem;
           font-weight: 700;
           color: #1e293b;
+          margin: 0 0 0.3rem 0;
+        }
+
+        .pet-name {
           margin: 0 0 0.3rem 0;
         }
 
@@ -1340,6 +1368,10 @@ const VetDashboard: React.FC = () => {
           font-weight: 600;
         }
 
+        .unavailable-grid {
+          max-height: none;
+        }
+
         .unavailable-card {
           display: flex;
           align-items: center;
@@ -1420,8 +1452,10 @@ const VetDashboard: React.FC = () => {
 
         .modal-overlay {
           position: fixed;
-          top: 0; left: 0;
-          width: 100%; height: 100%;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
           background: rgba(0, 0, 0, 0.5);
           display: flex;
           align-items: center;
@@ -1526,6 +1560,10 @@ const VetDashboard: React.FC = () => {
           cursor: pointer;
           font-weight: 500;
           color: #374151;
+        }
+
+        .checkmark {
+          display: inline-block;
         }
 
         .modal-actions {

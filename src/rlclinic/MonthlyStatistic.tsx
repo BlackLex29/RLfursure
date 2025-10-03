@@ -173,7 +173,7 @@ const MonthlyStatistic: React.FC = () => {
       });
     }
 
-    // Convert to array format for charts with proper labels - FIXED
+    // Convert to array format for charts with proper labels
     const serviceStatsArray: ServiceStats[] = services.map(service => {
       const serviceLabel = serviceLabels[service as keyof typeof serviceLabels] || service;
       return {
@@ -239,7 +239,7 @@ const MonthlyStatistic: React.FC = () => {
     fetchAppointments();
   }, [fetchAppointments]);
 
-  // Pie chart data - SIMPLIFIED VERSION
+  // Pie chart data
   const pieData = useMemo(() => [
     { name: 'Dogs', value: totalStats.totalDogs },
     { name: 'Cats', value: totalStats.totalCats }
@@ -425,7 +425,7 @@ const MonthlyStatistic: React.FC = () => {
             )}
           </ChartCard>
 
-          {/* Pie Chart - SIMPLIFIED VERSION */}
+          {/* Pie Chart */}
           <PieChartCard $delay={0.5}>
             <ChartTitle>🐾 Pet Distribution</ChartTitle>
             {isLoading ? (
@@ -451,12 +451,7 @@ const MonthlyStatistic: React.FC = () => {
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip 
-                      formatter={(value: number, name: string) => [
-                        value, 
-                        name
-                      ]}
-                    />
+                    <Tooltip content={<PieTooltip />} />
                   </PieChart>
                 </ResponsiveContainer>
                 
@@ -522,7 +517,7 @@ const MonthlyStatistic: React.FC = () => {
   );
 };
 
-/* Styled Components - SAME AS BEFORE */
+/* Styled Components */
 const PageContainer = styled.div`
   min-height: 100vh;
   padding: 20px;
