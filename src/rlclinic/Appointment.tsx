@@ -17,6 +17,7 @@ import {
   updateDoc,
   getDoc
 } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
 
 // 🔹 Enhanced Types with Pricing
 interface Pet {
@@ -149,7 +150,8 @@ const paymentMethods = [
   { value: "GCash", label: "GCash", description: "Pay online using GCash" }
 ];
 
-// 🔹 Custom Hook for Appointment Data
+// 🔹 FIXED: Custom Hook for Appointment Data
+// 🔹 FIXED: Custom Hook for Appointment Data
 const useAppointmentData = () => {
   const [pets, setPets] = useState<Pet[]>([]);
   const [bookedSlots, setBookedSlots] = useState<Appointment[]>([]);
@@ -158,138 +160,157 @@ const useAppointmentData = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const fetchInitialData = async () => {
+    let unsubscribeAuth: () => void;
+    let unsubscribePets: () => void;
+    let unsubscribeAppointments: () => void;
+    let unsubscribeUnavailable: () => void;
+
+    const fetchData = async (user: any) => {
       setIsLoading(true);
       try {
-        const [petsSnapshot, appointmentsSnapshot, unavailableSnapshot, doctorsSnapshot] = 
-          await Promise.all([
-            getDocs(collection(db, "pets")),
-            getDocs(collection(db, "appointments")),
-            getDocs(collection(db, "unavailableSlots")),
-            getDocs(query(collection(db, "users"), where("role", "==", "veterinarian")))
-          ]);
+        if (!user) {
+          setIsLoading(false);
+          return;
+        }
 
-        // Process pets
+        // ✅ FIXED: Query pets collection
+        const petsQuery = query(
+          collection(db, "pets"), 
+          where("ownerId", "==", user.uid)
+        );
+        
+        const petsSnapshot = await getDocs(petsQuery);
+        
         const userPets: Pet[] = [];
         petsSnapshot.forEach((doc) => {
-          const d = doc.data() as DocumentData;
-          if (d.ownerEmail === auth.currentUser?.email) {
-            userPets.push({ id: doc.id, name: d.petName });
+          const petData = doc.data();
+          const petName = petData.petName || petData.name || "Unnamed Pet";
+          
+          if (petData.ownerId === user.uid) {
+            userPets.push({ 
+              id: doc.id, 
+              name: petName
+            });
           }
         });
+        
         setPets(userPets);
 
-        // Process appointments
-        const appointmentsData: Appointment[] = [];
-        appointmentsSnapshot.forEach((doc) => {
-          const d = doc.data() as DocumentData;
-          appointmentsData.push({
-            id: doc.id,
-            date: d.date,
-            timeSlot: d.timeSlot,
-            status: d.status,
-            petId: d.petId,
-            clientName: d.clientName || "",
-            appointmentType: d.appointmentType || "",
-            price: d.price || 0
-          });
-        });
-        setBookedSlots(appointmentsData);
-
-        // Process unavailable slots
-        const unavailableData: Unavailable[] = [];
-        unavailableSnapshot.forEach((doc) => {
-          const d = doc.data() as DocumentData;
-          let dateValue = d.date;
-          if (dateValue && dateValue.toDate) {
-            dateValue = dateValue.toDate().toISOString().split('T')[0];
-          }
-          unavailableData.push({
-            id: doc.id,
-            date: dateValue,
-            veterinarian: d.veterinarian,
-            isAllDay: d.isAllDay,
-            startTime: d.startTime,
-            endTime: d.endTime
-          });
-        });
-        setUnavailableSlots(unavailableData);
-
-        // Process doctors
+        // Fetch doctors
+        const doctorsSnapshot = await getDocs(query(collection(db, "users"), where("role", "==", "veterinarian")));
         const doctorsData: Doctor[] = [];
         doctorsSnapshot.forEach((doc) => {
-          const d = doc.data() as DocumentData;
+          const data = doc.data();
           doctorsData.push({
             id: doc.id,
-            name: d.name,
-            email: d.email
+            name: data.name,
+            email: data.email
           });
         });
         setDoctors(doctorsData);
 
       } catch (error) {
-        console.error("Error fetching data:", error);
+        console.error("❌ Error fetching initial data:", error);
       } finally {
         setIsLoading(false);
       }
     };
 
-    fetchInitialData();
+    unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        fetchData(user);
+        
+        // Set up real-time listeners only after user is authenticated
+        try {
+          // Real-time pets listener
+          const petsQuery = query(collection(db, "pets"), where("ownerId", "==", user.uid));
+          unsubscribePets = onSnapshot(petsQuery, 
+            (snapshot) => {
+              const userPets: Pet[] = [];
+              snapshot.forEach((doc) => {
+                const petData = doc.data();
+                const petName = petData.petName || petData.name || "Unnamed Pet";
+                userPets.push({ id: doc.id, name: petName });
+              });
+              setPets(userPets);
+            },
+            (error) => {
+              console.error("❌ Pets listener error:", error);
+            }
+          );
 
-    // Real-time listeners
-    const unsubscribeUnavailable = onSnapshot(
-      collection(db, "unavailableSlots"),
-      (snapshot) => {
-        const unavailableData: Unavailable[] = [];
-        snapshot.forEach((doc) => {
-          const d = doc.data() as DocumentData;
-          let dateValue = d.date;
-          if (dateValue && dateValue.toDate) {
-            dateValue = dateValue.toDate().toISOString().split('T')[0];
-          }
-          unavailableData.push({
-            id: doc.id,
-            date: dateValue,
-            veterinarian: d.veterinarian,
-            isAllDay: d.isAllDay,
-            startTime: d.startTime,
-            endTime: d.endTime
-          });
-        });
-        setUnavailableSlots(unavailableData);
-      }
-    );
+          // Real-time appointments listener
+          unsubscribeAppointments = onSnapshot(collection(db, "appointments"), 
+            (snapshot) => {
+              const appointmentsData: Appointment[] = [];
+              snapshot.forEach((doc) => {
+                const data = doc.data();
+                appointmentsData.push({
+                  id: doc.id,
+                  date: data.date,
+                  timeSlot: data.timeSlot,
+                  status: data.status,
+                  petId: data.petId,
+                  clientName: data.clientName || "",
+                  appointmentType: data.appointmentType || "",
+                  price: data.price || 0
+                });
+              });
+              setBookedSlots(appointmentsData);
+            },
+            (error) => {
+              console.error("❌ Appointments listener error:", error);
+            }
+          );
 
-    const unsubscribeAppointments = onSnapshot(
-      collection(db, "appointments"),
-      (snapshot) => {
-        const appointmentsData: Appointment[] = [];
-        snapshot.forEach((doc) => {
-          const d = doc.data() as DocumentData;
-          appointmentsData.push({
-            id: doc.id,
-            date: d.date,
-            timeSlot: d.timeSlot,
-            status: d.status,
-            petId: d.petId,
-            clientName: d.clientName || "",
-            appointmentType: d.appointmentType || "",
-            price: d.price || 0
-          });
-        });
-        setBookedSlots(appointmentsData);
+          // Real-time unavailable slots listener
+          unsubscribeUnavailable = onSnapshot(collection(db, "unavailableSlots"), 
+            (snapshot) => {
+              const unavailableData: Unavailable[] = [];
+              snapshot.forEach((doc) => {
+                const data = doc.data();
+                let dateValue = data.date;
+                if (dateValue?.toDate) {
+                  dateValue = dateValue.toDate().toISOString().split('T')[0];
+                }
+                unavailableData.push({
+                  id: doc.id,
+                  date: dateValue,
+                  veterinarian: data.veterinarian,
+                  isAllDay: data.isAllDay,
+                  startTime: data.startTime,
+                  endTime: data.endTime
+                });
+              });
+              setUnavailableSlots(unavailableData);
+            },
+            (error) => {
+              console.error("❌ Unavailable slots listener error:", error);
+            }
+          );
+
+        } catch (listenerError) {
+          console.error("❌ Error setting up real-time listeners:", listenerError);
+        }
+
+      } else {
+        setPets([]);
+        setBookedSlots([]);
+        setUnavailableSlots([]);
+        setIsLoading(false);
       }
-    );
+    });
 
     return () => {
-      unsubscribeUnavailable();
-      unsubscribeAppointments();
+      if (unsubscribeAuth) unsubscribeAuth();
+      if (unsubscribePets) unsubscribePets();
+      if (unsubscribeAppointments) unsubscribeAppointments();
+      if (unsubscribeUnavailable) unsubscribeUnavailable();
     };
   }, []);
 
   return { pets, bookedSlots, unavailableSlots, doctors, isLoading };
 };
-
 // 🔹 Custom Hook for Availability Logic
 const useAvailability = (unavailableSlots: Unavailable[]) => {
   const isDateUnavailable = useCallback((date: string) => {
@@ -332,8 +353,9 @@ const PetSelector: React.FC<{
       onChange={(e) => onPetChange(e.target.value)}
       disabled={pets.length === 0}
     >
+      <option value="">Select a pet</option>
       {pets.length === 0 ? (
-        <option value="">No pets found</option>
+        <option value="" disabled>No pets found. Please register a pet first.</option>
       ) : (
         pets.map((p) => (
           <option key={p.id} value={p.id}>
@@ -342,6 +364,11 @@ const PetSelector: React.FC<{
         ))
       )}
     </PetSelect>
+    {pets.length === 0 && (
+      <NoPetsWarning>
+        ⚠️ No pets found. Please register your pet first before booking an appointment.
+      </NoPetsWarning>
+    )}
   </FormSection>
 );
 
@@ -587,6 +614,8 @@ const ReceiptScreen: React.FC<{
 };
 
 // 🔹 Payment Processing Function
+// 🔹 Payment Processing Function - FIXED
+// 🔹 Payment Processing Function - FIXED ERROR HANDLING
 const processPayment = async (
   appointmentId: string, 
   amount: number, 
@@ -596,20 +625,13 @@ const processPayment = async (
 ): Promise<boolean> => {
   try {
     if (paymentMethod === "Cash") {
-      // For cash payments, just update the appointment status
-      await updateDoc(doc(db, "appointments", appointmentId), {
-        paymentMethod: "Cash",
-        status: "Confirmed"
-      });
-      return false; // No redirect needed for cash payment
+      return false;
     }
     
-    // For GCash payments, process through PayMongo
-    const paymentMethodType = "gcash";
+    const amountInCentavos = Math.round(amount * 100);
     
-    // Convert price from PHP to centavos (multiply by 100)
-    const amountInCentavos = amount * 100;
-    
+    console.log("💳 Starting payment process for appointment:", appointmentId);
+
     const res = await fetch("/api/create-payment-intent", {
       method: "POST",
       headers: {
@@ -618,50 +640,57 @@ const processPayment = async (
       body: JSON.stringify({
         amount: amountInCentavos,
         description: `${appointmentType} for ${petName}`,
-        payment_method_type: paymentMethodType,
+        payment_method_type: paymentMethod.toLowerCase(), // 'gcash'
         return_url: `${window.location.origin}/appointment?payment_success=true&appointment_id=${appointmentId}`,
-        metadata: {
-          appointmentId: appointmentId,
-          petName: petName,
-          appointmentType: appointmentType
-        }
+        reference_number: appointmentId // Use appointment ID as reference
       })
     });
 
-    const responseData = await res.json();
-
     if (!res.ok) {
-      throw new Error(
-        `Payment error: ${res.status} - ${responseData.error || 'Unknown error'}. ` +
-        `${responseData.details ? JSON.stringify(responseData.details) : ''}`
-      );
+      const errorData = await res.json();
+      console.error("❌ Payment API error:", errorData);
+      throw new Error(errorData.error || `Payment failed: ${res.status}`);
     }
 
-    if (!responseData || Object.keys(responseData).length === 0) {
-      throw new Error("Empty response received from server");
+    const responseData = await res.json();
+    console.log("✅ Payment API response:", responseData);
+
+    if (!responseData.success) {
+      throw new Error(responseData.error || "Payment failed");
     }
 
-    const checkoutUrl = responseData?.data?.attributes?.checkout_url;
+    const checkoutUrl = responseData.data?.checkout_url;
 
     if (checkoutUrl) {
-      if (responseData.data.id) {
-        sessionStorage.setItem('paymentIntentId', responseData.data.id);
-      }
+      console.log("🔗 Redirecting to:", checkoutUrl);
       
-      // Store success callback
-      sessionStorage.setItem('appointmentId', appointmentId);
+      // Store appointment ID for success callback
+      sessionStorage.setItem('pendingAppointmentId', appointmentId);
       
       // Redirect to payment gateway
       window.location.href = checkoutUrl;
-      return true; // Redirecting
+      return true;
     } else {
-      throw new Error("Failed to initialize online payment. No checkout URL received.");
+      throw new Error("No checkout URL received");
     }
   } catch (err) {
-    console.error("Payment error:", err);
-    throw err;
+    console.error("❌ Payment processing error:", err);
+    
+    const errorMessage = err instanceof Error ? err.message : 'Unknown payment error';
+    
+    // Update appointment status
+    try {
+      await updateDoc(doc(db, "appointments", appointmentId), {
+        status: "Payment Failed",
+        paymentError: errorMessage
+      });
+    } catch (updateError) {
+      console.error("❌ Failed to update appointment status:", updateError);
+    }
+    
+    throw new Error(errorMessage);
   }
-};
+};  
 
 // 🔹 Main Appointment Page Component
 const AppointmentPage: React.FC = () => {
@@ -722,7 +751,7 @@ const AppointmentPage: React.FC = () => {
             const petDoc = await getDoc(doc(db, "pets", appointmentData.petId));
             let petName = "Unknown Pet";
             if (petDoc.exists()) {
-              petName = petDoc.data().petName;
+              petName = petDoc.data().petName || petDoc.data().name || "Unknown Pet";
             }
 
             const fullAppointment: Appointment = {
@@ -814,69 +843,125 @@ const AppointmentPage: React.FC = () => {
     setShowPaymentMethods(true);
   }, [bookingState, bookedSlots, isDateUnavailable]);
 
-  const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
-    setIsProcessing(true);
-    setShowPaymentMethods(false);
+const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
+  setIsProcessing(true);
+  setShowPaymentMethods(false);
+  
+  const { selectedPet, selectedSlot, selectedAppointmentType, selectedDate, selectedPrice } = bookingState;
+
+  try {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new Error("No authenticated user");
+    }
+
+    const selectedPetData = pets.find((p) => p.id === selectedPet);
     
-    const { selectedPet, selectedSlot, selectedAppointmentType, selectedDate, selectedPrice } = bookingState;
+    // ✅ FIXED: Complete appointment data
+    const appointmentData = {
+      userId: currentUser.uid,
+      clientName: currentUser.email,
+      clientId: currentUser.uid,
+      petId: selectedPet,
+      petName: selectedPetData?.name,
+      date: selectedDate,
+      timeSlot: selectedSlot,
+      appointmentType: selectedAppointmentType,
+      price: selectedPrice,
+      status: paymentMethod === "Cash" ? "Confirmed" : "Pending Payment",
+      paymentMethod: paymentMethod,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
 
+    console.log("💾 Creating appointment:", appointmentData);
+
+    const newDoc = await addDoc(collection(db, "appointments"), appointmentData);
+
+    // Update the appointment with its ID
+    await updateDoc(doc(db, "appointments", newDoc.id), {
+      id: newDoc.id
+    });
+
+    console.log("✅ Appointment created with ID:", newDoc.id);
+
+    // Send notifications to doctors
     try {
-      const selectedPetData = pets.find((p) => p.id === selectedPet);
-      
-      const appointmentData = {
-        clientName: auth.currentUser?.email,
-        petId: selectedPet,
-        petName: selectedPetData?.name,
-        date: selectedDate,
-        timeSlot: selectedSlot,
-        appointmentType: selectedAppointmentType,
-        price: selectedPrice,
-        status: paymentMethod === "Cash" ? "Confirmed" : "Pending Payment",
-        paymentMethod: paymentMethod,
-        createdAt: serverTimestamp()
-      };
-
-      const newDoc = await addDoc(collection(db, "appointments"), appointmentData);
-
-      // Update the appointment with its ID
-      await updateDoc(doc(db, "appointments", newDoc.id), {
-        id: newDoc.id
+      const doctorNotifications = doctors.map(async (doctor) => {
+        return addDoc(collection(db, "notifications"), {
+          recipientId: doctor.id,
+          recipientEmail: doctor.email,
+          type: "new_appointment",
+          title: "New Appointment Booked",
+          message: `New appointment booked by ${currentUser.email} for ${selectedPetData?.name} on ${selectedDate} at ${selectedSlot} - ₱${selectedPrice}`,
+          appointmentId: newDoc.id,
+          isRead: false,
+          createdAt: serverTimestamp()
+        });
       });
 
-      await sendNotificationToDoctor({
-        ...appointmentData,
-        appointmentId: newDoc.id
-      });
+      await Promise.all(doctorNotifications);
+      console.log("✅ Notifications sent to doctors");
+    } catch (notifError) {
+      console.error("❌ Notification error:", notifError);
+      // Continue even if notifications fail
+    }
 
-      // Process payment based on selected method
-      const isRedirecting = await processPayment(
-        newDoc.id, 
-        selectedPrice, 
-        selectedAppointmentType, 
-        selectedPetData?.name || "Pet",
-        paymentMethod
-      );
+    // Process payment based on selected method
+    if (paymentMethod === "Cash") {
+      alert("Appointment booked successfully! Please pay with cash when you arrive.");
+      router.push("/userdashboard");
+    } else {
+      // For GCash payments
+      try {
+        const isRedirecting = await processPayment(
+          newDoc.id, 
+          selectedPrice, 
+          selectedAppointmentType, 
+          selectedPetData?.name || "Pet",
+          paymentMethod
+        );
 
-      if (paymentMethod === "Cash" || !isRedirecting) {
-        alert("Appointment booked successfully! Please pay with cash when you arrive.");
+        if (!isRedirecting) {
+          alert("Appointment booked successfully!");
+          router.push("/userdashboard");
+        }
+        // If redirecting, processPayment will handle the redirect
+      } catch (paymentError) {
+        console.error("❌ Payment error:", paymentError);
+        
+        // ✅ FIXED: Safe error message display
+        const errorMessage = paymentError instanceof Error ? paymentError.message : 'Payment processing failed';
+        
+        // If payment fails, still keep the appointment but mark as failed payment
+        await updateDoc(doc(db, "appointments", newDoc.id), {
+          status: "Payment Failed",
+          paymentError: errorMessage
+        });
+        
+        alert(`Appointment created but payment failed: ${errorMessage}. Please try again or pay with cash.`);
         router.push("/userdashboard");
       }
-      // For GCash, the processPayment function handles the redirect
-      
-    } catch (err) {
-      console.error(err);
-      alert("Failed to book appointment");
-    } finally {
-      setIsProcessing(false);
     }
-  }, [bookingState, pets, sendNotificationToDoctor, router]);
+    
+  } catch (err) {
+    console.error("❌ Appointment creation error:", err);
+    
+    // ✅ FIXED: Safe error message handling
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+    alert("Failed to book appointment: " + errorMessage);
+    
+  } finally {
+    setIsProcessing(false);
+  }
+}, [bookingState, pets, doctors, router]);
 
   const unavailableDates = useMemo(() => getUnavailableDates(), [getUnavailableDates]);
 
   const isFormValid = useMemo(() => {
     const { selectedPet, selectedSlot, selectedAppointmentType, selectedDate } = bookingState;
     return selectedPet && selectedSlot && selectedAppointmentType && 
-           pets.length > 0 && !isDateUnavailable(selectedDate);
+          pets.length > 0 && !isDateUnavailable(selectedDate);
   }, [bookingState, pets.length, isDateUnavailable]);
 
   const handleViewReceipt = () => {
@@ -1186,6 +1271,15 @@ const PetSelect = styled.select`
     background-color: #f5f5f5;
     color: #999;
   }
+`;
+
+const NoPetsWarning = styled.div`
+  background-color: #fff3cd;
+  color: #856404;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-weight: 500;
+  margin-top: 8px;
 `;
 
 const AppointmentTypeContainer = styled.div`
