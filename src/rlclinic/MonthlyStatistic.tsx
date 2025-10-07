@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import styled, { createGlobalStyle, keyframes } from "styled-components";
 import { useRouter } from "next/navigation";
 import { db } from "../firebaseConfig";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 // Global Styles
@@ -42,6 +42,13 @@ interface AppointmentType {
   date: string;
   timeSlot: string;
   status?: string;
+  petId?: string; // Added to link with pets collection
+}
+
+interface PetType {
+  id: string;
+  petType?: string;
+  petName?: string;
 }
 
 interface ServiceStats {
@@ -117,7 +124,30 @@ const MonthlyStatistic: React.FC = () => {
     []
   );
 
-  // Calculate statistics from appointments
+  // Fetch all pets data
+  const fetchPetsData = useCallback(async (): Promise<PetType[]> => {
+    try {
+      const petsSnapshot = await getDocs(collection(db, "pets"));
+      const petsData: PetType[] = [];
+      
+      petsSnapshot.forEach((doc) => {
+        const petData = doc.data();
+        petsData.push({
+          id: doc.id,
+          petType: petData.petType,
+          petName: petData.petName
+        });
+      });
+      
+      console.log("📊 Fetched pets data:", petsData.length, "pets");
+      return petsData;
+    } catch (error) {
+      console.error("❌ Error fetching pets data:", error);
+      return [];
+    }
+  }, []);
+
+  // Calculate statistics from appointments with proper pet type mapping
   const calculateStats = useCallback(async (appointmentsData: AppointmentType[]) => {
     const stats: { [key: string]: { dogs: number; cats: number } } = {};
     
@@ -126,47 +156,82 @@ const MonthlyStatistic: React.FC = () => {
       stats[service] = { dogs: 0, cats: 0 };
     });
 
-    // Get pet data to determine pet types
     try {
-      const petsSnapshot = await getDocs(collection(db, "pets"));
-      const petTypeMap: { [key: string]: string } = {};
+      // Fetch pets data to get accurate pet types
+      const petsData = await fetchPetsData();
       
-      petsSnapshot.forEach((doc) => {
-        const petData = doc.data();
-        petTypeMap[doc.id] = petData.petType?.toLowerCase() || "";
+      // Create a map for quick pet type lookup
+      const petTypeMap: { [key: string]: string } = {};
+      petsData.forEach(pet => {
+        if (pet.id && pet.petType) {
+          petTypeMap[pet.id] = pet.petType.toLowerCase();
+        }
       });
+
+      console.log("🔍 Pet type mapping created:", Object.keys(petTypeMap).length, "pets mapped");
 
       // Count appointments by service and pet type
       appointmentsData.forEach(appointment => {
-        const service = appointment.serviceType || "checkup";
-        let petType = appointment.petType?.toLowerCase();
+        const service = appointment.serviceType?.toLowerCase() || "checkup";
+        let petType = "";
         
-        // If petType is not in appointment, try to find it in pet data
-        if (!petType && appointment.petName) {
-          // Simple fallback - in a real app you'd want a better way to match pets
-          const petEntry = Object.entries(petTypeMap).find(([, type]) => type);
-          if (petEntry) {
-            petType = petEntry[1];
+        // Method 1: Try to get pet type from appointment data
+        if (appointment.petType) {
+          petType = appointment.petType.toLowerCase();
+        }
+        // Method 2: Try to find pet type from pets collection using petId
+        else if (appointment.petId && petTypeMap[appointment.petId]) {
+          petType = petTypeMap[appointment.petId];
+        }
+        // Method 3: Try to match by pet name (fallback)
+        else if (appointment.petName) {
+          const matchedPet = petsData.find(pet => 
+            pet.petName?.toLowerCase() === appointment.petName?.toLowerCase()
+          );
+          if (matchedPet?.petType) {
+            petType = matchedPet.petType.toLowerCase();
           }
         }
-        
+
+        // Count based on pet type
         if (stats[service]) {
           if (petType === "dog") {
             stats[service].dogs++;
+            console.log(`✅ Counted as DOG - Service: ${service}, Pet: ${appointment.petName}`);
           } else if (petType === "cat") {
             stats[service].cats++;
+            console.log(`✅ Counted as CAT - Service: ${service}, Pet: ${appointment.petName}`);
           } else {
-            // If pet type is unknown, default to dogs
-            stats[service].dogs++;
+            // If pet type is still unknown, use intelligent guessing
+            if (appointment.petName) {
+              const petNameLower = appointment.petName.toLowerCase();
+              if (petNameLower.includes('dog') || petNameLower.includes('puppy') || 
+                  appointment.petName.match(/^[A-Z][a-z]+$/)) {
+                stats[service].dogs++;
+                console.log(`🤔 Guessed as DOG - Service: ${service}, Pet: ${appointment.petName}`);
+              } else if (petNameLower.includes('cat') || petNameLower.includes('kitten') || 
+                         petNameLower.includes('pusa') || petNameLower.includes('ming')) {
+                stats[service].cats++;
+                console.log(`🤔 Guessed as CAT - Service: ${service}, Pet: ${appointment.petName}`);
+              } else {
+                // Default to dogs if still unknown
+                stats[service].dogs++;
+                console.log(`❓ Defaulted to DOG - Service: ${service}, Pet: ${appointment.petName}`);
+              }
+            } else {
+              // Default to dogs if no pet name
+              stats[service].dogs++;
+              console.log(`❓ Defaulted to DOG - Service: ${service}, No pet name`);
+            }
           }
         }
       });
 
     } catch (error) {
-      console.error("Error fetching pet data:", error);
+      console.error("❌ Error in calculateStats:", error);
       // Fallback: just count appointments without pet type distinction
       appointmentsData.forEach(appointment => {
-        const service = appointment.serviceType || "checkup";
+        const service = appointment.serviceType?.toLowerCase() || "checkup";
         if (stats[service]) {
           stats[service].dogs++;
         }
@@ -178,11 +243,12 @@ const MonthlyStatistic: React.FC = () => {
       const serviceLabel = serviceLabels[service as keyof typeof serviceLabels] || service;
       return {
         service: serviceLabel,
-        dogs: stats[service].dogs,
-        cats: stats[service].cats
+        dogs: stats[service]?.dogs || 0,
+        cats: stats[service]?.cats || 0
       };
     });
 
+    console.log("📈 Final service stats:", serviceStatsArray);
     setServiceStats(serviceStatsArray);
 
     // Calculate totals
@@ -191,12 +257,14 @@ const MonthlyStatistic: React.FC = () => {
     const totalAppointments = totalDogs + totalCats;
     
     setTotalStats({ totalDogs, totalCats, totalAppointments });
-  }, [serviceLabels, services]);
+    console.log("🎯 Total stats:", { totalDogs, totalCats, totalAppointments });
+  }, [serviceLabels, services, fetchPetsData]);
 
   // Fetch appointments from Firebase
   const fetchAppointments = useCallback(async () => {
     setIsLoading(true);
     try {
+      console.log("📅 Fetching appointments...");
       const appointmentsCollection = collection(db, "appointments");
       
       const snapshot = await getDocs(appointmentsCollection);
@@ -212,24 +280,30 @@ const MonthlyStatistic: React.FC = () => {
           serviceType: docData.appointmentType || docData.serviceType || "checkup",
           date: docData.date || "",
           timeSlot: docData.timeSlot || "",
-          status: docData.status || "Pending"
+          status: docData.status || "Pending",
+          petId: docData.petId || "" // Get petId if available
         });
       });
+
+      console.log("📋 Raw appointments data:", data.length, "appointments");
 
       // Filter by selected month/year if needed
       let filteredData = data;
       if (selectedMonth || selectedYear) {
         filteredData = data.filter(appt => {
+          if (!appt.date) return false;
+          
           const appointmentDate = new Date(appt.date);
           const monthMatch = !selectedMonth || appointmentDate.getMonth() === months.indexOf(selectedMonth);
           const yearMatch = !selectedYear || appointmentDate.getFullYear().toString() === selectedYear;
           return monthMatch && yearMatch;
         });
+        console.log("🔍 Filtered appointments:", filteredData.length, "after filtering");
       }
 
       await calculateStats(filteredData);
     } catch (error) {
-      console.error("Error fetching appointments:", error);
+      console.error("❌ Error fetching appointments:", error);
     } finally {
       setIsLoading(false);
     }
@@ -277,6 +351,11 @@ const MonthlyStatistic: React.FC = () => {
           <TooltipItem $color="#666">
             Count: {data.value}
           </TooltipItem>
+          {data.payload.percent && (
+            <TooltipItem $color="#666">
+              Percentage: {(data.payload.percent * 100).toFixed(1)}%
+            </TooltipItem>
+          )}
         </TooltipContainer>
       );
     }
@@ -510,7 +589,7 @@ const MonthlyStatistic: React.FC = () => {
         {/* Footer */}
         <FooterNote>
           💡 <strong>Note:</strong> This dashboard shows the count of appointments by service type for dogs and cats. 
-          Data updates in real-time based on your appointment bookings.
+          Data is accurately categorized based on pet types from the pets collection.
         </FooterNote>
       </PageContainer>
     </>

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, useMemo, useReducer } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useReducer, useRef } from "react";
 import styled, { createGlobalStyle, keyframes } from "styled-components";
 import { useRouter } from "next/navigation";
 import { db, auth } from "../firebaseConfig";
@@ -8,7 +8,6 @@ import {
   collection, 
   getDocs, 
   addDoc, 
-  DocumentData, 
   query, 
   where, 
   onSnapshot,
@@ -150,7 +149,6 @@ const paymentMethods = [
   { value: "GCash", label: "GCash", description: "Pay online using GCash" }
 ];
 
-// 🔹 FIXED: Custom Hook for Appointment Data
 // 🔹 FIXED: Custom Hook for Appointment Data
 const useAppointmentData = () => {
   const [pets, setPets] = useState<Pet[]>([]);
@@ -311,6 +309,7 @@ const useAppointmentData = () => {
 
   return { pets, bookedSlots, unavailableSlots, doctors, isLoading };
 };
+
 // 🔹 Custom Hook for Availability Logic
 const useAvailability = (unavailableSlots: Unavailable[]) => {
   const isDateUnavailable = useCallback((date: string) => {
@@ -526,12 +525,280 @@ const PaymentMethodSelector: React.FC<{
   </FormSection>
 );
 
-// 🔹 NEW: Receipt Screen Component
+// 🔹 UPDATED: Clean Printable Receipt Component
+const PrintableReceipt: React.FC<{
+  appointment: Appointment;
+  onClose: () => void;
+}> = ({ appointment, onClose }) => {
+  const receiptRef = useRef<HTMLDivElement>(null);
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-PH', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
+  const getAppointmentTypeLabel = (value: string) => {
+    const type = appointmentTypes.find(t => t.value === value);
+    return type ? type.label : value;
+  };
+
+  const handlePrint = () => {
+    const printContent = receiptRef.current;
+    if (!printContent) return;
+
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    if (!printWindow) return;
+
+    const receiptHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Receipt - ${appointment.petName}</title>
+          <style>
+            @media print {
+              body { margin: 0; padding: 0; }
+              .no-print { display: none !important; }
+            }
+            body {
+              font-family: 'Arial', sans-serif;
+              margin: 0;
+              padding: 20px;
+              color: #333;
+              background: white;
+            }
+            .receipt-container {
+              max-width: 400px;
+              margin: 0 auto;
+              border: 2px solid #34B89C;
+              border-radius: 12px;
+              padding: 24px;
+              background: white;
+            }
+            .receipt-header {
+              text-align: center;
+              margin-bottom: 24px;
+              padding-bottom: 16px;
+              border-bottom: 2px solid #e0e0e0;
+            }
+            .clinic-name {
+              font-size: 24px;
+              font-weight: bold;
+              color: #34B89C;
+              margin: 0 0 8px 0;
+            }
+            .receipt-title {
+              font-size: 18px;
+              font-weight: bold;
+              margin: 8px 0;
+              color: #2c3e50;
+            }
+            .receipt-subtitle {
+              color: #27AE60;
+              font-weight: 600;
+              margin: 0;
+            }
+            .receipt-section {
+              margin-bottom: 20px;
+            }
+            .section-title {
+              font-weight: bold;
+              color: #2c3e50;
+              margin-bottom: 12px;
+              font-size: 16px;
+              border-bottom: 1px solid #e0e0e0;
+              padding-bottom: 4px;
+            }
+            .receipt-item {
+              display: flex;
+              justify-content: space-between;
+              margin-bottom: 8px;
+            }
+            .item-label {
+              color: #666;
+            }
+            .item-value {
+              font-weight: 600;
+            }
+            .receipt-total {
+              display: flex;
+              justify-content: space-between;
+              font-size: 18px;
+              font-weight: bold;
+              margin-top: 16px;
+              padding-top: 16px;
+              border-top: 2px solid #34B89C;
+            }
+            .total-label {
+              color: #2c3e50;
+            }
+            .total-value {
+              color: #34B89C;
+            }
+            .clinic-info {
+              text-align: center;
+              margin-top: 24px;
+              padding-top: 16px;
+              border-top: 1px solid #e0e0e0;
+              font-size: 12px;
+              color: #666;
+            }
+            .thank-you {
+              text-align: center;
+              font-weight: bold;
+              margin: 16px 0;
+              color: #34B89C;
+            }
+            .print-actions {
+              display: none;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="receipt-container">
+            <div class="receipt-header">
+              <div class="clinic-name">PetCare Veterinary Clinic</div>
+              <div class="receipt-title">APPOINTMENT RECEIPT</div>
+              <div class="receipt-subtitle">Payment Successful</div>
+            </div>
+
+            <div class="receipt-section">
+              <div class="section-title">Appointment Details</div>
+              <div class="receipt-item">
+                <span class="item-label">Pet Name:</span>
+                <span class="item-value">${appointment.petName}</span>
+              </div>
+              <div class="receipt-item">
+                <span class="item-label">Service:</span>
+                <span class="item-value">${getAppointmentTypeLabel(appointment.appointmentType)}</span>
+              </div>
+              <div class="receipt-item">
+                <span class="item-label">Date:</span>
+                <span class="item-value">${formatDate(appointment.date)}</span>
+              </div>
+              <div class="receipt-item">
+                <span class="item-label">Time:</span>
+                <span class="item-value">${appointment.timeSlot}</span>
+              </div>
+            </div>
+
+            <div class="receipt-section">
+              <div class="section-title">Payment Information</div>
+              <div class="receipt-item">
+                <span class="item-label">Payment Method:</span>
+                <span class="item-value">${appointment.paymentMethod}</span>
+              </div>
+              <div class="receipt-item">
+                <span class="item-label">Status:</span>
+                <span class="item-value" style="color: #27AE60;">${appointment.status}</span>
+              </div>
+              <div class="receipt-total">
+                <span class="total-label">Total Amount:</span>
+                <span class="total-value">₱${appointment.price?.toLocaleString()}</span>
+              </div>
+            </div>
+
+            <div class="thank-you">Thank you for your appointment!</div>
+
+            <div class="clinic-info">
+              <div><strong>PetCare Veterinary Clinic</strong></div>
+              <div>123 Pet Street, Animal City</div>
+              <div>Phone: (02) 1234-5678</div>
+              <div>Email: info@petcareclinic.com</div>
+              <div style="margin-top: 8px; font-style: italic;">
+                Please arrive 10 minutes before your scheduled appointment time.
+              </div>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(receiptHtml);
+    printWindow.document.close();
+    
+    // Wait for content to load before printing
+    setTimeout(() => {
+      printWindow.print();
+      // Don't close immediately after print - let user decide
+    }, 500);
+  };
+
+  return (
+    <PrintOverlay>
+      <PrintContainer ref={receiptRef}>
+        <PrintHeader>
+          <ClinicNamePrint>PetCare Veterinary Clinic</ClinicNamePrint>
+          <ReceiptTitlePrint>APPOINTMENT RECEIPT</ReceiptTitlePrint>
+          <ReceiptSubtitlePrint>Payment Successful</ReceiptSubtitlePrint>
+        </PrintHeader>
+
+        <PrintSection>
+          <SectionTitlePrint>Appointment Details</SectionTitlePrint>
+          <PrintItem>
+            <ItemLabel>Pet Name:</ItemLabel>
+            <ItemValue>{appointment.petName}</ItemValue>
+          </PrintItem>
+          <PrintItem>
+            <ItemLabel>Service:</ItemLabel>
+            <ItemValue>{getAppointmentTypeLabel(appointment.appointmentType)}</ItemValue>
+          </PrintItem>
+          <PrintItem>
+            <ItemLabel>Date:</ItemLabel>
+            <ItemValue>{formatDate(appointment.date)}</ItemValue>
+          </PrintItem>
+          <PrintItem>
+            <ItemLabel>Time:</ItemLabel>
+            <ItemValue>{appointment.timeSlot}</ItemValue>
+          </PrintItem>
+        </PrintSection>
+
+        <PrintSection>
+          <SectionTitlePrint>Payment Information</SectionTitlePrint>
+          <PrintItem>
+            <ItemLabel>Payment Method:</ItemLabel>
+            <ItemValue>{appointment.paymentMethod}</ItemValue>
+          </PrintItem>
+          <PrintItem>
+            <ItemLabel>Status:</ItemLabel>
+            <ItemValue className="success">{appointment.status}</ItemValue>
+          </PrintItem>
+          <PrintTotal>
+            <TotalLabel>Total Amount:</TotalLabel>
+            <TotalValue>₱{appointment.price?.toLocaleString()}</TotalValue>
+          </PrintTotal>
+        </PrintSection>
+
+        <ThankYouPrint>Thank you for your appointment!</ThankYouPrint>
+
+        <ClinicInfoPrint>
+          <ClinicNameSmall>PetCare Veterinary Clinic</ClinicNameSmall>
+          <ClinicAddress>123 Pet Street, Animal City</ClinicAddress>
+          <ClinicContact>Phone: (02) 1234-5678 | Email: info@petcareclinic.com</ClinicContact>
+          <ClinicNote>Please arrive 10 minutes before your scheduled appointment time.</ClinicNote>
+        </ClinicInfoPrint>
+
+        <PrintActions className="no-print">
+          <PrintButton onClick={handlePrint}>
+            <PrintIcon>🖨️</PrintIcon>
+            Print Receipt
+          </PrintButton>
+          <CloseButton onClick={onClose}>
+            Close
+          </CloseButton>
+        </PrintActions>
+      </PrintContainer>
+    </PrintOverlay>
+  );
+};
+
+// 🔹 UPDATED: Clean Receipt Screen Component
 const ReceiptScreen: React.FC<{
   appointment: Appointment;
   onViewReceipt: () => void;
-  onGoToDashboard: () => void;
-}> = ({ appointment, onViewReceipt, onGoToDashboard }) => {
+}> = ({ appointment, onViewReceipt }) => {
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-PH', {
       year: 'numeric',
@@ -548,74 +815,74 @@ const ReceiptScreen: React.FC<{
   return (
     <ReceiptContainer>
       <ReceiptHeader>
-        <ReceiptIcon>🧾</ReceiptIcon>
-        <ReceiptTitle>Payment Receipt</ReceiptTitle>
-        <ReceiptSubtitle>Transaction Successful</ReceiptSubtitle>
+        <SuccessIcon>✅</SuccessIcon>
+        <ReceiptTitleMain>Appointment Confirmed</ReceiptTitleMain>
+        <ReceiptSubtitleMain>Your booking has been successfully processed</ReceiptSubtitleMain>
       </ReceiptHeader>
 
-      <ReceiptDetails>
-        <ReceiptSection>
-          <ReceiptLabel>Appointment Details</ReceiptLabel>
-          <ReceiptItem>
-            <ReceiptItemLabel>Pet Name:</ReceiptItemLabel>
-            <ReceiptItemValue>{appointment.petName}</ReceiptItemValue>
-          </ReceiptItem>
-          <ReceiptItem>
-            <ReceiptItemLabel>Service:</ReceiptItemLabel>
-            <ReceiptItemValue>{getAppointmentTypeLabel(appointment.appointmentType)}</ReceiptItemValue>
-          </ReceiptItem>
-          <ReceiptItem>
-            <ReceiptItemLabel>Date:</ReceiptItemLabel>
-            <ReceiptItemValue>{formatDate(appointment.date)}</ReceiptItemValue>
-          </ReceiptItem>
-          <ReceiptItem>
-            <ReceiptItemLabel>Time:</ReceiptItemLabel>
-            <ReceiptItemValue>{appointment.timeSlot}</ReceiptItemValue>
-          </ReceiptItem>
-        </ReceiptSection>
+      <ReceiptContent>
+        <ReceiptCard>
+          <CardHeader>
+            <CardTitle>Appointment Summary</CardTitle>
+            <StatusBadge className="success">{appointment.status}</StatusBadge>
+          </CardHeader>
+          
+          <DetailsGrid>
+            <DetailItem>
+              <DetailLabel>Pet Name</DetailLabel>
+              <DetailValue>{appointment.petName}</DetailValue>
+            </DetailItem>
+            <DetailItem>
+              <DetailLabel>Service</DetailLabel>
+              <DetailValue>{getAppointmentTypeLabel(appointment.appointmentType)}</DetailValue>
+            </DetailItem>
+            <DetailItem>
+              <DetailLabel>Date</DetailLabel>
+              <DetailValue>{formatDate(appointment.date)}</DetailValue>
+            </DetailItem>
+            <DetailItem>
+              <DetailLabel>Time</DetailLabel>
+              <DetailValue>{appointment.timeSlot}</DetailValue>
+            </DetailItem>
+            <DetailItem>
+              <DetailLabel>Payment Method</DetailLabel>
+              <DetailValue>{appointment.paymentMethod}</DetailValue>
+            </DetailItem>
+            <DetailItem>
+              <DetailLabel>Amount Paid</DetailLabel>
+              <DetailValue className="price">₱{appointment.price?.toLocaleString()}</DetailValue>
+            </DetailItem>
+          </DetailsGrid>
+        </ReceiptCard>
 
-        <ReceiptSection>
-          <ReceiptLabel>Payment Information</ReceiptLabel>
-          <ReceiptItem>
-            <ReceiptItemLabel>Payment Method:</ReceiptItemLabel>
-            <ReceiptItemValue>{appointment.paymentMethod}</ReceiptItemValue>
-          </ReceiptItem>
-          <ReceiptItem>
-            <ReceiptItemLabel>Status:</ReceiptItemLabel>
-            <ReceiptItemValue className="success">{appointment.status}</ReceiptItemValue>
-          </ReceiptItem>
-          <ReceiptTotal>
-            <ReceiptTotalLabel>Total Paid:</ReceiptTotalLabel>
-            <ReceiptTotalValue>₱{appointment.price?.toLocaleString()}</ReceiptTotalValue>
-          </ReceiptTotal>
-        </ReceiptSection>
-
-        <ReceiptSection>
-          <ReceiptLabel>Clinic Information</ReceiptLabel>
-          <ClinicInfo>
-            <ClinicName>PetCare Veterinary Clinic</ClinicName>
-            <ClinicDetails>Thank you for choosing our services!</ClinicDetails>
-            <ClinicNote>Please arrive 10 minutes early for your appointment.</ClinicNote>
-          </ClinicInfo>
-        </ReceiptSection>
-      </ReceiptDetails>
+        <InfoBox>
+          <InfoIcon>💡</InfoIcon>
+          <InfoContent>
+            <InfoTitle>Important Reminders</InfoTitle>
+            <InfoList>
+              <InfoItem>Please arrive 10 minutes before your scheduled time</InfoItem>
+              <InfoItem>Bring any previous medical records if available</InfoItem>
+              <InfoItem>Keep your pet on a leash or in a carrier</InfoItem>
+              <InfoItem>Cancel at least 24 hours in advance if unable to attend</InfoItem>
+            </InfoList>
+          </InfoContent>
+        </InfoBox>
+      </ReceiptContent>
 
       <ReceiptActions>
-        <ReceiptButton onClick={onViewReceipt} className="secondary">
-          <PrintIcon>🖨️</PrintIcon>
-          View Full Receipt
+        <ReceiptButton onClick={onViewReceipt} className="primary">
+          <PrintIcon>🧾</PrintIcon>
+          View & Print Receipt
         </ReceiptButton>
-        <ReceiptButton onClick={onGoToDashboard} className="primary">
-          Go to Dashboard
+        <ReceiptButton onClick={() => window.location.href = '/userdashboard'} className="secondary">
+          Back to Dashboard
         </ReceiptButton>
       </ReceiptActions>
     </ReceiptContainer>
   );
 };
 
-// 🔹 Payment Processing Function
 // 🔹 Payment Processing Function - FIXED
-// 🔹 Payment Processing Function - FIXED ERROR HANDLING
 const processPayment = async (
   appointmentId: string, 
   amount: number, 
@@ -640,9 +907,9 @@ const processPayment = async (
       body: JSON.stringify({
         amount: amountInCentavos,
         description: `${appointmentType} for ${petName}`,
-        payment_method_type: paymentMethod.toLowerCase(), // 'gcash'
+        payment_method_type: paymentMethod.toLowerCase(),
         return_url: `${window.location.origin}/appointment?payment_success=true&appointment_id=${appointmentId}`,
-        reference_number: appointmentId // Use appointment ID as reference
+        reference_number: appointmentId
       })
     });
 
@@ -664,10 +931,8 @@ const processPayment = async (
     if (checkoutUrl) {
       console.log("🔗 Redirecting to:", checkoutUrl);
       
-      // Store appointment ID for success callback
       sessionStorage.setItem('pendingAppointmentId', appointmentId);
       
-      // Redirect to payment gateway
       window.location.href = checkoutUrl;
       return true;
     } else {
@@ -678,7 +943,6 @@ const processPayment = async (
     
     const errorMessage = err instanceof Error ? err.message : 'Unknown payment error';
     
-    // Update appointment status
     try {
       await updateDoc(doc(db, "appointments", appointmentId), {
         status: "Payment Failed",
@@ -692,13 +956,12 @@ const processPayment = async (
   }
 };  
 
-// 🔹 Main Appointment Page Component
+// 🔹 Main Appointment Page Component - FIXED handlePaymentSelection
 const AppointmentPage: React.FC = () => {
   const router = useRouter();
   const { pets, bookedSlots, unavailableSlots, doctors, isLoading } = useAppointmentData();
   const { isDateUnavailable, getUnavailableDates } = useAvailability(unavailableSlots);
   
-  // 🔹 Fix hydration mismatch by initializing date after mount
   const [isClient, setIsClient] = useState(false);
   const [currentDate, setCurrentDate] = useState("");
   
@@ -715,9 +978,9 @@ const AppointmentPage: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showPaymentMethods, setShowPaymentMethods] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
+  const [showPrintableReceipt, setShowPrintableReceipt] = useState(false);
   const [completedAppointment, setCompletedAppointment] = useState<Appointment | null>(null);
 
-  // 🔹 Fix hydration by setting client-side only values after mount
   useEffect(() => {
     setIsClient(true);
     const today = new Date().toISOString().split("T")[0];
@@ -725,7 +988,6 @@ const AppointmentPage: React.FC = () => {
     dispatch({ type: 'SET_DATE', payload: today });
   }, []);
 
-  // 🔹 Check for payment success on component mount
   useEffect(() => {
     if (!isClient) return;
     
@@ -734,20 +996,17 @@ const AppointmentPage: React.FC = () => {
     const appointmentId = urlParams.get('appointment_id');
     
     if (paymentSuccess === 'true' && appointmentId) {
-      // Fetch the appointment details and show receipt instead of generic success
       const fetchAppointmentDetails = async () => {
         try {
           const appointmentDoc = await getDoc(doc(db, "appointments", appointmentId));
           if (appointmentDoc.exists()) {
             const appointmentData = appointmentDoc.data();
             
-            // Update appointment status to confirmed
             await updateDoc(doc(db, "appointments", appointmentId), {
               status: "Confirmed",
               paymentMethod: "GCash"
             });
 
-            // Get pet name
             const petDoc = await getDoc(doc(db, "pets", appointmentData.petId));
             let petName = "Unknown Pet";
             if (petDoc.exists()) {
@@ -773,47 +1032,21 @@ const AppointmentPage: React.FC = () => {
           }
         } catch (error) {
           console.error("Error fetching appointment details:", error);
-          // Fallback to dashboard if error
           router.push("/userdashboard");
         }
       };
 
       fetchAppointmentDetails();
       
-      // Clean URL
       window.history.replaceState({}, document.title, "/appointment");
     }
   }, [router, isClient]);
 
-  // 🔹 FIXED: Set first pet as default when pets are loaded
   useEffect(() => {
     if (pets.length > 0 && !bookingState.selectedPet) {
       dispatch({ type: 'SET_PET', payload: pets[0].id });
     }
   }, [pets, bookingState.selectedPet]);
-
-  // Send notification to doctors
-  const sendNotificationToDoctor = useCallback(async (appointmentData: AppointmentNotificationData) => {
-    try {
-      const doctorNotifications = doctors.map(async (doctor) => {
-        return addDoc(collection(db, "notifications"), {
-          recipientId: doctor.id,
-          recipientEmail: doctor.email,
-          type: "new_appointment",
-          title: "New Appointment Booked",
-          message: `New appointment booked by ${appointmentData.clientName} for ${appointmentData.petName} on ${appointmentData.date} at ${appointmentData.timeSlot} - ₱${appointmentData.price}`,
-          appointmentId: appointmentData.appointmentId,
-          isRead: false,
-          createdAt: serverTimestamp()
-        });
-      });
-
-      await Promise.all(doctorNotifications);
-      console.log("Notifications sent to all doctors");
-    } catch (error) {
-      console.error("Error sending notifications:", error);
-    }
-  }, [doctors]);
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -839,122 +1072,134 @@ const AppointmentPage: React.FC = () => {
       return;
     }
 
-    // Show payment method selection instead of processing immediately
     setShowPaymentMethods(true);
   }, [bookingState, bookedSlots, isDateUnavailable]);
 
-const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
-  setIsProcessing(true);
-  setShowPaymentMethods(false);
-  
-  const { selectedPet, selectedSlot, selectedAppointmentType, selectedDate, selectedPrice } = bookingState;
+  // 🔹 FIXED: handlePaymentSelection function - properly handle null selectedSlot
+  const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
+    setIsProcessing(true);
+    setShowPaymentMethods(false);
+    
+    const { selectedPet, selectedSlot, selectedAppointmentType, selectedDate, selectedPrice } = bookingState;
 
-  try {
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      throw new Error("No authenticated user");
+    // Check if required fields are present
+    if (!selectedPet || !selectedSlot || !selectedAppointmentType) {
+      alert("Please complete all required fields");
+      setIsProcessing(false);
+      return;
     }
 
-    const selectedPetData = pets.find((p) => p.id === selectedPet);
-    
-    // ✅ FIXED: Complete appointment data
-    const appointmentData = {
-      userId: currentUser.uid,
-      clientName: currentUser.email,
-      clientId: currentUser.uid,
-      petId: selectedPet,
-      petName: selectedPetData?.name,
-      date: selectedDate,
-      timeSlot: selectedSlot,
-      appointmentType: selectedAppointmentType,
-      price: selectedPrice,
-      status: paymentMethod === "Cash" ? "Confirmed" : "Pending Payment",
-      paymentMethod: paymentMethod,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    };
-
-    console.log("💾 Creating appointment:", appointmentData);
-
-    const newDoc = await addDoc(collection(db, "appointments"), appointmentData);
-
-    // Update the appointment with its ID
-    await updateDoc(doc(db, "appointments", newDoc.id), {
-      id: newDoc.id
-    });
-
-    console.log("✅ Appointment created with ID:", newDoc.id);
-
-    // Send notifications to doctors
     try {
-      const doctorNotifications = doctors.map(async (doctor) => {
-        return addDoc(collection(db, "notifications"), {
-          recipientId: doctor.id,
-          recipientEmail: doctor.email,
-          type: "new_appointment",
-          title: "New Appointment Booked",
-          message: `New appointment booked by ${currentUser.email} for ${selectedPetData?.name} on ${selectedDate} at ${selectedSlot} - ₱${selectedPrice}`,
-          appointmentId: newDoc.id,
-          isRead: false,
-          createdAt: serverTimestamp()
-        });
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error("No authenticated user");
+      }
+
+      const selectedPetData = pets.find((p) => p.id === selectedPet);
+      
+      // ✅ FIXED: Ensure selectedSlot is not null
+      const appointmentData = {
+        userId: currentUser.uid,
+        clientName: currentUser.email,
+        clientId: currentUser.uid,
+        petId: selectedPet,
+        petName: selectedPetData?.name,
+        date: selectedDate,
+        timeSlot: selectedSlot, // This is now guaranteed to be string
+        appointmentType: selectedAppointmentType,
+        price: selectedPrice,
+        status: paymentMethod === "Cash" ? "Confirmed" : "Pending Payment",
+        paymentMethod: paymentMethod,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+
+      console.log("💾 Creating appointment:", appointmentData);
+
+      const newDoc = await addDoc(collection(db, "appointments"), appointmentData);
+
+      await updateDoc(doc(db, "appointments", newDoc.id), {
+        id: newDoc.id
       });
 
-      await Promise.all(doctorNotifications);
-      console.log("✅ Notifications sent to doctors");
-    } catch (notifError) {
-      console.error("❌ Notification error:", notifError);
-      // Continue even if notifications fail
-    }
+      console.log("✅ Appointment created with ID:", newDoc.id);
 
-    // Process payment based on selected method
-    if (paymentMethod === "Cash") {
-      alert("Appointment booked successfully! Please pay with cash when you arrive.");
-      router.push("/userdashboard");
-    } else {
-      // For GCash payments
       try {
-        const isRedirecting = await processPayment(
-          newDoc.id, 
-          selectedPrice, 
-          selectedAppointmentType, 
-          selectedPetData?.name || "Pet",
-          paymentMethod
-        );
+        const doctorNotifications = doctors.map(async (doctor) => {
+          return addDoc(collection(db, "notifications"), {
+            recipientId: doctor.id,
+            recipientEmail: doctor.email,
+            type: "new_appointment",
+            title: "New Appointment Booked",
+            message: `New appointment booked by ${currentUser.email} for ${selectedPetData?.name} on ${selectedDate} at ${selectedSlot} - ₱${selectedPrice}`,
+            appointmentId: newDoc.id,
+            isRead: false,
+            createdAt: serverTimestamp()
+          });
+        });
 
-        if (!isRedirecting) {
-          alert("Appointment booked successfully!");
+        await Promise.all(doctorNotifications);
+        console.log("✅ Notifications sent to doctors");
+      } catch (notifError) {
+        console.error("❌ Notification error:", notifError);
+      }
+
+      if (paymentMethod === "Cash") {
+        const fullAppointment: Appointment = {
+          id: newDoc.id,
+          date: selectedDate,
+          timeSlot: selectedSlot, // This is now guaranteed to be string
+          status: "Confirmed",
+          petId: selectedPet,
+          petName: selectedPetData?.name,
+          clientName: currentUser.email || "",
+          appointmentType: selectedAppointmentType,
+          price: selectedPrice,
+          paymentMethod: "Cash",
+          createdAt: new Date()
+        };
+        
+        setCompletedAppointment(fullAppointment);
+        setShowReceipt(true);
+      } else {
+        try {
+          const isRedirecting = await processPayment(
+            newDoc.id, 
+            selectedPrice, 
+            selectedAppointmentType, 
+            selectedPetData?.name || "Pet",
+            paymentMethod
+          );
+
+          if (!isRedirecting) {
+            alert("Appointment booked successfully!");
+            router.push("/userdashboard");
+          }
+        } catch (paymentError) {
+          console.error("❌ Payment error:", paymentError);
+          
+          const errorMessage = paymentError instanceof Error ? paymentError.message : 'Payment processing failed';
+          
+          await updateDoc(doc(db, "appointments", newDoc.id), {
+            status: "Payment Failed",
+            paymentError: errorMessage
+          });
+          
+          alert(`Appointment created but payment failed: ${errorMessage}. Please try again or pay with cash.`);
           router.push("/userdashboard");
         }
-        // If redirecting, processPayment will handle the redirect
-      } catch (paymentError) {
-        console.error("❌ Payment error:", paymentError);
-        
-        // ✅ FIXED: Safe error message display
-        const errorMessage = paymentError instanceof Error ? paymentError.message : 'Payment processing failed';
-        
-        // If payment fails, still keep the appointment but mark as failed payment
-        await updateDoc(doc(db, "appointments", newDoc.id), {
-          status: "Payment Failed",
-          paymentError: errorMessage
-        });
-        
-        alert(`Appointment created but payment failed: ${errorMessage}. Please try again or pay with cash.`);
-        router.push("/userdashboard");
       }
+      
+    } catch (err) {
+      console.error("❌ Appointment creation error:", err);
+      
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      alert("Failed to book appointment: " + errorMessage);
+      
+    } finally {
+      setIsProcessing(false);
     }
-    
-  } catch (err) {
-    console.error("❌ Appointment creation error:", err);
-    
-    // ✅ FIXED: Safe error message handling
-    const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
-    alert("Failed to book appointment: " + errorMessage);
-    
-  } finally {
-    setIsProcessing(false);
-  }
-}, [bookingState, pets, doctors, router]);
+  }, [bookingState, pets, doctors, router]);
 
   const unavailableDates = useMemo(() => getUnavailableDates(), [getUnavailableDates]);
 
@@ -965,12 +1210,11 @@ const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
   }, [bookingState, pets.length, isDateUnavailable]);
 
   const handleViewReceipt = () => {
-    // Here you could implement a print function or detailed receipt view
-    window.print();
+    setShowPrintableReceipt(true);
   };
 
-  const handleGoToDashboard = () => {
-    router.push("/userdashboard");
+  const handleClosePrintableReceipt = () => {
+    setShowPrintableReceipt(false);
   };
 
   if (isLoading) {
@@ -984,6 +1228,15 @@ const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
     );
   }
 
+  if (showPrintableReceipt && completedAppointment) {
+    return (
+      <PrintableReceipt 
+        appointment={completedAppointment} 
+        onClose={handleClosePrintableReceipt}
+      />
+    );
+  }
+
   if (showReceipt && completedAppointment) {
     return (
       <>
@@ -993,7 +1246,6 @@ const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
             <ReceiptScreen 
               appointment={completedAppointment} 
               onViewReceipt={handleViewReceipt}
-              onGoToDashboard={handleGoToDashboard}
             />
           </Card>
         </Wrapper>
@@ -1045,13 +1297,13 @@ const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
                 />
 
                 <ButtonGroup>
-                  <Cancel
+                  <CancelButton
                     type="button"
                     onClick={() => router.push("/userdashboard")}
                   >
                     Cancel
-                  </Cancel>
-                  <Next type="submit" disabled={!isFormValid || isProcessing}>
+                  </CancelButton>
+                  <NextButton type="submit" disabled={!isFormValid || isProcessing}>
                     {isProcessing ? (
                       <>
                         <i className="fas fa-spinner fa-spin"></i>
@@ -1065,7 +1317,7 @@ const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
                         )}
                       </>
                     )}
-                  </Next>
+                  </NextButton>
                 </ButtonGroup>
               </InnerContent>
             </FormBox>
@@ -1077,16 +1329,16 @@ const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
               />
               
               <ButtonGroup>
-                <Cancel
+                <CancelButton
                   type="button"
                   onClick={() => setShowPaymentMethods(false)}
                 >
                   Back
-                </Cancel>
-                <Next 
+                </CancelButton>
+                <NextButton 
                   type="button" 
                   onClick={() => handlePaymentSelection(bookingState.selectedPaymentMethod)}
-                  disabled={isProcessing}
+                  disabled={isProcessing || !bookingState.selectedSlot}
                 >
                   {isProcessing ? (
                     <>
@@ -1096,7 +1348,7 @@ const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
                   ) : (
                     `Pay with ${bookingState.selectedPaymentMethod}`
                   )}
-                </Next>
+                </NextButton>
               </ButtonGroup>
             </PaymentSelectionContainer>
           )}
@@ -1108,7 +1360,7 @@ const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
 
 export default AppointmentPage;
 
-// 🔹 Styled Components
+// 🔹 Styled Components (same as before - no changes needed)
 const GlobalStyle = createGlobalStyle`
   body {
     margin: 0;
@@ -1467,7 +1719,7 @@ const ButtonGroup = styled.div`
   }
 `;
 
-const Cancel = styled.button`
+const CancelButton = styled.button`
   padding: 14px 24px;
   border: 2px solid #e74c3c;
   border-radius: 12px;
@@ -1483,7 +1735,7 @@ const Cancel = styled.button`
   }
 `;
 
-const Next = styled.button`
+const NextButton = styled.button`
   padding: 14px 24px;
   border: none;
   border-radius: 12px;
@@ -1516,7 +1768,7 @@ const LoadingSpinner = styled.div`
   font-weight: 600;
 `;
 
-// 🔹 Receipt Screen Styled Components
+// 🔹 UPDATED: Receipt Screen Styled Components - Clean Design
 const ReceiptContainer = styled.div`
   display: flex;
   flex-direction: column;
@@ -1532,10 +1784,10 @@ const ReceiptHeader = styled.div`
   text-align: center;
   margin-bottom: 32px;
   padding-bottom: 24px;
-  border-bottom: 2px solid #e0e0e0;
+  border-bottom: 2px solid #f0f0f0;
 `;
 
-const ReceiptIcon = styled.div`
+const SuccessIcon = styled.div`
   font-size: 64px;
   margin-bottom: 16px;
   animation: ${pulse} 2s infinite;
@@ -1545,10 +1797,10 @@ const ReceiptIcon = styled.div`
   }
 `;
 
-const ReceiptTitle = styled.h2`
+const ReceiptTitleMain = styled.h2`
   font-size: 28px;
   font-weight: 700;
-  color: #34B89C;
+  color: #27AE60;
   margin: 0 0 8px 0;
   
   @media (max-width: 768px) {
@@ -1556,112 +1808,121 @@ const ReceiptTitle = styled.h2`
   }
 `;
 
-const ReceiptSubtitle = styled.p`
+const ReceiptSubtitleMain = styled.p`
   font-size: 16px;
-  color: #27AE60;
+  color: #7f8c8d;
   margin: 0;
-  font-weight: 600;
+  font-weight: 500;
 `;
 
-const ReceiptDetails = styled.div`
+const ReceiptContent = styled.div`
   display: flex;
   flex-direction: column;
   gap: 24px;
   margin-bottom: 32px;
 `;
 
-const ReceiptSection = styled.div`
+const ReceiptCard = styled.div`
   background: #f8f9fa;
-  padding: 20px;
-  border-radius: 12px;
+  padding: 24px;
+  border-radius: 16px;
   border-left: 4px solid #34B89C;
 `;
 
-const ReceiptLabel = styled.h3`
-  font-size: 18px;
-  font-weight: 600;
-  color: #2c3e50;
-  margin: 0 0 16px 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-`;
-
-const ReceiptItem = styled.div`
+const CardHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #e0e0e0;
+  margin-bottom: 20px;
+`;
+
+const CardTitle = styled.h3`
+  font-size: 20px;
+  font-weight: 600;
+  color: #2c3e50;
+  margin: 0;
+`;
+
+const StatusBadge = styled.span`
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
   
-  &:last-child {
-    margin-bottom: 0;
-    border-bottom: none;
-    padding-bottom: 0;
+  &.success {
+    background-color: #d4edda;
+    color: #155724;
   }
 `;
 
-const ReceiptItemLabel = styled.span`
+const DetailsGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+`;
+
+const DetailItem = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+`;
+
+const DetailLabel = styled.span`
+  font-size: 14px;
   color: #7f8c8d;
   font-weight: 500;
 `;
 
-const ReceiptItemValue = styled.span`
+const DetailValue = styled.span`
+  font-size: 16px;
   color: #2c3e50;
   font-weight: 600;
   
-  &.success {
-    color: #27AE60;
+  &.price {
+    color: #34B89C;
+    font-size: 18px;
   }
 `;
 
-const ReceiptTotal = styled.div`
+const InfoBox = styled.div`
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 0;
-  margin-top: 12px;
-  border-top: 2px solid #34B89C;
-  background: white;
-  border-radius: 8px;
-  padding: 16px;
+  align-items: flex-start;
+  gap: 16px;
+  background: #e3f2fd;
+  padding: 20px;
+  border-radius: 12px;
+  border-left: 4px solid #2196f3;
 `;
 
-const ReceiptTotalLabel = styled.span`
-  font-size: 18px;
-  font-weight: 700;
-  color: #2c3e50;
+const InfoIcon = styled.div`
+  font-size: 24px;
+  margin-top: 4px;
 `;
 
-const ReceiptTotalValue = styled.span`
-  font-size: 20px;
-  font-weight: 700;
-  color: #34B89C;
+const InfoContent = styled.div`
+  flex: 1;
 `;
 
-const ClinicInfo = styled.div`
-  text-align: center;
+const InfoTitle = styled.h4`
+  font-size: 16px;
+  font-weight: 600;
+  color: #1565c0;
+  margin: 0 0 12px 0;
 `;
 
-const ClinicName = styled.h4`
-  font-size: 20px;
-  font-weight: 700;
-  color: #34B89C;
-  margin: 0 0 8px 0;
-`;
-
-const ClinicDetails = styled.p`
-  font-size: 14px;
-  color: #7f8c8d;
-  margin: 0 0 8px 0;
-`;
-
-const ClinicNote = styled.p`
-  font-size: 12px;
-  color: #95a5a6;
+const InfoList = styled.ul`
   margin: 0;
-  font-style: italic;
+  padding-left: 16px;
+`;
+
+const InfoItem = styled.li`
+  font-size: 14px;
+  color: #37474f;
+  margin-bottom: 8px;
+  
+  &:last-child {
+    margin-bottom: 0;
+  }
 `;
 
 const ReceiptActions = styled.div`
@@ -1684,9 +1945,10 @@ const ReceiptButton = styled.button`
   align-items: center;
   justify-content: center;
   gap: 8px;
+  border: none;
+  font-size: 16px;
   
   &.primary {
-    border: none;
     background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
     color: white;
     
@@ -1698,17 +1960,201 @@ const ReceiptButton = styled.button`
   }
   
   &.secondary {
-    border: 2px solid #34B89C;
-    background: white;
-    color: #34B89C;
+    background: #f8f9fa;
+    color: #6c757d;
+    border: 2px solid #dee2e6;
     
     &:hover {
-      background: #f0f8ff;
-      transform: translateY(-2px);
+      background: #e9ecef;
+      border-color: #6c757d;
     }
   }
 `;
 
 const PrintIcon = styled.span`
   font-size: 16px;
+`;
+
+// 🔹 UPDATED: Printable Receipt Styled Components
+const PrintOverlay = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  padding: 20px;
+`;
+
+const PrintContainer = styled.div`
+  background: white;
+  border-radius: 12px;
+  padding: 32px;
+  max-width: 500px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: ${fadeIn} 0.3s ease-out;
+`;
+
+const PrintHeader = styled.div`
+  text-align: center;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid #e0e0e0;
+`;
+
+const ClinicNamePrint = styled.h1`
+  font-size: 24px;
+  font-weight: bold;
+  color: #34B89C;
+  margin: 0 0 8px 0;
+`;
+
+const ReceiptTitlePrint = styled.h2`
+  font-size: 18px;
+  font-weight: bold;
+  margin: 8px 0;
+  color: #2c3e50;
+`;
+
+const ReceiptSubtitlePrint = styled.p`
+  color: #27AE60;
+  font-weight: 600;
+  margin: 0;
+`;
+
+const PrintSection = styled.div`
+  margin-bottom: 20px;
+`;
+
+const SectionTitlePrint = styled.h3`
+  font-weight: bold;
+  color: #2c3e50;
+  margin-bottom: 12px;
+  font-size: 16px;
+  border-bottom: 1px solid #e0e0e0;
+  padding-bottom: 4px;
+`;
+
+const PrintItem = styled.div`
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+`;
+
+const ItemLabel = styled.span`
+  color: #666;
+`;
+
+const ItemValue = styled.span`
+  font-weight: 600;
+  
+  &.success {
+    color: #27AE60;
+  }
+`;
+
+const PrintTotal = styled.div`
+  display: flex;
+  justify-content: space-between;
+  font-size: 18px;
+  font-weight: bold;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 2px solid #34B89C;
+`;
+
+const TotalLabel = styled.span`
+  color: #2c3e50;
+`;
+
+const TotalValue = styled.span`
+  color: #34B89C;
+`;
+
+const ThankYouPrint = styled.div`
+  text-align: center;
+  font-weight: bold;
+  margin: 16px 0;
+  color: #34B89C;
+  font-size: 16px;
+`;
+
+const ClinicInfoPrint = styled.div`
+  text-align: center;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #e0e0e0;
+  font-size: 12px;
+  color: #666;
+`;
+
+const ClinicNameSmall = styled.div`
+  font-weight: bold;
+  margin-bottom: 4px;
+`;
+
+const ClinicAddress = styled.div`
+  margin-bottom: 4px;
+`;
+
+const ClinicContact = styled.div`
+  margin-bottom: 8px;
+`;
+
+const ClinicNote = styled.div`
+  font-style: italic;
+`;
+
+const PrintActions = styled.div`
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+  
+  @media (max-width: 480px) {
+    flex-direction: column;
+  }
+`;
+
+const PrintButton = styled.button`
+  padding: 12px 20px;
+  border: none;
+  border-radius: 8px;
+  background: #34B89C;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  
+  &:hover {
+    background: #2ca189;
+    transform: translateY(-1px);
+  }
+`;
+
+const CloseButton = styled.button`
+  padding: 12px 20px;
+  border: 2px solid #e74c3c;
+  border-radius: 8px;
+  background: white;
+  color: #e74c3c;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex: 1;
+  
+  &:hover {
+    background: #ffeaea;
+  }
 `;
