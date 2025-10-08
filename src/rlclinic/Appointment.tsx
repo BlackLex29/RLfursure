@@ -162,34 +162,28 @@ const useAppointmentData = () => {
             return;
           }
 
-          console.log("🔄 Fetching pets for user:", user.uid, user.email);
-
-          // ✅ FIXED: Query pets collection with correct field name
-      const petsQuery = query(
-  collection(db, "pets"), 
-  where("ownerId", "==", user.uid) // Now both work
-  // OR: where("ownerEmail", "==", user.email)
-);
+        // ✅ FIXED: Query pets collection
+        const petsQuery = query(
+          collection(db, "pets"), 
+          where("ownerId", "==", user.uid)
+        );
+        
+        const petsSnapshot = await getDocs(petsQuery);
+        
+        const userPets: Pet[] = [];
+        petsSnapshot.forEach((doc) => {
+          const petData = doc.data();
+          const petName = petData.petName || petData.name || "Unnamed Pet";
           
-          const petsSnapshot = await getDocs(petsQuery);
-          console.log("📊 Pets snapshot size:", petsSnapshot.size);
-          
-          const userPets: Pet[] = [];
-          petsSnapshot.forEach((doc) => {
-            const petData = doc.data();
-            console.log("🐾 Pet data:", petData);
-            
-            // ✅ FIXED: Handle both possible field names
-            const petName = petData.petName || petData.name || "Unnamed Pet";
-            
+          if (petData.ownerId === user.uid) {
             userPets.push({ 
               id: doc.id, 
               name: petName
             });
-          });
-          
-          console.log("✅ Final pets array:", userPets);
-          setPets(userPets);
+          }
+        });
+        
+        setPets(userPets);
 
           // Fetch doctors
           const doctorsSnapshot = await getDocs(query(collection(db, "users"), where("role", "==", "veterinarian")));

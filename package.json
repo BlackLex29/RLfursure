@@ -2,12 +2,15 @@
   "name": "rlclinic",
   "version": "0.1.0",
   "private": true,
-  "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
-  },
+"scripts": {
+  "dev": "next dev --turbopack",
+  "build": "next build",
+  "export": "next export",
+  "start": "next start",
+  "lint": "next lint",
+  "deploy": "npm run build && npm run export && firebase deploy"
+}
+,
   "dependencies": {
     "@emailjs/browser": "^4.4.1",
     "@getbrevo/brevo": "^3.0.1",
