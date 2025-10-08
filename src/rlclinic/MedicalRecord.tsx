@@ -41,7 +41,7 @@ interface MedicalRecord {
   date: string;
   notes: string;
   veterinarian: string;
-  createdAt: Date | null;
+  createdAt: any;
   status?: string;
   petId?: string;
   appointmentId?: string;
@@ -226,7 +226,7 @@ const MedicalRecord: React.FC = () => {
           appointmentType: data.appointmentType || "",
           status: data.status || "completed",
           petId: data.petId || "",
-          createdAt: data.createdAt?.toDate?.() || null
+          createdAt: data.createdAt || null
         } as MedicalRecord);
       });
       
