@@ -389,7 +389,7 @@ const Admindashboard: React.FC = () => {
       setVerificationCode("")
       setOtpSent(false)
       alert("Two-Factor Authentication enabled successfully!")
-    } catch (error) {
+    } catch  {
       alert("Failed to verify OTP. Please try again.")
     }
   }

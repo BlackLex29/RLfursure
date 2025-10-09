@@ -485,7 +485,7 @@ const UserDashboard: React.FC = () => {
       setVerificationCode("")
       setOtpSent(false)
       showSuccess("Two-Factor Authentication enabled successfully!")
-    } catch (error) {
+    } catch {
       alert("Failed to verify OTP. Please try again.")
     }
   }
