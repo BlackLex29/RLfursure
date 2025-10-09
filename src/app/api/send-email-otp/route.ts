@@ -36,7 +36,6 @@ export async function POST(request: NextRequest) {
     const OTP_CODE = generateOTP();
     console.log('🔐 Generated OTP for:', email);
 
-    // Create hash to verify later
     const timestamp = Date.now();
     const otpHash = Buffer.from(`${email.toLowerCase()}:${OTP_CODE}:${timestamp}`).toString('base64');
     const expiresAt = timestamp + (OTP_EXPIRY_MINUTES * 60 * 1000);
@@ -70,17 +69,16 @@ function generateOTP(): string {
 }
 
 async function sendEmailWithBrevo(email: string, name: string, otp: string): Promise<void> {
-  // Configure the API instance with the API key
   const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
   
-  // Set the API key using the authentic property
   apiInstance.setApiKey(SibApiV3Sdk.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY!);
 
+  // IMPORTANT: Use exact sender name and email from Brevo dashboard
   await apiInstance.sendTransacEmail({
     subject: `Your FurSureCare Verification Code: ${otp}`,
     sender: {
-      name: process.env.BREVO_SENDER_NAME || 'FurSureCare',
-      email: process.env.BREVO_SENDER_EMAIL || 'lextermilo@gmail.com'
+      name: 'FURSURE',
+      email: 'lextermilo@gmail.com'
     },
     to: [{ email, name }],
     htmlContent: `
@@ -92,23 +90,23 @@ async function sendEmailWithBrevo(email: string, name: string, otp: string): Pro
       <td align="center">
         <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
           <tr>
-            <td style="background:#3BB5AD;padding:30px;text-align:center;">
-              <h1 style="color:#fff;margin:0;font-size:28px;"> FurSureCare</h1>
+            <td style="background:#20c997;padding:30px;text-align:center;">
+              <h1 style="color:#fff;margin:0;font-size:28px;">🐾 FurSureCare</h1>
             </td>
           </tr>
           <tr>
             <td style="padding:40px 30px;">
               <h2 style="color:#333;margin:0 0 20px 0;">Hi ${name}!</h2>
               <p style="color:#666;font-size:16px;margin:0 0 20px 0;">Your verification code is:</p>
-              <div style="background:#F3F4F6;border:2px dashed #27d18aff;border-radius:8px;padding:20px;text-align:center;margin:20px 0;">
-                <span style="font-size:36px;font-weight:bold;color:#4F46E5;letter-spacing:8px;">${otp}</span>
+              <div style="background:#F3F4F6;border:2px dashed #20c997;border-radius:8px;padding:20px;text-align:center;margin:20px 0;">
+                <span style="font-size:36px;font-weight:bold;color:#20c997;letter-spacing:8px;">${otp}</span>
               </div>
               <p style="color:#666;font-size:14px;margin:20px 0 0 0;">This code expires in <strong>10 minutes</strong>. Don't share it with anyone.</p>
             </td>
           </tr>
           <tr>
             <td style="background:#F9FAFB;padding:20px 30px;text-align:center;">
-              <p style="color:#999;font-size:12px;margin:0;">© ${new Date().getFullYear()} FurSureCare</p>
+              <p style="color:#999;font-size:12px;margin:0;">© ${new Date().getFullYear()} FurSureCare Veterinary Clinic</p>
             </td>
           </tr>
         </table>
