@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import styled, { createGlobalStyle } from "styled-components";
 import { useRouter } from "next/navigation";
 import { db, auth } from "../firebaseConfig";
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy, setDoc } from "firebase/firestore";
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy } from "firebase/firestore";
 import { onAuthStateChanged, User } from "firebase/auth";
 
 const GlobalStyle = createGlobalStyle`
@@ -41,7 +41,7 @@ interface MedicalRecord {
   date: string;
   notes: string;
   veterinarian: string;
-  createdAt: any;
+  createdAt: Date | null;
   status?: string;
   petId?: string;
   appointmentId?: string;
@@ -226,7 +226,7 @@ const MedicalRecord: React.FC = () => {
           appointmentType: data.appointmentType || "",
           status: data.status || "completed",
           petId: data.petId || "",
-          createdAt: data.createdAt || null
+          createdAt: data.createdAt?.toDate?.() || null
         } as MedicalRecord);
       });
       

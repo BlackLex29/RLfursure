@@ -57,78 +57,134 @@ const Login: React.FC = () => {
     return Math.floor(100000 + Math.random() * 900000).toString();
   };
 
-const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-  e.preventDefault();
-  setLoading(true);
-  setError("");
-  setOtpRequired(false);
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    setOtpRequired(false);
 
-  try {
-    console.log("🔄 Attempting login with:", email);
-    
-    // Sign in with Firebase Auth
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
-    console.log("✅ Firebase auth success, user ID:", user.uid);
-    
-    // Wait for auth state to propagate
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    console.log("🔑 Current auth state:", auth.currentUser?.uid);
-    console.log("📊 Auth current user:", auth.currentUser);
-    
-    // Get user data from Firestore
-    console.log("📄 Attempting to fetch user document...");
-    const userDocRef = doc(db, "users", user.uid);
-    const userDoc = await getDoc(userDocRef);
-    
-    console.log("✅ User document fetched successfully");
-    console.log("📄 User document exists:", userDoc.exists());
-    
-    if (!userDoc.exists()) {
-      console.log("❌ No user document found for UID:", user.uid);
-      setError("User profile not found. Please contact administrator.");
-      await auth.signOut();
-      return;
-    }
+    try {
+      console.log("🔄 Attempting login with:", email);
+      
+      // Sign in with Firebase Auth
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+      console.log("✅ Firebase auth success, user ID:", user.uid);
+      
+      // Wait for auth state to propagate
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      console.log("🔑 Current auth state:", auth.currentUser?.uid);
+      console.log("📊 Auth current user:", auth.currentUser);
+      
+      // Get user data from Firestore
+      console.log("📄 Attempting to fetch user document...");
+      const userDocRef = doc(db, "users", user.uid);
+      const userDoc = await getDoc(userDocRef);
+      
+      console.log("✅ User document fetched successfully");
+      console.log("📄 User document exists:", userDoc.exists());
+      
+      if (!userDoc.exists()) {
+        console.log("❌ No user document found for UID:", user.uid);
+        setError("User profile not found. Please contact administrator.");
+        await auth.signOut();
+        return;
+      }
 
-    const userData = userDoc.data() as UserRole;
-    console.log("👤 User data:", userData);
-    console.log("🔐 2FA enabled:", userData.twoFactorEnabled);
-    console.log("🎯 User role:", userData.role);
-    
-    if (userData.twoFactorEnabled) {
-      console.log("🔐 2FA required, proceeding with OTP flow...");
-      // ... rest of your 2FA code
-    } else {
-      console.log("🎯 No 2FA required, navigating to:", userData.role);
-      navigateBasedOnRole(userData.role);
+      const userData = userDoc.data() as UserRole;
+      console.log("👤 User data:", userData);
+      console.log("🔐 2FA enabled:", userData.twoFactorEnabled);
+      console.log("🎯 User role:", userData.role);
+      
+      if (userData.twoFactorEnabled) {
+        console.log("🔐 2FA required, proceeding with OTP flow...");
+        
+        // Generate OTP
+        const otp = generateOTP();
+        const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+        
+        const userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || userData.email;
+        console.log("📧 Sending OTP to:", userData.email);
+        
+        // Send OTP via email API
+        const response = await fetch('/api/send-email-otp', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: userData.email,
+            otp: otp,
+            name: userName
+          }),
+        });
+
+        const data = await response.json();
+        console.log("📨 Email API response:", data);
+        
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to send verification code. Please try again.");
+        }
+
+        console.log("💾 Storing verification code in Firestore...");
+        await setDoc(doc(db, "verificationCodes", user.uid), {
+          code: otp,
+          otpHash: data.otpHash,
+          email: userData.email.toLowerCase(),
+          createdAt: Date.now(),
+          expiresAt: expiresAt,
+          verified: false
+        });
+
+        console.log("🚪 Signing out for OTP verification...");
+        await auth.signOut();
+        
+        // Set state for OTP verification
+        setUserId(user.uid);
+        setUserRole(userData.role);
+        setOtpRequired(true);
+        setError("✅ A verification code has been sent to your email.");
+        
+      } else {
+        console.log("🎯 No 2FA required, navigating to:", userData.role);
+        navigateBasedOnRole(userData.role);
+      }
+      
+    } catch (err) {
+      const firebaseError = err as FirebaseError;
+      console.error("❌ Login error:", firebaseError);
+      
+      if (firebaseError?.code === "permission-denied") {
+        console.error("🔐 Firestore Permission Details:", {
+          currentUser: auth.currentUser?.uid,
+          errorCode: firebaseError.code,
+          errorMessage: firebaseError.message
+        });
+        setError("Database access denied. Please check Firestore rules or contact support.");
+      } else if (firebaseError?.code === "auth/invalid-credential") {
+        setError("Invalid email or password.");
+      } else if (firebaseError?.code === "auth/user-not-found") {
+        setError("No account found with this email.");
+      } else if (firebaseError?.code === "auth/wrong-password") {
+        setError("Invalid email or password.");
+      } else if (firebaseError?.code === "auth/too-many-requests") {
+        setError("Too many failed attempts. Please try again later.");
+      } else {
+        setError(firebaseError?.message || "An error occurred during authentication.");
+      }
+      
+      // Sign out only on error
+      try {
+        await auth.signOut();
+      } catch (signOutError) {
+        console.log("Sign out error:", signOutError);
+      }
+    } finally {
+      setLoading(false);
     }
-    
-  } catch (err) {
-    const firebaseError = err as FirebaseError;
-    console.error("❌ Login error:", firebaseError);
-    
-    if (firebaseError?.code === "permission-denied") {
-      console.error("🔐 Firestore Permission Details:", {
-        currentUser: auth.currentUser?.uid,
-        errorCode: firebaseError.code,
-        errorMessage: firebaseError.message
-      });
-      setError("Database access denied. Please check Firestore rules or contact support.");
-    } else if (firebaseError?.code === "auth/invalid-credential") {
-      setError("Invalid email or password.");
-    } else if (firebaseError?.code === "auth/user-not-found") {
-      setError("No account found with this email.");
-    } else {
-      setError(firebaseError?.message || "An error occurred during authentication.");
-    }
-    
-    await auth.signOut();
-  } finally {
-    setLoading(false);
-  }
-};
+  };
+
   const navigateBasedOnRole = (role: string) => {
     console.log("Navigating based on role:", role);
     switch (role) {
@@ -149,176 +205,176 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     setShowPassword(!showPassword);
   };
 
-const handleOTPVerification = async (e: React.FormEvent) => {
-  e.preventDefault();
-  
-  if (!otpCode || otpCode.length !== 6) {
-    setError("Please enter a valid 6-digit code.");
-    return;
-  }
-
-  setOtpLoading(true);
-  setError("");
-
-  try {
-    console.log("🔐 Verifying OTP for user:", userId);
-    console.log("⌨️ OTP entered:", otpCode);
+  const handleOTPVerification = async (e: React.FormEvent) => {
+    e.preventDefault();
     
-    const otpDoc = await getDoc(doc(db, "verificationCodes", userId));
-    console.log("📄 OTP document exists:", otpDoc.exists());
+    if (!otpCode || otpCode.length !== 6) {
+      setError("Please enter a valid 6-digit code.");
+      return;
+    }
+
+    setOtpLoading(true);
+    setError("");
+
+    try {
+      console.log("🔐 Verifying OTP for user:", userId);
+      console.log("⌨️ OTP entered:", otpCode);
+      
+      const otpDoc = await getDoc(doc(db, "verificationCodes", userId));
+      console.log("📄 OTP document exists:", otpDoc.exists());
+      
+      if (!otpDoc.exists()) {
+        throw new Error("Verification code has expired. Please login again.");
+      }
+
+      const otpData = otpDoc.data();
+      console.log("📋 OTP data from Firestore:", otpData);
+      console.log("🔢 Stored OTP code:", otpData.code);
+      console.log("⌨️ Entered OTP code:", otpCode);
+      console.log("⏰ Expires at:", new Date(otpData.expiresAt).toLocaleString());
+      console.log("🕒 Current time:", new Date().toLocaleString());
+
+      if (Date.now() > otpData.expiresAt) {
+        await deleteDoc(doc(db, "verificationCodes", userId));
+        throw new Error("Verification code has expired. Please request a new one.");
+      }
+
+      let verificationSuccessful = false;
+
+      // Method 1: Direct code comparison
+      if (otpData.code && otpData.code === otpCode) {
+        console.log("✅ OTP verification successful via direct code");
+        verificationSuccessful = true;
+      }
+      // Method 2: API verification
+      else if (otpData.otpHash) {
+        console.log("🌐 Attempting API verification...");
+        const response = await fetch('/api/verify-otp', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: email.toLowerCase(),
+            otp: otpCode,
+            otpHash: otpData.otpHash,
+            expiresAt: otpData.expiresAt
+          }),
+        });
+
+        const data = await response.json();
+        console.log("📨 OTP verification API response:", data);
+        
+        if (response.ok && data.success) {
+          console.log("✅ OTP verification successful via API");
+          verificationSuccessful = true;
+        } else {
+          throw new Error(data.error || 'Invalid verification code');
+        }
+      } else {
+        throw new Error("Invalid verification code format.");
+      }
+
+      if (verificationSuccessful) {
+        console.log("✅ OTP verification successful, cleaning up...");
+        await deleteDoc(doc(db, "verificationCodes", userId));
+        
+        console.log("🔑 Re-authenticating user...");
+        // Re-authenticate user for 2FA flow
+        await signInWithEmailAndPassword(auth, email, password);
+        
+        console.log("🧭 Navigation to:", userRole);
+        navigateBasedOnRole(userRole);
+      }
+    } catch (err) {
+      const firebaseError = err as FirebaseError;
+      console.error("❌ OTP verification error:", firebaseError);
+      setError(firebaseError?.message || "Verification failed. Please try again.");
+      setOtpCode("");
+    } finally {
+      setOtpLoading(false);
+    }
+  };  
+
+  const handleResendOTP = async () => {
+    if (resendCooldown > 0) return;
+
+    console.log("Resending OTP for user:", userId);
+    setResendCooldown(60);
     
-    if (!otpDoc.exists()) {
-      throw new Error("Verification code has expired. Please login again.");
-    }
+    const interval = setInterval(() => {
+      setResendCooldown((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
 
-    const otpData = otpDoc.data();
-    console.log("📋 OTP data from Firestore:", otpData);
-    console.log("🔢 Stored OTP code:", otpData.code);
-    console.log("⌨️ Entered OTP code:", otpCode);
-    console.log("⏰ Expires at:", new Date(otpData.expiresAt).toLocaleString());
-    console.log("🕒 Current time:", new Date().toLocaleString());
+    try {
+      const userDoc = await getDoc(doc(db, "users", userId));
+      
+      if (!userDoc.exists()) {
+        throw new Error("User data not found. Please login again.");
+      }
 
-    if (Date.now() > otpData.expiresAt) {
-      await deleteDoc(doc(db, "verificationCodes", userId));
-      throw new Error("Verification code has expired. Please request a new one.");
-    }
+      const userData = userDoc.data() as UserRole;
+      const userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || email;
+      
+      const newOtp = generateOTP();
+      const expiresAt = Date.now() + 10 * 60 * 1000;
 
-    let verificationSuccessful = false;
-
-    // Method 1: Direct code comparison
-    if (otpData.code && otpData.code === otpCode) {
-      console.log("✅ OTP verification successful via direct code");
-      verificationSuccessful = true;
-    }
-    // Method 2: API verification
-    else if (otpData.otpHash) {
-      console.log("🌐 Attempting API verification...");
-      const response = await fetch('/api/verify-otp', {
+      console.log("Sending new OTP to:", email);
+      console.log("New OTP:", newOtp);
+      
+      const response = await fetch('/api/send-email-otp', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          email: email.toLowerCase(),
-          otp: otpCode,
-          otpHash: otpData.otpHash,
-          expiresAt: otpData.expiresAt
+          email: email,
+          otp: newOtp,
+          name: userName
         }),
       });
 
       const data = await response.json();
-      console.log("📨 OTP verification API response:", data);
-      
-      if (response.ok && data.success) {
-        console.log("✅ OTP verification successful via API");
-        verificationSuccessful = true;
-      } else {
-        throw new Error(data.error || 'Invalid verification code');
+      console.log("Resend OTP API response:", data);
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send verification code');
       }
-    } else {
-      throw new Error("Invalid verification code format.");
-    }
 
-    if (verificationSuccessful) {
-      console.log("✅ OTP verification successful, cleaning up...");
-      await deleteDoc(doc(db, "verificationCodes", userId));
-      
-      console.log("🔑 Re-authenticating user...");
-      // Re-authenticate user for 2FA flow
-      await signInWithEmailAndPassword(auth, email, password);
-      
-      console.log("🧭 Navigation to:", userRole);
-      navigateBasedOnRole(userRole);
-    }
-  } catch (err) {
-    const firebaseError = err as FirebaseError;
-    console.error("❌ OTP verification error:", firebaseError);
-    setError(firebaseError?.message || "Verification failed. Please try again.");
-    setOtpCode("");
-  } finally {
-    setOtpLoading(false);
-  }
-};  
-
-const handleResendOTP = async () => {
-  if (resendCooldown > 0) return;
-
-  console.log("Resending OTP for user:", userId);
-  setResendCooldown(60);
-  
-  const interval = setInterval(() => {
-    setResendCooldown((prev) => {
-      if (prev <= 1) {
-        clearInterval(interval);
-        return 0;
+      console.log("Storing new verification code...");
+      // Delete old OTP first
+      try {
+        await deleteDoc(doc(db, "verificationCodes", userId));
+      } catch {
+        console.log("No existing OTP to delete");
       }
-      return prev - 1;
-    });
-  }, 1000);
-
-  try {
-    const userDoc = await getDoc(doc(db, "users", userId));
-    
-    if (!userDoc.exists()) {
-      throw new Error("User data not found. Please login again.");
+      
+      // Store new OTP
+      await setDoc(doc(db, "verificationCodes", userId), {
+        code: newOtp,
+        otpHash: data.otpHash,
+        email: email.toLowerCase(),
+        createdAt: Date.now(),
+        expiresAt: expiresAt,
+        verified: false
+      });
+      
+      console.log("New OTP stored successfully");
+      setError("✅ A new verification code has been sent to your email.");
+      setOtpCode("");
+    } catch (error) {
+      const firebaseError = error as FirebaseError;
+      console.error("❌ Resend OTP error:", firebaseError);
+      setError("❌ Failed to resend code. Please try again.");
+      setResendCooldown(0); // Reset cooldown on error
     }
-
-    const userData = userDoc.data() as UserRole;
-    const userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || email;
-    
-    const newOtp = generateOTP();
-    const expiresAt = Date.now() + 10 * 60 * 1000;
-
-    console.log("Sending new OTP to:", email);
-    console.log("New OTP:", newOtp);
-    
-    const response = await fetch('/api/send-email-otp', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email: email,
-        otp: newOtp,
-        name: userName
-      }),
-    });
-
-    const data = await response.json();
-    console.log("Resend OTP API response:", data);
-
-    if (!response.ok) {
-      throw new Error(data.error || 'Failed to send verification code');
-    }
-
-    console.log("Storing new verification code...");
-    // Delete old OTP first
-    try {
-      await deleteDoc(doc(db, "verificationCodes", userId));
-    } catch (deleteError) {
-      console.log("No existing OTP to delete");
-    }
-    
-    // Store new OTP
-    await setDoc(doc(db, "verificationCodes", userId), {
-      code: newOtp,
-      otpHash: data.otpHash,
-      email: email.toLowerCase(),
-      createdAt: Date.now(),
-      expiresAt: expiresAt,
-      verified: false
-    });
-    
-    console.log("New OTP stored successfully");
-    setError("✅ A new verification code has been sent to your email.");
-    setOtpCode("");
-  } catch (error) {
-    const firebaseError = error as FirebaseError;
-    console.error("❌ Resend OTP error:", firebaseError);
-    setError("❌ Failed to resend code. Please try again.");
-    setResendCooldown(0); // Reset cooldown on error
-  }
-};  
+  };  
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -348,8 +404,6 @@ const handleResendOTP = async () => {
         }),
       });
 
-      
-
       const data = await response.json();
       console.log("Password reset API response:", data);
 
@@ -361,7 +415,7 @@ const handleResendOTP = async () => {
       await sendPasswordResetEmail(auth, resetEmail);
 
       setResetSuccess(true);
-      setError("Password reset link has been sent to your email!");
+      setError("✅ Password reset link has been sent to your email!");
       
       setTimeout(() => {
         setShowForgotPassword(false);
@@ -405,114 +459,113 @@ const handleResendOTP = async () => {
     router.push("/createaccount");
   };
 
- const handleGoogleLogin = async () => {
-  console.log("🔵 Google login clicked");
-  setLoading(true);
-  setError("");
+  const handleGoogleLogin = async () => {
+    console.log("🔵 Google login clicked");
+    setLoading(true);
+    setError("");
 
-  try {
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({
-      prompt: 'select_account'
-    });
-    
-    console.log("🌐 Initiating Google sign-in...");
-    const result = await signInWithPopup(auth, provider);
-    const user = result.user;
-    console.log("✅ Google sign-in successful, user ID:", user.uid);
-    
-    const userDoc = await getDoc(doc(db, "users", user.uid));
-    
-    if (userDoc.exists()) {
-      const userData = userDoc.data() as UserRole;
-      console.log("👤 Existing user data:", userData);
-      
-      if (userData.twoFactorEnabled) {
-        console.log("🔐 2FA required for Google user, generating OTP...");
-        const otp = generateOTP();
-        const expiresAt = Date.now() + 10 * 60 * 1000;
-        
-        const userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || userData.email;
-        console.log("📧 Sending OTP to:", userData.email);
-        
-        const emailResponse = await fetch('/api/send-email-otp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            email: userData.email,
-            otp: otp,
-            name: userName
-          }),
-        });
-
-        const emailData = await emailResponse.json();
-        console.log("📨 Email API response:", emailData);
-        
-        if (!emailResponse.ok) {
-          throw new Error(emailData.error || "Failed to send verification code. Please try again.");
-        }
-
-        console.log("💾 Storing verification code in Firestore...");
-        await setDoc(doc(db, "verificationCodes", user.uid), {
-          code: otp,
-          otpHash: emailData.otpHash,
-          email: userData.email.toLowerCase(),
-          createdAt: Date.now(),
-          expiresAt: expiresAt,
-          verified: false
-        });
-
-        console.log("🚪 Signing out for OTP verification...");
-        await auth.signOut();
-        
-        setUserId(user.uid);
-        setUserRole(userData.role);
-        setEmail(userData.email);
-        setOtpRequired(true);
-        setError("✅ A verification code has been sent to your email.");
-      } else {
-        console.log("🎯 No 2FA required, navigating to:", userData.role);
-        // DITO IMPORTANTE - WAG MAG-SIGNOUT KAPAG WALANG 2FA
-        navigateBasedOnRole(userData.role);
-      }
-    } else {
-      console.log("🆕 New Google user, creating user document...");
-      const newUserData: UserRole = {
-        role: 'user',
-        firstName: user.displayName?.split(' ')[0] || '',
-        lastName: user.displayName?.split(' ').slice(1).join(' ') || '',
-        email: user.email || '',
-        twoFactorEnabled: false
-      };
-      
-      await setDoc(doc(db, "users", user.uid), newUserData);
-      console.log("✅ User document created, navigating to user dashboard");
-      navigateBasedOnRole('user');
-    }
-  } catch (err) {
-    const firebaseError = err as FirebaseError;
-    console.error("❌ Google login error:", firebaseError);
-    
-    if (firebaseError?.code === "auth/popup-closed-by-user") {
-      setError("Sign-in cancelled. Please try again.");
-    } else if (firebaseError?.code === "auth/popup-blocked") {
-      setError("Pop-up was blocked. Please allow pop-ups for this site.");
-    } else {
-      setError(firebaseError?.message || "Failed to sign in with Google. Please try again.");
-    }
-    
-    // Sign out only on error
     try {
-      await auth.signOut();
-    } catch (signOutError) {
-      console.log("Sign out error:", signOutError);
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({
+        prompt: 'select_account'
+      });
+      
+      console.log("🌐 Initiating Google sign-in...");
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+      console.log("✅ Google sign-in successful, user ID:", user.uid);
+      
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+      
+      if (userDoc.exists()) {
+        const userData = userDoc.data() as UserRole;
+        console.log("👤 Existing user data:", userData);
+        
+        if (userData.twoFactorEnabled) {
+          console.log("🔐 2FA required for Google user, generating OTP...");
+          const otp = generateOTP();
+          const expiresAt = Date.now() + 10 * 60 * 1000;
+          
+          const userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || userData.email;
+          console.log("📧 Sending OTP to:", userData.email);
+          
+          const emailResponse = await fetch('/api/send-email-otp', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              email: userData.email,
+              otp: otp,
+              name: userName
+            }),
+          });
+
+          const emailData = await emailResponse.json();
+          console.log("📨 Email API response:", emailData);
+          
+          if (!emailResponse.ok) {
+            throw new Error(emailData.error || "Failed to send verification code. Please try again.");
+          }
+
+          console.log("💾 Storing verification code in Firestore...");
+          await setDoc(doc(db, "verificationCodes", user.uid), {
+            code: otp,
+            otpHash: emailData.otpHash,
+            email: userData.email.toLowerCase(),
+            createdAt: Date.now(),
+            expiresAt: expiresAt,
+            verified: false
+          });
+
+          console.log("🚪 Signing out for OTP verification...");
+          await auth.signOut();
+          
+          setUserId(user.uid);
+          setUserRole(userData.role);
+          setEmail(userData.email);
+          setOtpRequired(true);
+          setError("✅ A verification code has been sent to your email.");
+        } else {
+          console.log("🎯 No 2FA required, navigating to:", userData.role);
+          navigateBasedOnRole(userData.role);
+        }
+      } else {
+        console.log("🆕 New Google user, creating user document...");
+        const newUserData: UserRole = {
+          role: 'user',
+          firstName: user.displayName?.split(' ')[0] || '',
+          lastName: user.displayName?.split(' ').slice(1).join(' ') || '',
+          email: user.email || '',
+          twoFactorEnabled: false
+        };
+        
+        await setDoc(doc(db, "users", user.uid), newUserData);
+        console.log("✅ User document created, navigating to user dashboard");
+        navigateBasedOnRole('user');
+      }
+    } catch (err) {
+      const firebaseError = err as FirebaseError;
+      console.error("❌ Google login error:", firebaseError);
+      
+      if (firebaseError?.code === "auth/popup-closed-by-user") {
+        setError("Sign-in cancelled. Please try again.");
+      } else if (firebaseError?.code === "auth/popup-blocked") {
+        setError("Pop-up was blocked. Please allow pop-ups for this site.");
+      } else {
+        setError(firebaseError?.message || "Failed to sign in with Google. Please try again.");
+      }
+      
+      // Sign out only on error
+      try {
+        await auth.signOut();
+      } catch (signOutError) {
+        console.log("Sign out error:", signOutError);
+      }
+    } finally {
+      setLoading(false);
     }
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   return (
     <>
@@ -894,7 +947,7 @@ const StyledInput = styled.input`
   font-size: 1rem;
   transition: all 0.2s ease;
   background: white;
-  width: 100%; // Ensure full width
+  width: 100%;
   
   &:focus {
     outline: none;
@@ -917,7 +970,7 @@ const PasswordContainer = styled.div`
   position: relative;
   display: flex;
   align-items: center;
-  width: 100%; // Add this to ensure full width
+  width: 100%;
 `;
 
 const PasswordToggle = styled.button`
@@ -929,7 +982,7 @@ const PasswordToggle = styled.button`
   padding: 4px;
   border-radius: 4px;
   font-size: 1.1rem;
-  z-index: 2; // Add z-index to ensure it's above the input
+  z-index: 2;
   
   &:hover {
     background: rgba(0, 0, 0, 0.05);
@@ -1170,10 +1223,6 @@ const ResetDescription = styled(OTPDescription)`
   margin-bottom: 1rem;
 `;
 
-const ResetIcon = styled(EmailIcon)`
-  // Same as EmailIcon
-`;
+const ResetIcon = styled(EmailIcon)``;
 
-const ResetText = styled(OTPText)`
-  // Same as OTPText
-`;
+const ResetText = styled(OTPText)``;
