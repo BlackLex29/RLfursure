@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import styled, { createGlobalStyle, keyframes } from "styled-components";
 import { useRouter } from "next/navigation";
 import { db } from "../firebaseConfig";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, getDocs,} from "firebase/firestore";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 // Global Styles

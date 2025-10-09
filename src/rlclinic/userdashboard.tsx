@@ -1,12 +1,13 @@
-'use client';
+"use client"
 
-import React, { useEffect, useState } from "react";
-import styled, { createGlobalStyle } from "styled-components";
-import { useRouter } from "next/navigation";
-import { auth, db, storage } from "../firebaseConfig";
-import { signOut } from "firebase/auth";
-import { collection, onSnapshot, doc, deleteDoc, query, where, updateDoc, getDoc, setDoc } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import type React from "react"
+import { useEffect, useState } from "react"
+import styled, { createGlobalStyle } from "styled-components"
+import { useRouter } from "next/navigation"
+import { auth, db, storage } from "../firebaseConfig"
+import { signOut } from "firebase/auth"
+import { collection, onSnapshot, doc, deleteDoc, query, where, updateDoc, getDoc, setDoc } from "firebase/firestore"
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage"
 
 const GlobalStyle = createGlobalStyle`
   body {
@@ -14,35 +15,73 @@ const GlobalStyle = createGlobalStyle`
     padding: 0;
     box-sizing: border-box;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    background: #f8f9fa;
+    background: #fafafa;
     scroll-behavior: smooth;
   }
   
   * {
     box-sizing: border-box;
   }
-`;
+`
+
+const SidebarStatusBadge = styled.span<{ status: string }>`
+  padding: 0.3rem 0.6rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: ${(props) => {
+    switch (props.status) {
+      case "Done":
+        return "#26ee54"
+      case "Not Attend":
+        return "#99b145"
+      case "Cancelled":
+        return "#f8d7da"
+      default:
+        return "#d1ecf1"
+    }
+  }};
+  color: ${(props) => {
+    switch (props.status) {
+      case "Done":
+        return "#155724"
+      case "Not Attend":
+        return "#721c24"
+      case "Cancelled":
+        return "#721c24"
+      default:
+        return "#0c5460"
+    }
+  }};
+`
 
 interface AppointmentType {
-  id: string;
-  clientName: string;
-  petName: string;
-  date: string;
-  timeSlot: string;
-  status?: string;
-  paymentMethod?: string;
-  appointmentType?: string;
-  completedAt?: string;
-  notes?: string;
-  veterinarian?: string;
+  id: string
+  clientName: string
+  petName: string
+  date: string
+  timeSlot: string
+  status?: string
+  paymentMethod?: string
+  appointmentType?: string
+  completedAt?: string
+  notes?: string
+  veterinarian?: string
 }
 
 interface UserProfile {
-  firstName: string;
-  lastName: string;
-  email: string;
-  profilePicture?: string;
-  twoFactorEnabled?: boolean;
+  firstName: string
+  lastName: string
+  email: string
+  profilePicture?: string
+  twoFactorEnabled?: boolean
+}
+
+interface Pet {
+  id: string
+  name: string
+  petType: string
+  breed: string
 }
 
 const timeSlots = [
@@ -54,358 +93,425 @@ const timeSlots = [
   "2:00 PM–2:30 PM",
   "3:00 PM–3:30 PM",
   "4:00 PM–4:30 PM",
-  "5:00 PM–5:30 PM"
-];
+  "5:00 PM–5:30 PM",
+]
 
 const UserDashboard: React.FC = () => {
-  const router = useRouter();
-  const [appointments, setAppointments] = useState<AppointmentType[]>([]);
-  const [completedAppointments, setCompletedAppointments] = useState<AppointmentType[]>([]);
-  const [editDate, setEditDate] = useState("");
-  const [editSlot, setEditSlot] = useState("");
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isClient, setIsClient] = useState(false);
-  
-  const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [editFirstName, setEditFirstName] = useState("");
-  const [editLastName, setEditLastName] = useState("");
-  const [profilePictureUrl, setProfilePictureUrl] = useState("");
-  const [profilePictureFile, setProfilePictureFile] = useState<File | null>(null);
-  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const router = useRouter()
+  const [appointments, setAppointments] = useState<AppointmentType[]>([])
+  const [completedAppointments, setCompletedAppointments] = useState<AppointmentType[]>([])
+  const [pets, setPets] = useState<Pet[]>([])
+  const [editDate, setEditDate] = useState("")
+  const [editSlot, setEditSlot] = useState("")
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [isClient, setIsClient] = useState(false)
 
-  const [showRescheduleModal, setShowRescheduleModal] = useState(false);
-  const [showCancelModal, setShowCancelModal] = useState(false);
-  const [showHistoryModal, setShowHistoryModal] = useState(false);
-  const [selectedAppointment, setSelectedAppointment] = useState<AppointmentType | null>(null);
-  const [showMedicalRecordsModal, setShowMedicalRecordsModal] = useState(false);
-  const [showHistorySidebar, setShowHistorySidebar] = useState(false);
+  const [isSidebarVisible, setIsSidebarVisible] = useState(true)
 
-  const [showSuccessMessage, setShowSuccessMessage] = useState(false);
-  const [successMessage, setSuccessMessage] = useState("");
+  const [showProfileModal, setShowProfileModal] = useState(false)
+  const [editFirstName, setEditFirstName] = useState("")
+  const [editLastName, setEditLastName] = useState("")
+  const [profilePictureUrl, setProfilePictureUrl] = useState("")
+  const [profilePictureFile, setProfilePictureFile] = useState<File | null>(null)
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false)
 
-  const [today, setToday] = useState('');
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
+  // 2FA States
+  const [show2FAModal, setShow2FAModal] = useState(false)
+  const [showOTPSetup, setShowOTPSetup] = useState(false)
+  const [verificationCode, setVerificationCode] = useState("")
+  const [otpSent, setOtpSent] = useState(false)
+  const [isSendingOTP, setIsSendingOTP] = useState(false)
+  const [otpEmail, setOtpEmail] = useState("")
+
+  const [showRescheduleModal, setShowRescheduleModal] = useState(false)
+  const [showCancelModal, setShowCancelModal] = useState(false)
+  const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [selectedAppointment, setSelectedAppointment] = useState<AppointmentType | null>(null)
+  const [showHistorySidebar, setShowHistorySidebar] = useState(false)
+
+  const [showSuccessMessage, setShowSuccessMessage] = useState(false)
+  const [successMessage, setSuccessMessage] = useState("")
+
+  const [today, setToday] = useState("")
+  const [userEmail, setUserEmail] = useState<string | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
+
+  // New state for active menu item
+  const [activeMenuItem, setActiveMenuItem] = useState<string>("dashboard")
 
   const showSuccess = (message: string) => {
-    setSuccessMessage(message);
-    setShowSuccessMessage(true);
+    setSuccessMessage(message)
+    setShowSuccessMessage(true)
     setTimeout(() => {
-      setShowSuccessMessage(false);
-    }, 3000);
-  };
+      setShowSuccessMessage(false)
+    }, 3000)
+  }
 
   useEffect(() => {
-    setIsClient(true);
-    setToday(new Date().toISOString().split("T")[0]);
-    
+    setIsClient(true)
+    setToday(new Date().toISOString().split("T")[0])
+
     const unsubscribe = auth.onAuthStateChanged((user) => {
       if (user) {
-        setUserEmail(user.email);
-        setUserId(user.uid);
+        setUserEmail(user.email)
+        setUserId(user.uid)
+        setOtpEmail(user.email || "")
       } else {
-        router.push("/");
+        router.push("/")
       }
-    });
+    })
 
-    return () => unsubscribe();
-  }, [router]);
+    return () => unsubscribe()
+  }, [router])
 
   useEffect(() => {
-    if (!userEmail || !userId) return;
+    if (!userEmail || !userId) return
 
     const fetchUserProfile = async () => {
       try {
-        const userDoc = await getDoc(doc(db, "users", userId));
+        const userDoc = await getDoc(doc(db, "users", userId))
         if (userDoc.exists()) {
-          const profileData = userDoc.data() as UserProfile;
-          setUserProfile(profileData);
-          setEditFirstName(profileData.firstName || userEmail.split('@')[0]);
-          setEditLastName(profileData.lastName || "");
-          setProfilePictureUrl(profileData.profilePicture || "");
-          setTwoFactorEnabled(profileData.twoFactorEnabled || false);
+          const profileData = userDoc.data() as UserProfile
+          setUserProfile(profileData)
+          setEditFirstName(profileData.firstName || userEmail.split("@")[0])
+          setEditLastName(profileData.lastName || "")
+          setProfilePictureUrl(profileData.profilePicture || "")
+          setTwoFactorEnabled(profileData.twoFactorEnabled || false)
         } else {
           const defaultProfile: UserProfile = {
-            firstName: userEmail.split('@')[0],
+            firstName: userEmail.split("@")[0],
             lastName: "",
             email: userEmail,
-            twoFactorEnabled: false
-          };
-          await setDoc(doc(db, "users", userId), defaultProfile);
-          setUserProfile(defaultProfile);
-          setEditFirstName(defaultProfile.firstName);
-          setEditLastName("");
-          setProfilePictureUrl("");
-          setTwoFactorEnabled(false);
+            twoFactorEnabled: false,
+          }
+          await setDoc(doc(db, "users", userId), defaultProfile)
+          setUserProfile(defaultProfile)
+          setEditFirstName(defaultProfile.firstName)
+          setEditLastName("")
+          setProfilePictureUrl("")
+          setTwoFactorEnabled(false)
         }
       } catch (error) {
-        console.error("Error fetching user profile:", error);
+        console.error("Error fetching user profile:", error)
         const defaultProfile: UserProfile = {
-          firstName: userEmail.split('@')[0],
+          firstName: userEmail.split("@")[0],
           lastName: "",
           email: userEmail,
-          twoFactorEnabled: false
-        };
-        setUserProfile(defaultProfile);
-        setEditFirstName(defaultProfile.firstName);
-        setEditLastName("");
-        setProfilePictureUrl("");
-        setTwoFactorEnabled(false);
+          twoFactorEnabled: false,
+        }
+        setUserProfile(defaultProfile)
+        setEditFirstName(defaultProfile.firstName)
+        setEditLastName("")
+        setProfilePictureUrl("")
+        setTwoFactorEnabled(false)
       } finally {
-        setLoading(false);
+        setLoading(false)
       }
-    };
+    }
 
-    fetchUserProfile();
+    fetchUserProfile()
 
-    const activeQuery = query(
-      collection(db, "appointments"),
-      where("clientName", "==", userEmail)
-    );
+    // Fetch pets for the current user
+    const petsQuery = query(collection(db, "pets"), where("ownerId", "==", userId))
+
+    const unsubscribePets = onSnapshot(petsQuery, (snapshot) => {
+      const petsData: Pet[] = []
+      snapshot.forEach((doc) => {
+        const petData = doc.data()
+        petsData.push({
+          id: doc.id,
+          name: petData.name || petData.petName || "Unnamed Pet",
+          petType: petData.petType || "",
+          breed: petData.petBreed || "",
+        })
+      })
+      setPets(petsData)
+    })
+
+    const activeQuery = query(collection(db, "appointments"), where("clientName", "==", userEmail))
 
     const activeUnsub = onSnapshot(activeQuery, (snapshot) => {
-      const data: AppointmentType[] = [];
+      const data: AppointmentType[] = []
       snapshot.forEach((doc) => {
-        const appointmentData = { id: doc.id, ...(doc.data() as Omit<AppointmentType, 'id'>) };
+        const appointmentData = { id: doc.id, ...(doc.data() as Omit<AppointmentType, "id">) }
         if (!["Done", "Not Attend", "Cancelled"].includes(appointmentData.status || "")) {
-          data.push(appointmentData);
+          data.push(appointmentData)
         }
-      });
-      data.sort((a, b) => a.date.localeCompare(b.date));
-      setAppointments(data);
-    });
+      })
+      data.sort((a, b) => a.date.localeCompare(b.date))
+      setAppointments(data)
+    })
 
-    const completedQuery = query(
-      collection(db, "appointments"),
-      where("clientName", "==", userEmail)
-    );
+    const completedQuery = query(collection(db, "appointments"), where("clientName", "==", userEmail))
 
     const completedUnsub = onSnapshot(completedQuery, (snapshot) => {
-      const data: AppointmentType[] = [];
+      const data: AppointmentType[] = []
       snapshot.forEach((doc) => {
-        const appointmentData = { id: doc.id, ...(doc.data() as Omit<AppointmentType, 'id'>) };
+        const appointmentData = { id: doc.id, ...(doc.data() as Omit<AppointmentType, "id">) }
         if (["Done", "Not Attend", "Cancelled"].includes(appointmentData.status || "")) {
-          data.push(appointmentData);
+          data.push(appointmentData)
         }
-      });
+      })
       data.sort((a, b) => {
-        const dateA = a.completedAt || a.date;
-        const dateB = b.completedAt || b.date;
-        return new Date(dateB).getTime() - new Date(dateA).getTime();
-      });
-      setCompletedAppointments(data);
-    });
+        const dateA = a.completedAt || a.date
+        const dateB = b.completedAt || b.date
+        return new Date(dateB).getTime() - new Date(dateA).getTime()
+      })
+      setCompletedAppointments(data)
+    })
 
     return () => {
-      activeUnsub();
-      completedUnsub();
-    };
-  }, [userEmail, userId]);
-
-  // Debug useEffect
-  useEffect(() => {
-    console.log("Current edit states:", {
-      editFirstName,
-      editLastName,
-      profilePictureUrl,
-      profilePictureFile: profilePictureFile?.name || 'No file',
-      isEditingProfile
-    });
-  }, [editFirstName, editLastName, profilePictureUrl, profilePictureFile, isEditingProfile]);
+      unsubscribePets()
+      activeUnsub()
+      completedUnsub()
+    }
+  }, [userEmail, userId])
 
   const handleLogout = async () => {
-    await signOut(auth);
-    router.push("/homepage");
-  };
+    await signOut(auth)
+    router.push("/homepage")
+  }
 
   const handleDelete = async (id: string) => {
     try {
-      await deleteDoc(doc(db, "appointments", id));
-      setShowCancelModal(false);
-      showSuccess("Appointment cancelled successfully!");
+      await deleteDoc(doc(db, "appointments", id))
+      setShowCancelModal(false)
+      showSuccess("Appointment cancelled successfully!")
     } catch (error) {
-      console.error(error);
-      alert("Failed to cancel appointment.");
+      console.error(error)
+      alert("Failed to cancel appointment.")
     }
-  };
+  }
 
   const openCancelModal = (appt: AppointmentType) => {
-    setSelectedAppointment(appt);
-    setShowCancelModal(true);
-  };
+    setSelectedAppointment(appt)
+    setShowCancelModal(true)
+  }
 
   const openRescheduleModal = (appt: AppointmentType) => {
-    setSelectedAppointment(appt);
-    setEditDate(appt.date || today);
-    setEditSlot(appt.timeSlot);
-    setShowRescheduleModal(true);
-  };
+    setSelectedAppointment(appt)
+    setEditDate(appt.date || today)
+    setEditSlot(appt.timeSlot)
+    setShowRescheduleModal(true)
+  }
 
   const openHistoryModal = (appt: AppointmentType) => {
-    setSelectedAppointment(appt);
-    setShowHistoryModal(true);
-  };
-
-  const handleMedicalRecordsClick = () => {
-    setShowMedicalRecordsModal(true);
-  };
+    setSelectedAppointment(appt)
+    setShowHistoryModal(true)
+  }
 
   const handleHistoryClick = () => {
-    setShowHistorySidebar(true);
-  };
+    setShowHistorySidebar(true)
+  }
+
+  const handleProfileClick = () => {
+    setShowProfileModal(true)
+  }
+
+  const handle2FAClick = () => {
+    setShow2FAModal(true)
+  }
 
   const saveEdit = async () => {
     if (!selectedAppointment || !editDate || !editSlot) {
-      return alert("Please select date and time slot.");
+      return alert("Please select date and time slot.")
     }
 
-    const isTaken = appointments.some(a =>
-      a.id !== selectedAppointment.id &&
-      a.date === editDate &&
-      a.timeSlot === editSlot &&
-      a.status !== "Cancelled"
-    );
-    
-    if (isTaken) return alert("This time slot is already taken.");
+    const isTaken = appointments.some(
+      (a) =>
+        a.id !== selectedAppointment.id && a.date === editDate && a.timeSlot === editSlot && a.status !== "Cancelled",
+    )
+
+    if (isTaken) return alert("This time slot is already taken.")
 
     try {
       await updateDoc(doc(db, "appointments", selectedAppointment.id), {
         date: editDate,
-        timeSlot: editSlot
-      });
-      setShowRescheduleModal(false);
-      setSelectedAppointment(null);
-      showSuccess("Appointment rescheduled successfully!");
+        timeSlot: editSlot,
+      })
+      setShowRescheduleModal(false)
+      setSelectedAppointment(null)
+      showSuccess("Appointment rescheduled successfully!")
     } catch (error) {
-      console.error(error);
-      alert("Failed to reschedule appointment.");
+      console.error(error)
+      alert("Failed to reschedule appointment.")
     }
-  };
-
-  const toggleProfileEdit = () => {
-    if (isEditingProfile) {
-      saveProfileEdit();
-    } else {
-      setIsEditingProfile(true);
-      setEditFirstName(userProfile?.firstName || userEmail?.split('@')[0] || "");
-      setEditLastName(userProfile?.lastName || "");
-      setProfilePictureUrl(userProfile?.profilePicture || "");
-      setTwoFactorEnabled(userProfile?.twoFactorEnabled || false);
-      setProfilePictureFile(null);
-    }
-  };
+  }
 
   const uploadImageToStorage = async (file: File): Promise<string> => {
-    if (!userId) throw new Error("No user ID");
-    
-    // Create a unique filename
-    const fileExtension = file.name.split('.').pop();
-    const fileName = `profile-picture-${Date.now()}.${fileExtension}`;
-    
-    const storageRef = ref(storage, `profile-pictures/${userId}/${fileName}`);
-    const snapshot = await uploadBytes(storageRef, file);
-    const downloadURL = await getDownloadURL(snapshot.ref);
-    return downloadURL;
-  };
+    if (!userId) throw new Error("No user ID")
+
+    const fileExtension = file.name.split(".").pop()
+    const fileName = `profile-picture-${Date.now()}.${fileExtension}`
+
+    const storageRef = ref(storage, `profile-pictures/${userId}/${fileName}`)
+    const snapshot = await uploadBytes(storageRef, file)
+    const downloadURL = await getDownloadURL(snapshot.ref)
+    return downloadURL
+  }
 
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    console.log("File selected:", file); // Debug log
-    
+    const file = event.target.files?.[0]
+
     if (file) {
-      // Validate file type
-      if (!file.type.startsWith('image/')) {
-        alert('Please select an image file (JPEG, PNG, etc.)');
-        event.target.value = ''; // Reset input
-        return;
+      if (!file.type.startsWith("image/")) {
+        alert("Please select an image file (JPEG, PNG, etc.)")
+        event.target.value = ""
+        return
       }
 
-      // Validate file size (max 5MB)
       if (file.size > 5 * 1024 * 1024) {
-        alert('Please select an image smaller than 5MB');
-        event.target.value = ''; // Reset input
-        return;
+        alert("Please select an image smaller than 5MB")
+        event.target.value = ""
+        return
       }
 
-      setProfilePictureFile(file);
-      
-      // Create preview URL
-      const imageUrl = URL.createObjectURL(file);
-      console.log("Preview URL created:", imageUrl); // Debug log
-      setProfilePictureUrl(imageUrl);
+      setProfilePictureFile(file)
+      const imageUrl = URL.createObjectURL(file)
+      setProfilePictureUrl(imageUrl)
     }
-  };
+  }
 
-  const saveProfileEdit = async () => {
+  const saveProfileChanges = async () => {
     if (!userId) {
-      console.error("No user ID found");
-      return;
+      console.error("No user ID found")
+      return
     }
 
     try {
-      let imageUrl = profilePictureUrl;
-      
-      console.log("Saving profile...", { 
-        editFirstName, 
-        editLastName, 
-        profilePictureFile: !!profilePictureFile,
-        currentImageUrl: profilePictureUrl 
-      });
+      let imageUrl = profilePictureUrl
 
-      // Upload new image if selected
       if (profilePictureFile) {
         try {
-          console.log("Uploading new image...");
-          imageUrl = await uploadImageToStorage(profilePictureFile);
-          console.log("Image uploaded successfully:", imageUrl);
+          imageUrl = await uploadImageToStorage(profilePictureFile)
         } catch (error) {
-          console.error("Error uploading image:", error);
-          alert("Failed to upload profile picture. Please try again.");
-          return;
+          console.error("Error uploading image:", error)
+          alert("Failed to upload profile picture. Please try again.")
+          return
         }
       }
 
       const updatedProfile = {
-        firstName: editFirstName.trim() || userEmail?.split('@')[0] || "User",
+        firstName: editFirstName.trim() || userEmail?.split("@")[0] || "User",
         lastName: editLastName.trim(),
         email: userEmail || "",
         profilePicture: imageUrl,
-        twoFactorEnabled: twoFactorEnabled,
-        updatedAt: new Date().toISOString()
-      };
+        updatedAt: new Date().toISOString(),
+      }
 
-      console.log("Updating Firestore with:", updatedProfile);
+      await updateDoc(doc(db, "users", userId), updatedProfile)
 
-      await updateDoc(doc(db, "users", userId), updatedProfile);
-      
-      // Update local state
-      setUserProfile(prevProfile => ({
+      setUserProfile((prevProfile) => ({
         ...prevProfile!,
-        ...updatedProfile
-      }));
-      
-      setIsEditingProfile(false);
-      setProfilePictureFile(null);
-      
-      console.log("Profile updated successfully");
-      showSuccess(`Profile updated successfully! 2FA is now ${twoFactorEnabled ? 'enabled' : 'disabled'}.`);
-      
+        ...updatedProfile,
+      }))
+
+      setProfilePictureFile(null)
+      setShowProfileModal(false)
+
+      showSuccess("Profile updated successfully!")
     } catch (error) {
-      console.error("Error updating profile:", error);
-      alert("Failed to update profile. Please try again.");
+      console.error("Error updating profile:", error)
+      alert("Failed to update profile. Please try again.")
     }
-  };
+  }
 
   const cancelProfileEdit = () => {
-    setIsEditingProfile(false);
-    setEditFirstName(userProfile?.firstName || userEmail?.split('@')[0] || "");
-    setEditLastName(userProfile?.lastName || "");
-    setProfilePictureUrl(userProfile?.profilePicture || "");
-    setTwoFactorEnabled(userProfile?.twoFactorEnabled || false);
-    setProfilePictureFile(null);
-  };
+    setShowProfileModal(false)
+    setEditFirstName(userProfile?.firstName || userEmail?.split("@")[0] || "")
+    setEditLastName(userProfile?.lastName || "")
+    setProfilePictureUrl(userProfile?.profilePicture || "")
+    setProfilePictureFile(null)
+  }
+
+  // 2FA Functions
+  const handleSendOTP = async () => {
+    if (!otpEmail) {
+      alert("Please enter your email address")
+      return
+    }
+
+    setIsSendingOTP(true)
+    try {
+      const response = await fetch("/api/send-email-otp", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: otpEmail,
+          name: userProfile?.firstName || "User",
+        }),
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        setOtpSent(true)
+        alert("OTP sent successfully to your email!")
+      } else {
+        alert(data.error || "Failed to send OTP")
+      }
+    } catch (error) {
+      console.error("Error sending OTP:", error)
+      alert("Failed to send OTP. Please try again.")
+    } finally {
+      setIsSendingOTP(false)
+    }
+  }
+
+  const handleVerifyOTP = async () => {
+    if (verificationCode.length !== 6) {
+      alert("Please enter a valid 6-digit OTP")
+      return
+    }
+
+    try {
+      // Verify OTP logic here
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+      
+      // Update 2FA status in database
+      if (userId) {
+        await updateDoc(doc(db, "users", userId), {
+          twoFactorEnabled: true,
+        })
+      }
+      
+      setTwoFactorEnabled(true)
+      setShowOTPSetup(false)
+      setShow2FAModal(false)
+      setVerificationCode("")
+      setOtpSent(false)
+      showSuccess("Two-Factor Authentication enabled successfully!")
+    } catch (error) {
+      alert("Failed to verify OTP. Please try again.")
+    }
+  }
+
+  const handleDisable2FA = async () => {
+    if (confirm("Are you sure you want to disable Two-Factor Authentication?")) {
+      try {
+        if (userId) {
+          await updateDoc(doc(db, "users", userId), {
+            twoFactorEnabled: false,
+          })
+        }
+        setTwoFactorEnabled(false)
+        showSuccess("Two-Factor Authentication disabled")
+      } catch (error) {
+        console.error("Error disabling 2FA:", error)
+        alert("Failed to disable 2FA. Please try again.")
+      }
+    }
+  }
+
+  const reset2FAForm = () => {
+    setShowOTPSetup(false)
+    setVerificationCode("")
+    setOtpSent(false)
+  }
 
   const getAppointmentTypeLabel = (type?: string) => {
     const types: Record<string, string> = {
@@ -415,19 +521,376 @@ const UserDashboard: React.FC = () => {
       ultrasound: "Ultrasound",
       groom: "Grooming",
       spayNeuter: "Spay/Neuter",
-      deworm: "Deworming"
-    };
-    return types[type || ""] || "General Consultation";
-  };
+      deworm: "Deworming",
+    }
+    return types[type || ""] || "General Consultation"
+  }
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-PH', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
-  };
+    const date = new Date(dateString)
+    return date.toLocaleDateString("en-PH", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    })
+  }
+
+  // Render different content based on active menu item
+  const renderContent = () => {
+    switch (activeMenuItem) {
+      case "pet-registration":
+        return (
+          <MainContent>
+            <ContentHeader>
+              <ContentTitle>Pet Registration</ContentTitle>
+              <ContentSubtitle>Register your pets for veterinary services</ContentSubtitle>
+            </ContentHeader>
+            <PetRegistrationSection>
+              <PetRegistrationCard>
+                <PetRegistrationIcon>🐾</PetRegistrationIcon>
+                <PetRegistrationContent>
+                  <PetRegistrationTitle>Register New Pet</PetRegistrationTitle>
+                  <PetRegistrationText>
+                    Add your pet&apos;s information to get started with appointments and medical records. Fill out the pet
+                    registration form with details like name, breed, age, and medical history.
+                  </PetRegistrationText>
+                  <PetRegistrationButton onClick={() => router.push("/petregistration")}>
+                    Start Registration
+                  </PetRegistrationButton>
+                </PetRegistrationContent>
+              </PetRegistrationCard>
+
+              {pets.length > 0 && (
+                <ExistingPetsSection>
+                  <SectionHeader>
+                    <SectionTitle>Your Registered Pets ({pets.length})</SectionTitle>
+                  </SectionHeader>
+                  <PetsList>
+                    {pets.map((pet) => (
+                      <PetListItem key={pet.id}>
+                        <PetItemIcon>{pet.petType === "Cat" ? "🐱" : "🐕"}</PetItemIcon>
+                        <PetItemInfo>
+                          <PetItemName>{pet.name}</PetItemName>
+                          <PetItemDetails>
+                            {pet.petType} • {pet.breed}
+                          </PetItemDetails>
+                        </PetItemInfo>
+                        <PetItemActions>
+                          <ViewRecordsButton onClick={() => router.push("/usermedicalrecord")}>
+                            View Records
+                          </ViewRecordsButton>
+                        </PetItemActions>
+                      </PetListItem>
+                    ))}
+                  </PetsList>
+                </ExistingPetsSection>
+              )}
+
+              <PetBenefitsGrid>
+                <BenefitCard>
+                  <BenefitIcon>📋</BenefitIcon>
+                  <BenefitTitle>Quick Appointments</BenefitTitle>
+                  <BenefitText>Schedule vet visits faster with pre-registered pet information</BenefitText>
+                </BenefitCard>
+                <BenefitCard>
+                  <BenefitIcon>🏥</BenefitIcon>
+                  <BenefitTitle>Medical History</BenefitTitle>
+                  <BenefitText>Keep track of vaccinations, treatments, and health records</BenefitText>
+                </BenefitCard>
+                <BenefitCard>
+                  <BenefitIcon>🔔</BenefitIcon>
+                  <BenefitTitle>Reminders</BenefitTitle>
+                  <BenefitText>Get notifications for upcoming vaccinations and checkups</BenefitText>
+                </BenefitCard>
+              </PetBenefitsGrid>
+            </PetRegistrationSection>
+          </MainContent>
+        )
+
+      case "appointments":
+        return (
+          <MainContent>
+            <ContentHeader>
+              <ContentTitle>Appointment Management</ContentTitle>
+              <ContentSubtitle>Schedule and manage your pet&apos;s appointments</ContentSubtitle>
+            </ContentHeader>
+            <AppointmentsSection>
+              <SectionHeader>
+                <SectionTitleGroup>
+                  <SectionTitle>Active Appointments</SectionTitle>
+                  {isClient && <AppointmentCount>{appointments.length} scheduled</AppointmentCount>}
+                </SectionTitleGroup>
+                <NewAppointmentButton onClick={() => router.push("/appointment")}>
+                  + New Appointment
+                </NewAppointmentButton>
+              </SectionHeader>
+
+              {appointments.length === 0 ? (
+                <NoAppointments>
+                  <NoAppointmentsIcon>📅</NoAppointmentsIcon>
+                  <NoAppointmentsText>No active appointments</NoAppointmentsText>
+                  <ScheduleButton onClick={() => router.push("/appointment")}>Schedule an Appointment</ScheduleButton>
+                </NoAppointments>
+              ) : (
+                <AppointmentsList>
+                  {appointments
+                    .filter((a) => a.petName)
+                    .map((appt) => (
+                      <AppointmentCard key={appt.id}>
+                        <AppointmentHeader>
+                          <AppointmentLeftSide>
+                            <AppointmentStatus>Pet: {appt.petName}</AppointmentStatus>
+                            <AppointmentInfo>
+                              <AppointmentLabel>Service:</AppointmentLabel>
+                              <AppointmentValue>{getAppointmentTypeLabel(appt.appointmentType)}</AppointmentValue>
+                            </AppointmentInfo>
+                            <AppointmentInfo>
+                              <AppointmentLabel>Date:</AppointmentLabel>
+                              <AppointmentValue>{formatDate(appt.date || today)}</AppointmentValue>
+                              <AppointmentSeparator>|</AppointmentSeparator>
+                              <AppointmentLabel>Time:</AppointmentLabel>
+                              <AppointmentValue>{appt.timeSlot}</AppointmentValue>
+                            </AppointmentInfo>
+                            <AppointmentInfo>
+                              <AppointmentLabel>Payment:</AppointmentLabel>
+                              <AppointmentValue>{appt.paymentMethod || "Not specified"}</AppointmentValue>
+                            </AppointmentInfo>
+                          </AppointmentLeftSide>
+                          <StatusBadge status={appt.status || "Pending"}>
+                            {appt.status || "Pending Payment"}
+                          </StatusBadge>
+                        </AppointmentHeader>
+
+                        <ButtonRow>
+                          <EditButton onClick={() => openRescheduleModal(appt)}>Reschedule</EditButton>
+                          <DeleteButton onClick={() => openCancelModal(appt)}>Cancel</DeleteButton>
+                        </ButtonRow>
+                      </AppointmentCard>
+                    ))}
+                </AppointmentsList>
+              )}
+            </AppointmentsSection>
+          </MainContent>
+        )
+
+      case "medical-records":
+        return (
+          <MainContent>
+            <ContentHeader>
+              <ContentTitle>Medical Records</ContentTitle>
+              <ContentSubtitle>Access your pet&apos;s health history and documents</ContentSubtitle>
+            </ContentHeader>
+            <MedicalRecordsDashboard>
+              <MedicalRecordsCard>
+                <MedicalRecordsIcon>📋</MedicalRecordsIcon>
+                <MedicalRecordsContent>
+                  <MedicalRecordsTitle>View Medical Records</MedicalRecordsTitle>
+                  <MedicalRecordsText>
+                    Access complete medical history, vaccination records, treatment plans, and diagnostic reports for
+                    all your registered pets.
+                  </MedicalRecordsText>
+                  <MedicalRecordsButton onClick={() => router.push("/usermedicalrecord")}>
+                    Open Medical Records
+                  </MedicalRecordsButton>
+                </MedicalRecordsContent>
+              </MedicalRecordsCard>
+
+              <MedicalFeaturesGrid>
+                <FeatureCard>
+                  <FeatureIcon>💉</FeatureIcon>
+                  <FeatureTitle>Vaccination History</FeatureTitle>
+                  <FeatureText>Track all vaccinations and due dates</FeatureText>
+                </FeatureCard>
+                <FeatureCard>
+                  <FeatureIcon>🩺</FeatureIcon>
+                  <FeatureTitle>Diagnostic Reports</FeatureTitle>
+                  <FeatureText>View lab results and diagnostic tests</FeatureText>
+                </FeatureCard>
+                <FeatureCard>
+                  <FeatureIcon>💊</FeatureIcon>
+                  <FeatureTitle>Medication History</FeatureTitle>
+                  <FeatureText>Record of prescribed medications</FeatureText>
+                </FeatureCard>
+              </MedicalFeaturesGrid>
+            </MedicalRecordsDashboard>
+          </MainContent>
+        )
+
+      case "profile":
+        return (
+          <MainContent>
+            <ContentHeader>
+              <ContentTitle>Profile & Security</ContentTitle>
+              <ContentSubtitle>Manage your account settings and security preferences</ContentSubtitle>
+            </ContentHeader>
+            <ProfileDashboard>
+              <ProfileInfoCard>
+                <ProfileAvatarSection>
+                  <ProfileAvatarLarge>
+                    {userProfile?.profilePicture ? (
+                      <ProfileImage src={userProfile.profilePicture} alt="Profile" />
+                    ) : (
+                      <DefaultAvatarLarge>👤</DefaultAvatarLarge>
+                    )}
+                  </ProfileAvatarLarge>
+                  <ProfileName>
+                    {userProfile?.firstName || "User"} {userProfile?.lastName || ""}
+                  </ProfileName>
+                  <ProfileEmail>{userEmail}</ProfileEmail>
+                </ProfileAvatarSection>
+
+                <ProfileDetails>
+                  <DetailItem>
+                    <DetailLabel>First Name:</DetailLabel>
+                    <DetailValue>{userProfile?.firstName || "Not set"}</DetailValue>
+                  </DetailItem>
+                  <DetailItem>
+                    <DetailLabel>Last Name:</DetailLabel>
+                    <DetailValue>{userProfile?.lastName || "Not set"}</DetailValue>
+                  </DetailItem>
+                  <DetailItem>
+                    <DetailLabel>2FA Status:</DetailLabel>
+                    <DetailValue>
+                      <SecurityStatus $enabled={twoFactorEnabled}>
+                        {twoFactorEnabled ? "🟢 Enabled" : "🔴 Disabled"}
+                      </SecurityStatus>
+                    </DetailValue>
+                  </DetailItem>
+                </ProfileDetails>
+
+                <ActionButtons>
+                  <EditProfileButton onClick={handleProfileClick}>Edit Profile</EditProfileButton>
+                  <SecurityButton onClick={handle2FAClick}>Security Settings</SecurityButton>
+                </ActionButtons>
+              </ProfileInfoCard>
+
+              <SecurityCard>
+                <SecurityTitle>🔐 Security Overview</SecurityTitle>
+                <SecurityFeatures>
+                  <SecurityFeature>
+                    <SecurityFeatureIcon>📧</SecurityFeatureIcon>
+                    <SecurityFeatureInfo>
+                      <SecurityFeatureTitle>Email Verification</SecurityFeatureTitle>
+                      <SecurityFeatureStatus>Verified</SecurityFeatureStatus>
+                    </SecurityFeatureInfo>
+                  </SecurityFeature>
+                  <SecurityFeature>
+                    <SecurityFeatureIcon>🔒</SecurityFeatureIcon>
+                    <SecurityFeatureInfo>
+                      <SecurityFeatureTitle>Two-Factor Authentication</SecurityFeatureTitle>
+                      <SecurityFeatureStatus>{twoFactorEnabled ? "Enabled" : "Disabled"}</SecurityFeatureStatus>
+                    </SecurityFeatureInfo>
+                    <SecurityActionButton onClick={handle2FAClick}>
+                      {twoFactorEnabled ? "Manage" : "Enable"}
+                    </SecurityActionButton>
+                  </SecurityFeature>
+                </SecurityFeatures>
+              </SecurityCard>
+            </ProfileDashboard>
+          </MainContent>
+        )
+
+      default: // dashboard
+        return (
+          <MainContent>
+            <ContentHeader>
+              <ContentTitle>Dashboard Overview</ContentTitle>
+              <ContentSubtitle>Welcome back! Here&apos;s your pet care summary</ContentSubtitle>
+            </ContentHeader>
+
+            <QuickStatsGrid>
+              <StatCard>
+                <StatIcon>📅</StatIcon>
+                <StatContent>
+                  <StatNumber>{appointments.length}</StatNumber>
+                  <StatLabel>Active Appointments</StatLabel>
+                </StatContent>
+              </StatCard>
+              <StatCard>
+                <StatIcon>✅</StatIcon>
+                <StatContent>
+                  <StatNumber>{completedAppointments.length}</StatNumber>
+                  <StatLabel>Completed Visits</StatLabel>
+                </StatContent>
+              </StatCard>
+              <StatCard>
+                <StatIcon>🐾</StatIcon>
+                <StatContent>
+                  <StatNumber>{pets.length}</StatNumber>
+                  <StatLabel>Registered Pets</StatLabel>
+                </StatContent>
+              </StatCard>
+            </QuickStatsGrid>
+
+            {pets.length > 0 && (
+              <RecentActivitySection>
+                <SectionHeader>
+                  <SectionTitle>Your Pets</SectionTitle>
+                </SectionHeader>
+                <PetsGrid>
+                  {pets.slice(0, 3).map((pet) => (
+                    <PetCard key={pet.id}>
+                      <PetIcon>{pet.petType === "Cat" ? "🐱" : "🐕"}</PetIcon>
+                      <PetInfo>
+                        <PetName>{pet.name}</PetName>
+                        <PetDetails>
+                          {pet.petType} • {pet.breed}
+                        </PetDetails>
+                      </PetInfo>
+                    </PetCard>
+                  ))}
+                  {pets.length > 3 && (
+                    <ViewAllPetsCard onClick={() => setActiveMenuItem("pet-registration")}>
+                      <ViewAllIcon>➕</ViewAllIcon>
+                      <ViewAllText>View All {pets.length} Pets</ViewAllText>
+                    </ViewAllPetsCard>
+                  )}
+                </PetsGrid>
+              </RecentActivitySection>
+            )}
+
+            <ActionCardsGrid>
+              <ActionCard onClick={() => setActiveMenuItem("profile")}>
+                <ActionCardIcon>👤</ActionCardIcon>
+                <ActionCardContent>
+                  <ActionCardTitle>Profile & Security</ActionCardTitle>
+                  <ActionCardText>Manage your profile and security settings</ActionCardText>
+                </ActionCardContent>
+              </ActionCard>
+            </ActionCardsGrid>
+
+            <RecentActivitySection>
+              <SectionHeader>
+                <SectionTitle>Recent Appointments</SectionTitle>
+              </SectionHeader>
+              {appointments.length === 0 ? (
+                <NoActivity>
+                  <NoActivityIcon>📅</NoActivityIcon>
+                  <NoActivityText>No recent appointments</NoActivityText>
+                </NoActivity>
+              ) : (
+                <ActivityList>
+                  {appointments.slice(0, 3).map((appt) => (
+                    <ActivityItem key={appt.id}>
+                      <ActivityIcon>🐕</ActivityIcon>
+                      <ActivityContent>
+                        <ActivityTitle>
+                          {appt.petName} - {getAppointmentTypeLabel(appt.appointmentType)}
+                        </ActivityTitle>
+                        <ActivityDate>
+                          {formatDate(appt.date)} • {appt.timeSlot}
+                        </ActivityDate>
+                      </ActivityContent>
+                      <ActivityStatus status={appt.status || "Pending"}>{appt.status || "Pending"}</ActivityStatus>
+                    </ActivityItem>
+                  ))}
+                </ActivityList>
+              )}
+            </RecentActivitySection>
+          </MainContent>
+        )
+    }
+  }
 
   if (!isClient) {
     return (
@@ -447,7 +910,7 @@ const UserDashboard: React.FC = () => {
           </HeaderBar>
         </PageContainer>
       </>
-    );
+    )
   }
 
   return (
@@ -471,7 +934,13 @@ const UserDashboard: React.FC = () => {
                 <span></span>
               </HamburgerIcon>
             </MobileMenuButton>
-            
+
+            {!isSidebarVisible && (
+              <ShowSidebarButton onClick={() => setIsSidebarVisible(true)} title="Show sidebar">
+                ☰
+              </ShowSidebarButton>
+            )}
+
             <Logo>
               <LogoIcon>🏥</LogoIcon>
               <LogoText>
@@ -480,14 +949,14 @@ const UserDashboard: React.FC = () => {
               </LogoText>
             </Logo>
           </HeaderLeft>
-          
+
           <HeaderRight className={isMenuOpen ? "open" : ""}>
             <UserInfo>
               {loading ? "Loading..." : `${userProfile?.firstName || "User"} ${userProfile?.lastName || ""}`.trim()}
             </UserInfo>
-            
+
             <ProfileContainer>
-              <ProfileIconButton onClick={toggleProfileEdit}>
+              <ProfileIconButton onClick={handleProfileClick}>
                 <ProfileAvatar>
                   {userProfile?.profilePicture ? (
                     <ProfileImage src={userProfile.profilePicture} alt="Profile" />
@@ -496,116 +965,79 @@ const UserDashboard: React.FC = () => {
                   )}
                 </ProfileAvatar>
               </ProfileIconButton>
-
-              {isEditingProfile && (
-                <ProfileModalOverlay onClick={cancelProfileEdit}>
-                  <LargeProfileModal onClick={(e) => e.stopPropagation()}>
-                    <ModalHeader>
-                      <ModalTitle>Edit Profile</ModalTitle>
-                      <CloseButton onClick={cancelProfileEdit}>×</CloseButton>
-                    </ModalHeader>
-                    
-                    <ModalContent>
-                      <ProfileImageSection>
-                        <ProfileImagePreview>
-                          {profilePictureUrl ? (
-                            <ProfileImage src={profilePictureUrl} alt="Profile Preview" />
-                          ) : (
-                            <DefaultAvatarLarge>👤</DefaultAvatarLarge>
-                          )}
-                        </ProfileImagePreview>
-                        <ImageUploadLabel htmlFor="profile-pic">
-                          Choose Photo
-                          <ImageUploadInput
-                            type="file"
-                            accept="image/*"
-                            onChange={handleImageUpload}
-                            id="profile-pic"
-                          />
-                        </ImageUploadLabel>
-                        {profilePictureFile && (
-                          <ImageUploadHint>New image selected: {profilePictureFile.name}</ImageUploadHint>
-                        )}
-                      </ProfileImageSection>
-                      
-                      <FormGroup>
-                        <Label>First Name</Label>
-                        <EditInput
-                          type="text"
-                          value={editFirstName}
-                          onChange={(e) => {
-                            console.log("First name changed:", e.target.value);
-                            setEditFirstName(e.target.value);
-                          }}
-                          placeholder="First name"
-                        />
-                      </FormGroup>
-                      
-                      <FormGroup>
-                        <Label>Last Name</Label>
-                        <EditInput
-                          type="text"
-                          value={editLastName}
-                          onChange={(e) => {
-                            console.log("Last name changed:", e.target.value);
-                            setEditLastName(e.target.value);
-                          }}
-                          placeholder="Last name"
-                        />
-                      </FormGroup>
-                      
-                      <FormGroup>
-                        <Label>Email</Label>
-                        <EmailDisplay>{userEmail}</EmailDisplay>
-                      </FormGroup>
-
-                      <SecuritySection>
-                        <SecurityTitle>🔐 Security Settings</SecurityTitle>
-                        <TwoFactorContainer>
-                          <TwoFactorInfo>
-                            <TwoFactorLabel>Two-Factor Authentication (2FA)</TwoFactorLabel>
-                            <TwoFactorDescription>
-                              {twoFactorEnabled 
-                                ? "✅ Enabled - Verification code will be sent to your email on each login" 
-                                : "⚠️ Disabled - Enable 2FA for extra security"}
-                            </TwoFactorDescription>
-                          </TwoFactorInfo>
-                          <ToggleSwitch>
-                            <ToggleInput
-                              type="checkbox"
-                              id="2fa-toggle"
-                              checked={twoFactorEnabled}
-                              onChange={(e) => setTwoFactorEnabled(e.target.checked)}
-                            />
-                            <ToggleSlider className={twoFactorEnabled ? "active" : ""} />
-                          </ToggleSwitch>
-                        </TwoFactorContainer>
-                      </SecuritySection>
-                    </ModalContent>
-                    
-                    <ModalActions>
-                      <CancelModalButton onClick={cancelProfileEdit}>
-                        Cancel
-                      </CancelModalButton>
-                      <SaveProfileButton onClick={saveProfileEdit}>
-                        Save Changes
-                      </SaveProfileButton>
-                    </ModalActions>
-                  </LargeProfileModal>
-                </ProfileModalOverlay>
-              )}
             </ProfileContainer>
-            
+
             <LogoutButton onClick={handleLogout}>Logout</LogoutButton>
           </HeaderRight>
         </HeaderBar>
 
+        <DashboardLayout>
+          {/* LEFT SIDEBAR MENU */}
+          {isSidebarVisible && (
+            <Sidebar>
+              <SidebarHeader>
+                <SidebarTitleRow>
+                  <SidebarTitle>Main Menu</SidebarTitle>
+                  <SidebarToggleButton onClick={() => setIsSidebarVisible(false)} title="Hide sidebar">
+                    ×
+                  </SidebarToggleButton>
+                </SidebarTitleRow>
+              </SidebarHeader>
+
+              <MenuList>
+                <MenuItem $active={activeMenuItem === "dashboard"} onClick={() => setActiveMenuItem("dashboard")}>
+                  <MenuIcon>📊</MenuIcon>
+                  <MenuText>Dashboard</MenuText>
+                </MenuItem>
+
+                <MenuItem
+                  $active={activeMenuItem === "pet-registration"}
+                  onClick={() => setActiveMenuItem("pet-registration")}
+                >
+                  <MenuIcon>🐾</MenuIcon>
+                  <MenuText>Pet Registration</MenuText>
+                  <MenuBadge $primary={true}>Primary</MenuBadge>
+                </MenuItem>
+
+                <MenuItem $active={activeMenuItem === "appointments"} onClick={() => setActiveMenuItem("appointments")}>
+                  <MenuIcon>📅</MenuIcon>
+                  <MenuText>Appointments</MenuText>
+                  {appointments.length > 0 && <MenuCount>{appointments.length}</MenuCount>}
+                </MenuItem>
+
+                <MenuItem
+                  $active={activeMenuItem === "medical-records"}
+                  onClick={() => setActiveMenuItem("medical-records")}
+                >
+                  <MenuIcon>📋</MenuIcon>
+                  <MenuText>Medical Records</MenuText>
+                </MenuItem>
+
+                <MenuItem $active={activeMenuItem === "profile"} onClick={() => setActiveMenuItem("profile")}>
+                  <MenuIcon>👤</MenuIcon>
+                  <MenuText>Profile & Security</MenuText>
+                </MenuItem>
+              </MenuList>
+
+              <SidebarFooter>
+                <SupportSection>
+                  <SupportTitle>Need Help?</SupportTitle>
+                  <SupportText>Contact our support team for assistance</SupportText>
+                  <SupportButton onClick={() => router.push("/support")}>Get Support</SupportButton>
+                </SupportSection>
+              </SidebarFooter>
+            </Sidebar>
+          )}
+
+          {/* MAIN CONTENT AREA */}
+          <ContentArea>{renderContent()}</ContentArea>
+        </DashboardLayout>
+
+        {/* HISTORY SIDEBAR TOGGLE */}
         <HistorySidebarToggle onClick={handleHistoryClick}>
           <HistoryIcon>📋</HistoryIcon>
           <HistoryText>History</HistoryText>
-          {completedAppointments.length > 0 && (
-            <HistoryBadgeSmall>{completedAppointments.length}</HistoryBadgeSmall>
-          )}
+          {completedAppointments.length > 0 && <HistoryBadgeSmall>{completedAppointments.length}</HistoryBadgeSmall>}
         </HistorySidebarToggle>
 
         {showHistorySidebar && (
@@ -616,7 +1048,7 @@ const UserDashboard: React.FC = () => {
                 <SidebarTitle>Appointment History</SidebarTitle>
                 <SidebarCloseButton onClick={() => setShowHistorySidebar(false)}>×</SidebarCloseButton>
               </SidebarHeader>
-              
+
               <SidebarContent>
                 {completedAppointments.length === 0 ? (
                   <NoHistoryMessage>
@@ -626,20 +1058,29 @@ const UserDashboard: React.FC = () => {
                 ) : (
                   <SidebarHistoryList>
                     {completedAppointments.map((appt) => (
-                      <SidebarHistoryCard key={appt.id} onClick={() => {
-                        setShowHistorySidebar(false);
-                        openHistoryModal(appt);
-                      }}>
+                      <SidebarHistoryCard
+                        key={appt.id}
+                        onClick={() => {
+                          setShowHistorySidebar(false)
+                          openHistoryModal(appt)
+                        }}
+                      >
                         <SidebarCardHeader>
                           <PetName>{appt.petName}</PetName>
                           <SidebarStatusBadge status={appt.status || "Completed"}>
-                            {appt.status === "Done" ? "✅" : 
-                            appt.status === "Not Attend" ? "❌" : 
-                            appt.status === "Cancelled" ? "🚫" : "✅"}
+                            {appt.status === "Done"
+                              ? "✅"
+                              : appt.status === "Not Attend"
+                                ? "❌"
+                                : appt.status === "Cancelled"
+                                  ? "🚫"
+                                  : "✅"}
                           </SidebarStatusBadge>
                         </SidebarCardHeader>
                         <ServiceInfo>{getAppointmentTypeLabel(appt.appointmentType)}</ServiceInfo>
-                        <DateInfo>{formatDate(appt.date)} • {appt.timeSlot}</DateInfo>
+                        <DateInfo>
+                          {formatDate(appt.date)} • {appt.timeSlot}
+                        </DateInfo>
                         <ClickHint>Click for details</ClickHint>
                       </SidebarHistoryCard>
                     ))}
@@ -650,126 +1091,176 @@ const UserDashboard: React.FC = () => {
           </>
         )}
 
-        <Content>
-          <WelcomeSection>
-            <WelcomeTitle>
-              Welcome to Fursurecare, {userProfile?.firstName || userEmail?.split('@')[0] || "User"}!
-            </WelcomeTitle>
-            <WelcomeSubtitle>How can we help your pet today?</WelcomeSubtitle>
-          </WelcomeSection>
-
-          <CardsGrid>
-            <Card onClick={() => router.push("/petregistration")}>
-              <CardIcon>🐾</CardIcon>
-              <CardContent>
-                <CardTitle>Register Pet</CardTitle>
-                <CardText>Add your pet to get started with appointments</CardText>
-              </CardContent>
-            </Card>
-
-            <Card onClick={() => router.push("/appointment")}>
-              <CardIcon>📅</CardIcon>
-              <CardContent>
-                <CardTitle>Book Appointment</CardTitle>
-                <CardText>Schedule a new vet visit for your pet</CardText>
-              </CardContent>
-            </Card>
-
-            <Card onClick={handleMedicalRecordsClick}>
-              <CardIcon>📋</CardIcon>
-              <CardContent>
-                <CardTitle>Medical Records</CardTitle>
-                <CardText>View your pets health records and documents</CardText>
-              </CardContent>
-            </Card>
-          </CardsGrid>
-
-          <AppointmentsSection>
-            <SectionHeader>
-              <SectionTitleGroup>
-                <SectionTitle>Active Appointments</SectionTitle>
-                {isClient && <AppointmentCount>{appointments.length} scheduled</AppointmentCount>}
-              </SectionTitleGroup>
-            </SectionHeader>
-
-            {appointments.length === 0 ? (
-              <NoAppointments>
-                <NoAppointmentsIcon>📅</NoAppointmentsIcon>
-                <NoAppointmentsText>No active appointments</NoAppointmentsText>
-                <ScheduleButton onClick={() => router.push("/appointment")}>
-                  Schedule an Appointment
-                </ScheduleButton>
-              </NoAppointments>
-            ) : (
-              <AppointmentsList>
-                {appointments
-                  .filter(a => a.petName)
-                  .map((appt) => (
-                    <AppointmentCard key={appt.id}>
-                      <AppointmentHeader>
-                        <AppointmentLeftSide>
-                          <AppointmentStatus>Pet: {appt.petName}</AppointmentStatus>
-                          <AppointmentInfo>
-                            <AppointmentLabel>Service:</AppointmentLabel>
-                            <AppointmentValue>{getAppointmentTypeLabel(appt.appointmentType)}</AppointmentValue>
-                          </AppointmentInfo>
-                          <AppointmentInfo>
-                            <AppointmentLabel>Date:</AppointmentLabel>
-                            <AppointmentValue>{formatDate(appt.date || today)}</AppointmentValue>
-                            <AppointmentSeparator>|</AppointmentSeparator>
-                            <AppointmentLabel>Time:</AppointmentLabel>
-                            <AppointmentValue>{appt.timeSlot}</AppointmentValue>
-                          </AppointmentInfo>
-                          <AppointmentInfo>
-                            <AppointmentLabel>Payment:</AppointmentLabel>
-                            <AppointmentValue>{appt.paymentMethod || "Not specified"}</AppointmentValue>
-                          </AppointmentInfo>
-                        </AppointmentLeftSide>
-                        <StatusBadge status={appt.status || "Pending"}>
-                          {appt.status || "Pending Payment"}
-                        </StatusBadge>
-                      </AppointmentHeader>
-
-                      <ButtonRow>
-                        <EditButton onClick={() => openRescheduleModal(appt)}>Reschedule</EditButton>
-                        <DeleteButton onClick={() => openCancelModal(appt)}>Cancel</DeleteButton>
-                      </ButtonRow>
-                    </AppointmentCard>
-                  ))}
-              </AppointmentsList>
-            )}
-          </AppointmentsSection>
-        </Content>
-
-        {showMedicalRecordsModal && (
-          <ModalOverlay onClick={() => setShowMedicalRecordsModal(false)}>
+        {/* PROFILE MODAL */}
+        {showProfileModal && (
+          <ModalOverlay onClick={cancelProfileEdit}>
             <ModalContainer onClick={(e) => e.stopPropagation()}>
               <ModalHeader>
-                <ModalTitle>Medical Records</ModalTitle>
-                <CloseButton onClick={() => setShowMedicalRecordsModal(false)}>×</CloseButton>
+                <ModalTitle>Profile Settings</ModalTitle>
+                <CloseButton onClick={cancelProfileEdit}>×</CloseButton>
               </ModalHeader>
-              
+
               <ModalContent>
-                <MedicalRecordsSection>
-                  <SectionSubtitle>View Medical Records</SectionSubtitle>
-                  <ViewRecordsButton onClick={() => {
-                    setShowMedicalRecordsModal(false);
-                    router.push("/usermedicalrecord");
-                  }}>
-                    Open Medical Records
-                  </ViewRecordsButton>
-                </MedicalRecordsSection>
+                <ProfileSection>
+                  <SectionTitle>👤 Profile Information</SectionTitle>
+
+                  <ProfileImageSection>
+                    <ProfileImagePreview>
+                      {profilePictureUrl ? (
+                        <ProfileImage src={profilePictureUrl} alt="Profile Preview" />
+                      ) : (
+                        <DefaultAvatarLarge>👤</DefaultAvatarLarge>
+                      )}
+                    </ProfileImagePreview>
+                    <ImageUploadLabel htmlFor="profile-pic">
+                      Change Photo
+                      <ImageUploadInput type="file" accept="image/*" onChange={handleImageUpload} id="profile-pic" />
+                    </ImageUploadLabel>
+                    {profilePictureFile && (
+                      <ImageUploadHint>New image selected: {profilePictureFile.name}</ImageUploadHint>
+                    )}
+                  </ProfileImageSection>
+
+                  <FormGroup>
+                    <Label>First Name</Label>
+                    <EditInput
+                      type="text"
+                      value={editFirstName}
+                      onChange={(e) => setEditFirstName(e.target.value)}
+                      placeholder="First name"
+                    />
+                  </FormGroup>
+
+                  <FormGroup>
+                    <Label>Last Name</Label>
+                    <EditInput
+                      type="text"
+                      value={editLastName}
+                      onChange={(e) => setEditLastName(e.target.value)}
+                      placeholder="Last name"
+                    />
+                  </FormGroup>
+
+                  <FormGroup>
+                    <Label>Email</Label>
+                    <EmailDisplay>{userEmail}</EmailDisplay>
+                  </FormGroup>
+                </ProfileSection>
               </ModalContent>
-              
+
               <ModalActions>
-                <CancelModalButton onClick={() => setShowMedicalRecordsModal(false)}>
-                  Close
-                </CancelModalButton>
+                <CancelModalButton onClick={cancelProfileEdit}>Cancel</CancelModalButton>
+                <SaveProfileButton onClick={saveProfileChanges}>Save Changes</SaveProfileButton>
               </ModalActions>
             </ModalContainer>
           </ModalOverlay>
         )}
 
+        {/* 2FA MODAL */}
+        {show2FAModal && (
+          <ModalOverlay onClick={() => setShow2FAModal(false)}>
+            <ModalContainer onClick={(e) => e.stopPropagation()}>
+              <ModalHeader>
+                <ModalTitle>Two-Factor Authentication</ModalTitle>
+                <CloseButton onClick={() => setShow2FAModal(false)}>×</CloseButton>
+              </ModalHeader>
+
+              <ModalContent>
+                <SecuritySection>
+                  <SectionTitle>🔐 Security Settings</SectionTitle>
+                  
+                  {!showOTPSetup ? (
+                    <TwoFactorContainer>
+                      <TwoFactorInfo>
+                        <TwoFactorLabel>Two-Factor Authentication (2FA)</TwoFactorLabel>
+                        <TwoFactorDescription>
+                          {twoFactorEnabled
+                            ? "✅ Enabled - Verification code will be sent to your email on each login"
+                            : "⚠️ Disabled - Enable 2FA for extra security"}
+                        </TwoFactorDescription>
+                      </TwoFactorInfo>
+                      
+                      {!twoFactorEnabled ? (
+                        <Enable2FAButton onClick={() => setShowOTPSetup(true)}>
+                          Enable 2FA
+                        </Enable2FAButton>
+                      ) : (
+                        <Disable2FAButton onClick={handleDisable2FA}>
+                          Disable 2FA
+                        </Disable2FAButton>
+                      )}
+                    </TwoFactorContainer>
+                  ) : (
+                    <OTPSetupSection>
+                      <OTPSetupTitle>Set up Two-Factor Authentication</OTPSetupTitle>
+
+                      {!otpSent ? (
+                        <OTPEmailSection>
+                          <FormGroup>
+                            <Label>Email Address for OTP</Label>
+                            <EmailInput
+                              type="email"
+                              value={otpEmail}
+                              onChange={(e) => setOtpEmail(e.target.value)}
+                              placeholder="Enter your email"
+                              disabled={isSendingOTP}
+                            />
+                          </FormGroup>
+                          <SendOTPButton onClick={handleSendOTP} disabled={isSendingOTP || !otpEmail}>
+                            {isSendingOTP ? "Sending OTP..." : "Send OTP"}
+                          </SendOTPButton>
+                        </OTPEmailSection>
+                      ) : (
+                        <OTPVerificationSection>
+                          <OTPInstructions>
+                            We&apos;ve sent a 6-digit verification code to your email. Please enter it below to enable
+                            2FA.
+                          </OTPInstructions>
+
+                          <OTPInputGroup>
+                            <FormGroup>
+                              <Label>Enter 6-digit OTP</Label>
+                              <OTPInput
+                                type="text"
+                                maxLength={6}
+                                value={verificationCode}
+                                onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ""))}
+                                placeholder="000000"
+                              />
+                            </FormGroup>
+                            <ResendOTPText>
+                              Didn&apos;t receive the code?{" "}
+                              <ResendLink onClick={handleSendOTP} disabled={isSendingOTP}>
+                                {isSendingOTP ? "Sending..." : "Resend OTP"}
+                              </ResendLink>
+                            </ResendOTPText>
+                          </OTPInputGroup>
+
+                          <OTPButtonGroup>
+                            <CancelModalButton onClick={reset2FAForm}>
+                              Cancel
+                            </CancelModalButton>
+                            <SubmitButton onClick={handleVerifyOTP} disabled={verificationCode.length !== 6}>
+                              Verify & Enable 2FA
+                            </SubmitButton>
+                          </OTPButtonGroup>
+                        </OTPVerificationSection>
+                      )}
+                    </OTPSetupSection>
+                  )}
+                </SecuritySection>
+              </ModalContent>
+
+              {!showOTPSetup && (
+                <ModalActions>
+                  <CancelModalButton onClick={() => setShow2FAModal(false)}>Close</CancelModalButton>
+                </ModalActions>
+              )}
+            </ModalContainer>
+          </ModalOverlay>
+        )}
+
+        {/* OTHER MODALS REMAIN THE SAME */}
         {showRescheduleModal && selectedAppointment && (
           <ModalOverlay onClick={() => setShowRescheduleModal(false)}>
             <ModalContainer onClick={(e) => e.stopPropagation()}>
@@ -777,7 +1268,7 @@ const UserDashboard: React.FC = () => {
                 <ModalTitle>Reschedule Appointment</ModalTitle>
                 <CloseButton onClick={() => setShowRescheduleModal(false)}>×</CloseButton>
               </ModalHeader>
-              
+
               <ModalContent>
                 <AppointmentInfoModal>
                   <InfoItem>
@@ -796,45 +1287,34 @@ const UserDashboard: React.FC = () => {
 
                 <FormGroup>
                   <Label>New Date:</Label>
-                  <DateInput
-                    type="date"
-                    value={editDate}
-                    onChange={(e) => setEditDate(e.target.value)}
-                    min={today}
-                  />
+                  <DateInput type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} min={today} />
                 </FormGroup>
-                
+
                 <FormGroup>
                   <Label>New Time Slot:</Label>
-                  <SelectInput
-                    value={editSlot}
-                    onChange={(e) => setEditSlot(e.target.value)}
-                  >
+                  <SelectInput value={editSlot} onChange={(e) => setEditSlot(e.target.value)}>
                     <option value="">Select a time slot</option>
-                    {timeSlots.map(slot => {
-                      const isTaken = appointments.some(a =>
-                        a.id !== selectedAppointment.id &&
-                        a.date === editDate &&
-                        a.timeSlot === slot &&
-                        a.status !== "Cancelled"
-                      );
+                    {timeSlots.map((slot) => {
+                      const isTaken = appointments.some(
+                        (a) =>
+                          a.id !== selectedAppointment.id &&
+                          a.date === editDate &&
+                          a.timeSlot === slot &&
+                          a.status !== "Cancelled",
+                      )
                       return (
                         <option key={slot} value={slot} disabled={isTaken}>
                           {slot} {isTaken ? "(Taken)" : ""}
                         </option>
-                      );
+                      )
                     })}
                   </SelectInput>
                 </FormGroup>
               </ModalContent>
-              
+
               <ModalActions>
-                <CancelModalButton onClick={() => setShowRescheduleModal(false)}>
-                  Cancel
-                </CancelModalButton>
-                <ConfirmButton onClick={saveEdit}>
-                  Confirm Reschedule
-                </ConfirmButton>
+                <CancelModalButton onClick={() => setShowRescheduleModal(false)}>Cancel</CancelModalButton>
+                <ConfirmButton onClick={saveEdit}>Confirm Reschedule</ConfirmButton>
               </ModalActions>
             </ModalContainer>
           </ModalOverlay>
@@ -845,9 +1325,9 @@ const UserDashboard: React.FC = () => {
             <ModalContainer onClick={(e) => e.stopPropagation()}>
               <ModalHeader>
                 <ModalTitle>Cancel Appointment</ModalTitle>
-                <CloseButton onClick={() => setShowCancelModal(false)}>x</CloseButton>
+                <CloseButton onClick={() => setShowCancelModal(false)}>×</CloseButton>
               </ModalHeader>
-              
+
               <ModalContent>
                 <WarningMessage>
                   <WarningIcon>⚠️</WarningIcon>
@@ -855,7 +1335,7 @@ const UserDashboard: React.FC = () => {
                     Are you sure you want to cancel this appointment? This action cannot be undone.
                   </WarningText>
                 </WarningMessage>
-                
+
                 <AppointmentDetails>
                   <DetailItem>
                     <DetailLabel>Pet:</DetailLabel>
@@ -875,11 +1355,9 @@ const UserDashboard: React.FC = () => {
                   </DetailItem>
                 </AppointmentDetails>
               </ModalContent>
-              
+
               <ModalActions>
-                <CancelModalButton onClick={() => setShowCancelModal(false)}>
-                  Keep Appointment
-                </CancelModalButton>
+                <CancelModalButton onClick={() => setShowCancelModal(false)}>Keep Appointment</CancelModalButton>
                 <DeleteModalButton onClick={() => handleDelete(selectedAppointment.id)}>
                   Cancel Appointment
                 </DeleteModalButton>
@@ -895,7 +1373,7 @@ const UserDashboard: React.FC = () => {
                 <ModalTitle>Appointment Details</ModalTitle>
                 <CloseButton onClick={() => setShowHistoryModal(false)}>×</CloseButton>
               </ModalHeader>
-              
+
               <ModalContent>
                 <AppointmentInfoModal>
                   <InfoItem>
@@ -922,9 +1400,13 @@ const UserDashboard: React.FC = () => {
                     <InfoLabel>Status:</InfoLabel>
                     <InfoValue>
                       <HistoryStatusBadge status={selectedAppointment.status || "Completed"}>
-                        {selectedAppointment.status === "Done" ? "✅ Completed" : 
-                        selectedAppointment.status === "Not Attend" ? "❌ No Show" : 
-                        selectedAppointment.status === "Cancelled" ? "🚫 Cancelled" : selectedAppointment.status}
+                        {selectedAppointment.status === "Done"
+                          ? "✅ Completed"
+                          : selectedAppointment.status === "Not Attend"
+                            ? "❌ No Show"
+                            : selectedAppointment.status === "Cancelled"
+                              ? "🚫 Cancelled"
+                              : selectedAppointment.status}
                       </HistoryStatusBadge>
                     </InfoValue>
                   </InfoItem>
@@ -948,510 +1430,1390 @@ const UserDashboard: React.FC = () => {
                   )}
                 </AppointmentInfoModal>
               </ModalContent>
-              
+
               <ModalActions>
-                <CancelModalButton onClick={() => setShowHistoryModal(false)}>
-                  Close
-                </CancelModalButton>
+                <CancelModalButton onClick={() => setShowHistoryModal(false)}>Close</CancelModalButton>
               </ModalActions>
             </ModalContainer>
           </ModalOverlay>
         )}
       </PageContainer>
     </>
-  );
-};
+  )
+}
 
-export default UserDashboard;
+export default UserDashboard
 
-// STYLED COMPONENTS - WITH FIXED INPUT STYLING
-const ImageUploadHint = styled.div`
-  font-size: 0.8rem;
-  color: #4ecdc4;
-  font-weight: 600;
-  text-align: center;
-  margin-top: 0.5rem;
-`;
 
-const PageContainer = styled.div`
+const ActionButtons = styled.div`
   display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  width: 100%;
-  background: #f8f9fa;
-  position: relative;
+  gap: 1rem;
+  margin-top: 1.5rem;
   
-  &::before {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-image: radial-gradient(circle at 2px 2px, rgba(78, 205, 196, 0.03) 1px, transparent 0);
-    background-size: 50px 50px;
-    pointer-events: none;
-    z-index: 0;
+  @media (max-width: 480px) {
+    flex-direction: column;
   }
-`;
+`
 
-const HistorySidebarToggle = styled.div`
-  position: fixed;
-  right: 20px;
-  top: 50%;
-  transform: translateY(-50%);
-  background: linear-gradient(135deg, #4ecdc4 0%, #44a08d 100%);
+const SecurityButton = styled.button`
+  background: #6c757d;
   color: white;
-  padding: 1.2rem 1rem;
-  border-radius: 30px 0 0 30px;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 8px 24px rgba(78, 205, 196, 0.3);
-  z-index: 99;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.6rem;
-  transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-  border: 3px solid white;
+  transition: all 0.2s ease;
+  width: 100%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
   
   &:hover {
-    transform: translateY(-50%) translateX(-8px);
-    box-shadow: 0 12px 32px rgba(78, 205, 196, 0.4);
-    padding-right: 1.5rem;
+    background: #5a6268;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
   }
+`
 
-  @media (max-width: 768px) {
-    right: 10px;
-    padding: 1rem 0.8rem;
-    border-radius: 24px 0 0 24px;
-  }
-`;
-
-const HistoryIcon = styled.div`
-  font-size: 1.6rem;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
-`;
-
-const HistoryText = styled.span`
+const SecurityActionButton = styled.button`
+  background: #34B89C;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
   font-size: 0.8rem;
-  font-weight: 700;
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  letter-spacing: 1px;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
   
-  @media (max-width: 768px) {
-    writing-mode: horizontal-tb;
-    text-orientation: initial;
-    font-size: 0.7rem;
+  &:hover {
+    background: #2a9d7f;
   }
-`;
+`
 
-const HistoryBadgeSmall = styled.div`
-  background: white;
-  color: #4ecdc4;
-  font-size: 0.75rem;
-  font-weight: 800;
-  padding: 0.3rem 0.6rem;
+const Enable2FAButton = styled.button`
+  background: #34B89C;
+  color: white;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background: #2a9d7f;
+  }
+`
+
+const Disable2FAButton = styled.button`
+  background: #dc3545;
+  color: white;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background: #c82333;
+  }
+`
+
+const OTPSetupSection = styled.div`
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
-  min-width: 24px;
-  text-align: center;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-  animation: pulse 2s infinite;
-  
-  @keyframes pulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.1); }
-  }
-`;
+  padding: 1.5rem;
+  background: #f8f9fa;
+  margin-top: 1rem;
+`
 
-const SidebarOverlay = styled.div`
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  z-index: 999;
-  animation: fadeIn 0.3s ease;
-  
-  @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-`;
+const OTPSetupTitle = styled.h4`
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+  color: #2c3e50;
+  font-weight: 600;
+`
 
-const HistorySidebar = styled.div`
-  position: fixed;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 420px;
-  background: white;
-  z-index: 1000;
-  box-shadow: -8px 0 32px rgba(0,0,0,0.15);
+const OTPEmailSection = styled.div`
   display: flex;
   flex-direction: column;
-  animation: slideInFromRight 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  gap: 1rem;
+`
 
-  @keyframes slideInFromRight {
-    from {
-      transform: translateX(100%);
-      opacity: 0;
-    }
-    to {
-      transform: translateX(0);
-      opacity: 1;
-    }
+const EmailInput = styled.input`
+  padding: 0.8rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 1rem;
+  width: 100%;
+
+  &:focus {
+    outline: none;
+    border-color: #34B89C;
+    box-shadow: 0 0 0 2px rgba(52, 184, 156, 0.1);
   }
 
+  &:disabled {
+    background-color: #f5f5f5;
+  }
+`
+
+const SendOTPButton = styled.button`
+  padding: 0.8rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  background: #34B89C;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  align-self: flex-start;
+
+  &:hover:not(:disabled) {
+    background: #2a9d7f;
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+`
+
+const OTPVerificationSection = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+`
+
+const OTPInstructions = styled.p`
+  margin: 0;
+  color: #666;
+  line-height: 1.5;
+  font-size: 0.9rem;
+`
+
+const OTPInputGroup = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+`
+
+const OTPInput = styled.input`
+  padding: 0.8rem;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  font-size: 1.2rem;
+  text-align: center;
+  letter-spacing: 0.5rem;
+  font-weight: 600;
+  font-family: monospace;
+  width: 100%;
+
+  &:focus {
+    outline: none;
+    border-color: #34B89C;
+    box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.1);
+  }
+`
+
+const ResendOTPText = styled.p`
+  margin: 0.5rem 0 0 0;
+  font-size: 0.9rem;
+  color: #666;
+  text-align: center;
+`
+
+const ResendLink = styled.button`
+  background: none;
+  border: none;
+  color: #34B89C;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 0.9rem;
+
+  &:hover:not(:disabled) {
+    color: #2a9d7f;
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+`
+
+const OTPButtonGroup = styled.div`
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+  
+  @media (max-width: 480px) {
+    flex-direction: column;
+  }
+`
+
+const SubmitButton = styled.button`
+  padding: 0.8rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  background: #34B89C;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+
+  &:hover:not(:disabled) {
+    background: #2a9d7f;
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+`
+
+const DashboardLayout = styled.div`
+  display: flex;
+  min-height: calc(100vh - 80px);
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+  }
+`
+
+const Sidebar = styled.div`
+  width: 280px;
+  background:     #ffffff ;
+  border-right: 1px solid #e9ecef;
+  display: flex;  
+  flex-direction: column;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.05);
+  
   @media (max-width: 768px) {
     width: 100%;
-    max-width: 380px;
+    border-right: none;
+    border-bottom: 1px solid #e9ecef;
   }
-
-  @media (max-width: 480px) {
-    width: 100%;
-    max-width: none;
-  }
-`;
+`
 
 const SidebarHeader = styled.div`
+  padding: 1.5rem;
+  border-bottom: 1px solid #e9ecef;
+  background: #ffffff;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1.8rem;
-  background: linear-gradient(135deg, #4ecdc4 0%, #44a08d 100%);
-  color: white;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-`;
+`
 
-const SidebarTitle = styled.h2`
-  margin: 0;
-  font-size: 1.3rem;
-  font-weight: 700;
-  letter-spacing: -0.3px;
-`;
+const SidebarTitleRow = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+`
 
-const SidebarCloseButton = styled.button`
-  background: rgba(255, 255, 255, 0.25);
+const SidebarToggleButton = styled.button`
+  background: #6BC1E1;
   border: none;
-  color: white;
-  font-size: 1.8rem;
+  font-size: 1.5rem;
+  color: #000000;
   cursor: pointer;
-  padding: 0;
-  width: 40px;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
   height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  transition: all 0.3s ease;
-  font-weight: 300;
-
+  
   &:hover {
-    background: rgba(255, 255, 255, 0.35);
-    transform: rotate(90deg);
+    background: #2a9d7f;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    transform: translateY(-1px);
   }
-`;
+  
+  &:active {
+    transform: translateY(0);
+  }
+`
 
-const SidebarContent = styled.div`
+const SidebarTitle = styled.h3`
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #2c3e50;
+  letter-spacing: -0.3px;
+`
+
+const MenuList = styled.div`
   flex: 1;
-  overflow-y: auto;
-  padding: 1.2rem;
-  
-  &::-webkit-scrollbar {
-    width: 8px;
-  }
-  
-  &::-webkit-scrollbar-track {
-    background: #f1f1f1;
-  }
-  
-  &::-webkit-scrollbar-thumb {
-    background: #4ecdc4;
-    border-radius: 4px;
-  }
-`;
+  padding: 1rem 0;
+`
 
-const SidebarHistoryList = styled.div`
+const MenuItem = styled.div<{ $active: boolean }>`
   display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-`;
-
-const SidebarHistoryCard = styled.div`
-  background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
-  padding: 1.2rem;
-  border-radius: 16px;
-  border: 2px solid #e9ecef;
-  border-left: 5px solid #6c757d;
-  cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-
-  &:hover {
-    background: white;
-    transform: translateX(-5px);
-    box-shadow: 0 8px 20px rgba(0,0,0,0.12);
-    border-left-color: #4ecdc4;
-  }
-`;
-
-const SidebarCardHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.6rem;
-`;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-left: 3px solid ${(props) => (props.$active ? "#3483b8" : "transparent")};
+  background: ${(props) => (props.$active ? "#34B89C" : "transparent")};
+  
+  &:hover {
+    background: #f8f9fa;
+    border-left-color: #34B89C;
+  }
+`
 
-const SidebarStatusBadge = styled.span<{ status: string }>`
-  font-size: 1.2rem;
-  width: 32px;
-  height: 32px;
+const MenuIcon = styled.div`
+  font-size: 1.3rem;
+  color: white;
+`
+
+const MenuText = styled.span`
+  flex: 1;
+  font-weight: 600;
+  color: #2c3e50;
+  font-size: 0.95rem;
+`
+
+const MenuBadge = styled.span<{ $primary: boolean }>`
+  background: ${(props) => (props.$primary ? "#34B89C" : "#6c757d")};
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 700;
+`
+
+const MenuCount = styled.span`
+  background: #e74c3c;
+  color: white;
+  padding: 0.25rem 0.6rem;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  font-weight: 700;
+  min-width: 20px;
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  background: ${props => {
-    switch (props.status) {
-      case "Done": return "#d4edda";
-      case "Not Attend": return "#fff3cd";
-      case "Cancelled": return "#f8d7da";
-      default: return "#e2e6ea";
-    }
-  }};
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-`;
+`
 
-const SuccessNotification = styled.div`
-  position: fixed;
-  top: 24px;
-  right: 24px;
-  background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
-  border: 2px solid #28a745;
-  border-radius: 16px;
-  padding: 1.2rem 1.6rem;
+const SidebarFooter = styled.div`
+  padding: 1.5rem;
+  border-top: 1px solid #e9ecef;
+  background: #ffffff;
+`
+
+const SupportSection = styled.div`
+  text-align: center;
+`
+
+const SupportTitle = styled.h4`
+  margin: 0 0 0.5rem 0;
+  font-size: 0.9rem;
+  color: #2c3e50;
+  font-weight: 600;
+`
+
+const SupportText = styled.p`
+  margin: 0 0 1rem 0;
+  font-size: 0.8rem;
+  color: #6c757d;
+  line-height: 1.4;
+`
+
+const SupportButton = styled.button`
+  background: #6c757d;
+  color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  width: 100%;
+  
+  &:hover {
+    background: #5a6268;
+    transform: translateY(-1px);
+  }
+`
+
+const ContentArea = styled.div`
+  flex: 1;
+  background: #ffffff;
+  overflow-y: auto;
+`
+
+const MainContent = styled.div`
+  padding: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  
+  @media (max-width: 768px) {
+    padding: 1.5rem;
+  }
+`
+
+const ContentHeader = styled.div`
+  margin-bottom: 2rem;
+`
+
+const ContentTitle = styled.h1`
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: #2c3e50;
+  margin: 0 0 0.5rem 0;
+  letter-spacing: -0.8px;
+  
+  @media (max-width: 768px) {
+    font-size: 1.8rem;
+  }
+`
+
+const ContentSubtitle = styled.p`
+  font-size: 1.1rem;
+  color: #6c757d;
+  margin: 0;
+  font-weight: 500;
+  
+  @media (max-width: 768px) {
+    font-size: 1rem;
+  }
+`
+
+const QuickStatsGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+`
+
+const StatCard = styled.div`
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid #000000;
   display: flex;
   align-items: center;
   gap: 1rem;
-  box-shadow: 0 8px 24px rgba(40, 167, 69, 0.25);
-  z-index: 1001;
-  animation: slideInBounce 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-
-  @keyframes slideInBounce {
-    0% {
-      transform: translateX(400px);
-      opacity: 0;
-    }
-    60% {
-      transform: translateX(-10px);
-      opacity: 1;
-    }
-    100% {
-      transform: translateX(0);
-    }
-  }
-
-  @media (max-width: 768px) {
-    top: 12px;
-    right: 12px;
-    left: 12px;
-  }
-`;
-
-const SuccessIcon = styled.div`
-  background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-  color: white;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: bold;
-  font-size: 1.1rem;
-  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
-`;
-
-const SuccessText = styled.span`
-  color: #155724;
-  font-weight: 600;
-  flex: 1;
-  font-size: 0.95rem;
-`;
-
-const CloseSuccessButton = styled.button`
-  background: rgba(21, 87, 36, 0.1);
-  border: none;
-  font-size: 1.5rem;
-  color: #155724;
-  cursor: pointer;
-  padding: 0;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  transition: all 0.3s ease;
-
+  transition: all 0.2s ease;
+  
   &:hover {
-    background: rgba(21, 87, 36, 0.2);
-    transform: rotate(90deg) scale(1.1);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   }
-`;
+`
 
-const HeaderBar = styled.header`
+const StatIcon = styled.div`
+  font-size: 2.5rem;
+  color: #34B89C;
+`
+
+const StatContent = styled.div`
+  display: flex;
+  flex-direction: column;
+`
+
+const StatNumber = styled.div`
+  font-size: 2rem;
+  font-weight: 800;
+  color: #2c3e50;
+  line-height: 1;
+`
+
+const StatLabel = styled.div`
+  font-size: 0.9rem;
+  color: #6c757d;
+  font-weight: 600;
+`
+
+const ActionCardsGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+`
+
+const ActionCard = styled.div`
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid #e9ecef;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    border-color: #34B89C;
+  }
+`
+
+const ActionCardIcon = styled.div`
+  font-size: 2.2rem;
+  color: #34B89C;
+  background: #f0f9f7;
+  padding: 1rem;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 70px;
+  height: 70px;
+  border: 1px solid #e0f2ed;
+`
+
+const ActionCardContent = styled.div`
+  flex: 1;
+`
+
+const ActionCardTitle = styled.h3`
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #2c3e50;
+  margin: 0 0 0.5rem 0;
+`
+
+const ActionCardText = styled.p`
+  font-size: 0.9rem;
+  color: #6c757d;
+  margin: 0;
+  line-height: 1.4;
+`
+
+const RecentActivitySection = styled.div`
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e9ecef;
+  margin-bottom: 2rem;
+`
+
+const NoActivity = styled.div`
+  text-align: center;
+  padding: 2rem;
+  color: #6c757d;
+`
+
+const NoActivityIcon = styled.div`
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  opacity: 0.5;
+`
+
+const NoActivityText = styled.p`
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 500;
+`
+
+const ActivityList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+`
+
+const ActivityItem = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+`
+
+const ActivityIcon = styled.div`
+  font-size: 1.5rem;
+  color: #34B89C;
+`
+
+const ActivityContent = styled.div`
+  flex: 1;
+`
+
+const ActivityTitle = styled.div`
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 0.25rem;
+`
+
+const ActivityDate = styled.div`
+  font-size: 0.85rem;
+  color: #6c757d;
+`
+
+const ActivityStatus = styled.span<{ status: string }>`
+  padding: 0.4rem 0.8rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: ${(props) => {
+    switch (props.status) {
+      case "Confirmed":
+        return "#d4edda"
+      case "Cancelled":
+        return "#f8d7da"
+      case "Completed":
+        return "#d1ecf1"
+      default:
+        return "#fff3cd"
+    }
+  }};
+  color: ${(props) => {
+    switch (props.status) {
+      case "Confirmed":
+        return "#155724"
+      case "Cancelled":
+        return "#721c24"
+      case "Completed":
+        return "#0c5460"
+      default:
+        return "#856404"
+    }
+  }};
+`
+
+// PET REGISTRATION SECTION
+const PetRegistrationSection = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+`
+
+const PetRegistrationCard = styled.div`
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 2.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e9ecef;
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  border-left: 4px solid #34B89C;
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+    text-align: center;
+    padding: 2rem;
+  }
+`
+
+const PetRegistrationIcon = styled.div`
+  font-size: 4rem;
+  color: #34B89C;
+  background: #f0f9f7;
+  padding: 1.5rem;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 100px;
+  height: 100px;
+  border: 1px solid #e0f2ed;
+`
+
+const PetRegistrationContent = styled.div`
+  flex: 1;
+`
+
+const PetRegistrationTitle = styled.h2`
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #2c3e50;
+  margin: 0 0 1rem 0;
+  letter-spacing: -0.5px;
+`
+
+const PetRegistrationText = styled.p`
+  font-size: 1.05rem;
+  color: #6c757d;
+  margin: 0 0 2rem 0;
+  line-height: 1.6;
+`
+
+const PetRegistrationButton = styled.button`
+  background: #34B89C;
+  color: white;
+  border: none;
+  padding: 1rem 2rem;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  
+  &:hover {
+    background: #2a9d7f;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+  }
+`
+
+const ExistingPetsSection = styled.div`
+  margin-top: 2rem;
+`
+
+const PetsList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+`
+
+const PetListItem = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.5rem;
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e9ecef;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    border-color: #34B89C;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+`
+
+const PetItemIcon = styled.div`
+  font-size: 2rem;
+  color: #34B89C;
+`
+
+const PetItemInfo = styled.div`
+  flex: 1;
+`
+
+const PetItemName = styled.div`
+  font-weight: 700;
+  color: #2c3e50;
+  font-size: 1.1rem;
+  margin-bottom: 0.25rem;
+`
+
+const PetItemDetails = styled.div`
+  color: #6c757d;
+  font-size: 0.9rem;
+`
+
+const PetItemActions = styled.div`
+  display: flex;
+  gap: 0.5rem;
+`
+
+const ViewRecordsButton = styled.button`
+  background: #34B89C;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background: #2a9d7f;
+    transform: translateY(-1px);
+  }
+`
+
+const PetBenefitsGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+`
+
+const BenefitCard = styled.div`
+  background: #ffffff;
+  padding: 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e9ecef;
+  text-align: center;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+`
+
+const BenefitIcon = styled.div`
+  font-size: 2.5rem;
+  margin-bottom: 1rem;
+  color: #34B89C;
+`
+
+const BenefitTitle = styled.h3`
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #2c3e50;
+  margin: 0 0 0.5rem 0;
+`
+
+const BenefitText = styled.p`
+  font-size: 0.9rem;
+  color: #6c757d;
+  margin: 0;
+  line-height: 1.4;
+`
+
+// PETS GRID COMPONENTS
+const PetsGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+`
+
+const PetCard = styled.div`
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 1.5rem;
+  border: 1px solid #e9ecef;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    border-color: #34B89C;
+    transform: translateY(-2px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+`
+
+const PetIcon = styled.div`
+  font-size: 2rem;
+  color: #34B89C;
+`
+
+const PetInfo = styled.div`
+  flex: 1;
+`
+
+const PetName = styled.div`
+  font-weight: 700;
+  color: #2c3e50;
+  font-size: 1.1rem;
+  margin-bottom: 0.25rem;
+`
+
+const PetDetails = styled.div`
+  color: #6c757d;
+  font-size: 0.85rem;
+`
+
+const ViewAllPetsCard = styled(PetCard)`
+  cursor: pointer;
+  background: #f0f9f7;
+  border-color: #34B89C;
+  text-align: center;
+  flex-direction: column;
+  gap: 0.5rem;
+  
+  &:hover {
+    background: #e0f2ed;
+  }
+`
+
+const ViewAllIcon = styled.div`
+  font-size: 1.5rem;
+  color: #34B89C;
+`
+
+const ViewAllText = styled.div`
+  font-weight: 600;
+  color: #2c3e50;
+  font-size: 0.9rem;
+`
+
+// MEDICAL RECORDS SECTION
+const MedicalRecordsDashboard = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+`
+
+const MedicalRecordsCard = styled(PetRegistrationCard)``
+
+const MedicalRecordsIcon = styled(PetRegistrationIcon)``
+
+const MedicalRecordsContent = styled(PetRegistrationContent)``
+
+const MedicalRecordsTitle = styled(PetRegistrationTitle)``
+
+const MedicalRecordsText = styled(PetRegistrationText)``
+
+const MedicalRecordsButton = styled(PetRegistrationButton)``
+
+const MedicalFeaturesGrid = styled(PetBenefitsGrid)``
+
+const FeatureCard = styled(BenefitCard)``
+
+const FeatureIcon = styled(BenefitIcon)``
+
+const FeatureTitle = styled(BenefitTitle)``
+
+const FeatureText = styled(BenefitText)``
+
+// PROFILE SECTION
+const ProfileDashboard = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+  }
+`
+
+const ProfileInfoCard = styled.div`
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 2rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e9ecef;
+  text-align: center;
+`
+
+const ProfileAvatarSection = styled.div`
+  margin-bottom: 2rem;
+`
+
+const ProfileAvatarLarge = styled.div`
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 3px solid #34B89C;
+  margin: 0 auto 1rem auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f0f9f7;
+`
+
+const ProfileName = styled.h2`
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #2c3e50;
+  margin: 0 0 0.5rem 0;
+`
+
+const ProfileEmail = styled.p`
+  color: #6c757d;
+  margin: 0;
+  font-size: 0.95rem;
+`
+
+const ProfileDetails = styled.div`
+  text-align: left;
+  margin-bottom: 2rem;
+`
+
+const EditProfileButton = styled.button`
+  background: #34B89C;
+  color: white;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  
+  &:hover {
+    background: #2a9d7f;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+  }
+`
+
+const SecurityCard = styled.div`
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 2rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e9ecef;
+`
+
+const SecurityTitle = styled.h3`
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #2c3e50;
+    margin: 0 0 1.5rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  `
+
+const SecurityFeatures = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+`
+
+const SecurityFeature = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+`
+
+const SecurityFeatureIcon = styled.div`
+  font-size: 1.5rem;
+  color: #34B89C;
+`
+
+const SecurityFeatureInfo = styled.div`
+  flex: 1;
+`
+
+const SecurityFeatureTitle = styled.div`
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 0.25rem;
+`
+
+const SecurityFeatureStatus = styled.div`
+  font-size: 0.85rem;
+  color: #6c757d;
+  font-weight: 500;
+`
+
+const SecurityStatus = styled.span<{ $enabled: boolean }>`
+  color: ${(props) => (props.$enabled ? "#28a745" : "#dc3545")};
+  font-weight: 600;
+`
+
+// APPOINTMENTS SECTION
+const NewAppointmentButton = styled.button`
+  background: #34B89C;
+  color: white;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  
+  &:hover {
+    background: #2a9d7f;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+  }
+`
+
+const AppointmentsSection = styled.div`
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e9ecef;
+`
+
+const SectionHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1.2rem 2.5rem;
-  background: linear-gradient(135deg, #4ecdc4 0%, #44a08d 100%);
-  box-shadow: 0 4px 20px rgba(78, 205, 196, 0.25);
-  position: sticky;
-  top: 0;
-  z-index: 100;
-
+  margin-bottom: 1.5rem;
+  
   @media (max-width: 768px) {
-    padding: 1.2rem;
-    position: relative;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: 1rem;
+    align-items: stretch;
   }
-`;
+`
+
+const SectionTitleGroup = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+`
+
+const SectionTitle = styled.h2`
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #2c3e50;
+  margin: 0;
+`
+
+const AppointmentCount = styled.span`
+  background: #34B89C;
+  color: white;
+  padding: 0.4rem 0.8rem;
+  border-radius: 16px;
+  font-size: 0.8rem;
+  font-weight: 700;
+`
+
+const NoAppointments = styled.div`
+  text-align: center;
+  padding: 3rem 2rem;
+  color: #6c757d;
+`
+
+const NoAppointmentsIcon = styled.div`
+  font-size: 4rem;
+  margin-bottom: 1rem;
+  opacity: 0.5;
+`
+
+const NoAppointmentsText = styled.p`
+  font-size: 1.1rem;
+  margin: 0 0 1.5rem 0;
+  font-weight: 500;
+`
+
+const ScheduleButton = styled.button`
+  background: #34B89C;
+  color: white;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  
+  &:hover {
+    background: #2a9d7f;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+  }
+`
+
+const AppointmentsList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+`
+
+const AppointmentCard = styled.div`
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 1.5rem;
+  border: 1px solid #e9ecef;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    border-color: #34B89C;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+`
+
+const AppointmentHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+    gap: 1rem;
+  }
+`
+
+const AppointmentLeftSide = styled.div`
+  flex: 1;
+`
+
+const AppointmentStatus = styled.div`
+  font-weight: 700;
+  color: #2c3e50;
+  font-size: 1.1rem;
+  margin-bottom: 0.5rem;
+`
+
+const AppointmentInfo = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+  flex-wrap: wrap;
+`
+
+const AppointmentLabel = styled.span`
+  font-weight: 600;
+  color: #6c757d;
+  font-size: 0.9rem;
+`
+
+const AppointmentValue = styled.span`
+  color: #2c3e50;
+  font-weight: 500;
+  font-size: 0.9rem;
+`
+
+const AppointmentSeparator = styled.span`
+  color: #dee2e6;
+  font-weight: 300;
+`
+
+const StatusBadge = styled.span<{ status: string }>`
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  background: ${(props) => {
+    switch (props.status) {
+      case "Confirmed":
+        return "#d4edda"
+      case "Pending Payment":
+        return "#fff3cd"
+      case "Cancelled":
+        return "#f8d7da"
+      case "Completed":
+        return "#d1ecf1"
+      default:
+        return "#e2e3e5"
+    }
+  }};
+  color: ${(props) => {
+    switch (props.status) {
+      case "Confirmed":
+        return "#155724"
+      case "Pending Payment":
+        return "#856404"
+      case "Cancelled":
+        return "#721c24"
+      case "Completed":
+        return "#0c5460"
+      default:
+        return "#383d41"
+    }
+  }};
+  white-space: nowrap;
+  
+  @media (max-width: 768px) {
+    align-self: flex-start;
+  }
+`
+
+const ButtonRow = styled.div`
+  display: flex;
+  gap: 0.75rem;
+  
+  @media (max-width: 480px) {
+    flex-direction: column;
+  }
+`
+
+const EditButton = styled.button`
+  background: #34B89C;
+  color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background: #2a9d7f;
+    transform: translateY(-1px);
+  }
+`
+
+const DeleteButton = styled.button`
+  background: #e74c3c;
+  color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    background: #c0392b;
+    transform: translateY(-1px);
+  }
+`
+
+// EXISTING STYLED COMPONENTS (for reference and completion)
+const PageContainer = styled.div`
+  min-height: 100vh;
+  background: #7a0c4c;
+`
+
+const HeaderBar = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 2rem;
+  background: #4ECDC4;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border-bottom: 1px solid #e9ecef;
+  
+  @media (max-width: 768px) {
+    padding: 1rem;
+  }
+`
 
 const HeaderLeft = styled.div`
   display: flex;
   align-items: center;
-  gap: 1.5rem;
-
-  @media (max-width: 768px) {
-    width: 100%;
-    justify-content: space-between;
-  }
-`;
-
-const HeaderRight = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 1.5rem;
-  color: white;
-
-  @media (max-width: 768px) {
-    display: none;
-    flex-direction: column;
-    width: 100%;
-    gap: 1rem;
-    padding-top: 1rem;
-    
-    &.open {
-      display: flex;
-      animation: slideDown 0.3s ease;
-    }
-  }
-  
-  @keyframes slideDown {
-    from {
-      opacity: 0;
-      transform: translateY(-10px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-`;
-
-const Logo = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 0.9rem;
-  color: white;
-`;
-
-const LogoIcon = styled.div`
-  font-size: 2.2rem;
-  background: rgba(255, 255, 255, 0.25);
-  padding: 0.7rem;
-  border-radius: 14px;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  transition: all 0.3s ease;
-  
-  &:hover {
-    transform: scale(1.05) rotate(-5deg);
-  }
-`;
-
-const LogoText = styled.div`
-  display: flex;
-  flex-direction: column;
-`;
-
-const ClinicName = styled.span`
-  font-size: 1.6rem;
-  font-weight: 800;
-  line-height: 1.2;
-  text-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  letter-spacing: -0.5px;
-`;
-
-const LogoSubtext = styled.span`
-  font-size: 0.8rem;
-  opacity: 0.95;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-`;
-
-const UserInfo = styled.span`
-  font-size: 1rem;
-  font-weight: 600;
-  color: white;
-  margin-right: 1rem;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.1);
-
-  @media (max-width: 768px) {
-    margin-right: 0;
-    margin-bottom: 0.5rem;
-  }
-`;
+  gap: 1rem;
+`
 
 const MobileMenuButton = styled.button`
   display: none;
-  background: rgba(255, 255, 255, 0.25);
+  background: none;
   border: none;
   cursor: pointer;
-  padding: 0.6rem;
-  border-radius: 10px;
-  backdrop-filter: blur(10px);
-  transition: all 0.3s ease;
-  
-  &:hover {
-    background: rgba(255, 255, 255, 0.35);
-  }
+  padding: 0.5rem;
   
   @media (max-width: 768px) {
     display: block;
   }
-`;
+`
 
 const HamburgerIcon = styled.div`
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  width: 26px;
-  height: 20px;
+  gap: 4px;
+  width: 24px;
   
   span {
     height: 3px;
-    width: 100%;
-    background-color: white;
-    border-radius: 3px;
+    background: #2c3e50;
+    border-radius: 2px;
     transition: all 0.3s ease;
   }
   
   &.open span:nth-child(1) {
-    transform: rotate(45deg) translate(7px, 7px);
+    transform: rotate(45deg) translate(6px, 6px);
   }
   
   &.open span:nth-child(2) {
@@ -1459,1121 +2821,776 @@ const HamburgerIcon = styled.div`
   }
   
   &.open span:nth-child(3) {
-    transform: rotate(-45deg) translate(7px, -7px);
+    transform: rotate(-45deg) translate(6px, -6px);
   }
-`;
+`
 
-const ProfileContainer = styled.div`
-  position: relative;
+const Logo = styled.div`
   display: flex;
   align-items: center;
-`;
+  gap: 0.75rem;
+`
 
-const ProfileIconButton = styled.div`
-  cursor: pointer;
-  padding: 0.4rem;
-  border-radius: 12px;
-  transition: all 0.3s ease;
+const LogoIcon = styled.div`
+  font-size: 2rem;
+  color: #34B89C;
+`
 
-  &:hover {
-    background: rgba(255, 255, 255, 0.15);
-    transform: translateY(-2px);
-  }
-`;
+const LogoText = styled.div`
+  display: flex;
+  flex-direction: column;
+`
+
+const ClinicName = styled.div`
+  font-weight: 800;
+  font-size: 1.2rem;
+  color: #2c3e50;
+  letter-spacing: -0.5px;
+`
+
+const LogoSubtext = styled.div`
+  font-size: 0.75rem;
+  color: #6c757d;
+  font-weight: 500;
+`
+
+const HeaderRight = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  
+  @media (max-width: 768px) {
+    display: ${(props) => (props.className?.includes("open") ? "flex" : "none")};
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+      background: white;
+      padding: 1rem;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+      flex-direction: column;
+      align-items: stretch;
+      z-index: 1000;
+    }
+  `
+
+const UserInfo = styled.div`
+    font-weight: 600;
+    color: #2c3e50;
+    
+    @media (max-width: 768px) {
+      text-align: center;
+      padding: 0.5rem 0;
+    }
+  `
+
+const ProfileContainer = styled.div`
+    display: flex;
+    align-items: center;
+  `
+
+const ProfileIconButton = styled.button`
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 50%;
+    transition: background 0.3s ease;
+    
+    &:hover {
+      background: #f8f9fa;
+    }
+  `
 
 const ProfileAvatar = styled.div`
-  width: 46px;
-  height: 46px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   overflow: hidden;
-  background: white;
+  border: 2px solid #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 3px solid rgba(255, 255, 255, 0.4);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-  transition: all 0.3s ease;
-  
-  ${ProfileIconButton}:hover & {
-    border-color: rgba(255, 255, 255, 0.6);
-    box-shadow: 0 6px 16px rgba(0,0,0,0.25);
-  }
-`;
+  background: #f0f9f7;
+`
 
 const ProfileImage = styled.img`
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-`;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  `
 
 const DefaultAvatar = styled.div`
-  font-size: 1.4rem;
-  color: #4ecdc4;
-`;
+    font-size: 1.2rem;
+    color: #6c757d;
+  `
 
 const DefaultAvatarLarge = styled(DefaultAvatar)`
-  font-size: 4.5rem;
-`;
+    font-size: 3rem;
+  `
 
 const LogoutButton = styled.button`
-  background: rgba(255, 255, 255, 0.25);
+    background: #e74c3c;
+    color: white;
+    border: none;
+    padding: 0.6rem 1.2rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    
+    &:hover {
+      background: #c0392b;
+      transform: translateY(-1px);
+    }
+    
+    @media (max-width: 768px) {
+      width: 100%;
+      padding: 0.8rem;
+    }
+  `
+
+// HISTORY SIDEBAR COMPONENTS
+const HistorySidebarToggle = styled.button`
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  background: #34B89C;
   color: white;
-  border: 2px solid rgba(255, 255, 255, 0.4);
-  padding: 0.7rem 1.4rem;
-  border-radius: 25px;
-  font-size: 0.9rem;
+  border: none;
+  padding: 1rem;
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
   cursor: pointer;
-  font-weight: 700;
-  transition: all 0.3s ease;
-  backdrop-filter: blur(10px);
-  text-shadow: 0 1px 2px rgba(0,0,0,0.1);
-
-  &:hover {
-    background: rgba(255, 255, 255, 0.35);
-    border-color: rgba(255, 255, 255, 0.6);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  }
-
-  @media (max-width: 768px) {
-    width: 100%;
-  }
-`;
-
-const Content = styled.div`
-  flex: 1;
-  padding: 2.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   display: flex;
   flex-direction: column;
-  gap: 2.5rem;
-  position: relative;
-  z-index: 1;
-
-  @media (max-width: 768px) {
-    padding: 1.2rem;
-    gap: 1.8rem;
-  }
-`;
-
-const WelcomeSection = styled.div`
-  background: white;
-  padding: 2.8rem;
-  border-radius: 24px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.08);
-  text-align: center;
-  border-top: 5px solid #4ecdc4;
-  position: relative;
-  overflow: hidden;
-  
-  &::before {
-    content: '';
-    position: absolute;
-    top: -50%;
-    right: -50%;
-    width: 200%;
-    height: 200%;
-    background: radial-gradient(circle, rgba(78,205,196,0.05) 0%, transparent 70%);
-    animation: rotate 20s linear infinite;
-  }
-  
-  @keyframes rotate {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
-
-  @media (max-width: 768px) {
-    padding: 2rem;
-  }
-`;
-
-const WelcomeTitle = styled.h1`
-  font-size: 2.3rem;
-  font-weight: 800;
-  color: #2c3e50;
-  margin: 0 0 0.6rem 0;
-  position: relative;
-  z-index: 1;
-  letter-spacing: -0.8px;
-
-  @media (max-width: 768px) {
-    font-size: 1.7rem;
-  }
-`;
-
-const WelcomeSubtitle = styled.p`
-  font-size: 1.15rem;
-  color: #7f8c8d;
-  margin: 0;
-  position: relative;
-  z-index: 1;
-  font-weight: 500;
-
-  @media (max-width: 768px) {
-    font-size: 1rem;
-  }
-`;
-
-const CardsGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 1.8rem;
-
-  @media (max-width: 768px) {
-    grid-template-columns: 1fr;
-    gap: 1.2rem;
-  }
-`;
-
-const Card = styled.div`
-  background: white;
-  border-radius: 20px;
-  padding: 2.2rem;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
-  cursor: pointer;
-  transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-  border: 2px solid #e9ecef;
-  display: flex;
   align-items: center;
-  gap: 1.6rem;
-  position: relative;
-  overflow: hidden;
+  justify-content: center;
+  gap: 2px;
+  transition: all 0.2s ease;
+  z-index: 100;
+  
+  &:hover {
+    background: #2a9d7f;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+  }
+`
 
-  &::before {
-    content: '';
+const HistoryIcon = styled.div`
+    font-size: 1.2rem;
+  `
+
+const HistoryText = styled.span`
+    font-size: 0.7rem;
+    font-weight: 600;
+  `
+
+const HistoryBadgeSmall = styled.span`
     position: absolute;
+    top: -5px;
+    right: -5px;
+    background: #e74c3c;
+    color: white;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  `
+
+const SidebarOverlay = styled.div`
+    position: fixed;
     top: 0;
     left: 0;
     right: 0;
-    height: 5px;
-    background: linear-gradient(90deg, #4ecdc4, #44a08d);
-    transform: scaleX(0);
-    transition: transform 0.3s ease;
-  }
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 1998;
+  `
 
-  &:hover {
-    transform: translateY(-8px);
-    box-shadow: 0 16px 40px rgba(78, 205, 196, 0.2);
-    border-color: #4ecdc4;
-    
-    &::before {
-      transform: scaleX(1);
-    }
-  }
-
-  @media (max-width: 768px) {
-    padding: 1.8rem;
-    gap: 1.2rem;
-  }
-`;
-
-const CardIcon = styled.div`
-  font-size: 2.8rem;
-  color: #4ecdc4;
-  background: linear-gradient(135deg, #e8f8f5 0%, #d4edda 100%);
-  padding: 1.3rem;
-  border-radius: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 85px;
-  height: 85px;
-  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.2);
-  transition: all 0.3s ease;
-  
-  ${Card}:hover & {
-    transform: scale(1.1) rotate(-5deg);
-    box-shadow: 0 6px 20px rgba(78, 205, 196, 0.3);
-  }
-
-  @media (max-width: 768px) {
-    font-size: 2.2rem;
-    min-width: 70px;
-    height: 70px;
-    padding: 1rem;
-  }
-`;
-
-const CardContent = styled.div`
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-`;
-
-const CardTitle = styled.h3`
-  font-size: 1.4rem;
-  font-weight: 700;
-  color: #2c3e50;
-  margin: 0;
-  letter-spacing: -0.3px;
-
-  @media (max-width: 768px) {
-    font-size: 1.2rem;
-  }
-`;
-
-const CardText = styled.p`
-  font-size: 0.95rem;
-  color: #6c757d;
-  margin: 0;
-  line-height: 1.5;
-  font-weight: 500;
-
-  @media (max-width: 768px) {
-    font-size: 0.9rem;
-  }
-`;
-
-const AppointmentsSection = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 1.8rem;
-`;
-
-const SectionHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 1rem;
-`;
-
-const SectionTitleGroup = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 1.2rem;
-  flex-wrap: wrap;
-`;
-
-const SectionTitle = styled.h2`
-  font-size: 1.7rem;
-  font-weight: 700;
-  color: #2c3e50;
-  margin: 0;
-  letter-spacing: -0.5px;
-
-  @media (max-width: 768px) {
-    font-size: 1.4rem;
-  }
-`;
-
-const AppointmentCount = styled.span`
-  background: #4ecdc4;
-  color: white;
-  padding: 0.5rem 1rem;
-  border-radius: 20px;
-  font-size: 0.85rem;
-  font-weight: 700;
-  box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
-`;
-
-const AppointmentsList = styled.div`
-  display: grid;
-  gap: 1.3rem;
-  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-
-  @media (max-width: 768px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const AppointmentCard = styled.div`
-  background: white;
-  padding: 1.8rem;
-  border-radius: 20px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
-  border: 2px solid #e9ecef;
-  border-left: 6px solid #ffc107;
-  display: flex;
-  flex-direction: column;
-  gap: 1.2rem;
-  transition: all 0.3s ease;
-
-  &:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 12px 32px rgba(0,0,0,0.12);
-  }
-
-  @media (max-width: 768px) {
-    padding: 1.4rem;
-  }
-`;
-
-const AppointmentHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 1rem;
-  flex-wrap: wrap;
-`;
-
-const AppointmentLeftSide = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  flex: 1;
-`;
-
-const AppointmentStatus = styled.div`
-  font-weight: 700;
-  color: #2c3e50;
-  font-size: 1.05rem;
-`;
-
-const AppointmentInfo = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-`;
-
-const AppointmentLabel = styled.span`
-  font-weight: 600;
-  color: #6c757d;
-  font-size: 0.85rem;
-`;
-
-const AppointmentValue = styled.span`
-  color: #2c3e50;
-  font-size: 0.9rem;
-  font-weight: 500;
-`;
-
-const AppointmentSeparator = styled.span`
-  color: #dee2e6;
-  margin: 0 0.25rem;
-`;
-
-const StatusBadge = styled.span<{ status: string }>`
-  padding: 0.5rem 1rem;
-  border-radius: 20px;
-  font-size: 0.8rem;
-  font-weight: 700;
-  white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-  background: ${props => {
-    switch (props.status) {
-      case "Confirmed": return "#d4edda";
-      case "Cancelled": return "#f8d7da";
-      case "Completed": return "#d1ecf1";
-      default: return "#fff3cd";
-    }
-  }};
-  color: ${props => {
-    switch (props.status) {
-      case "Confirmed": return "#155724";
-      case "Cancelled": return "#721c24";
-      case "Completed": return "#0c5460";
-      default: return "#856404";
-    }
-  }};
-`;
-
-const HistoryStatusBadge = styled.span<{ status: string }>`
-  padding: 0.5rem 1rem;
-  border-radius: 20px;
-  font-size: 0.8rem;
-  font-weight: 700;
-  white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-  background: ${props => {
-    switch (props.status) {
-      case "Done": return "#d4edda";
-      case "Not Attend": return "#fff3cd";
-      case "Cancelled": return "#f8d7da";
-      default: return "#e2e6ea";
-    }
-  }};
-  color: ${props => {
-    switch (props.status) {
-      case "Done": return "#155724";
-      case "Not Attend": return "#856404";
-      case "Cancelled": return "#721c24";
-      default: return "#6c757d";
-    }
-  }};
-`;
-
-const ButtonRow = styled.div`
-  display: flex;
-  gap: 1rem;
-  margin-top: 0.5rem;
-
-  @media (max-width: 480px) {
+const HistorySidebar = styled.div`
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 400px;
+    background: white;
+    box-shadow: -4px 0 16px rgba(0,0,0,0.1);
+    z-index: 1999;
+    display: flex;
     flex-direction: column;
-    gap: 0.8rem;
-  }
-`;
+    
+    @media (max-width: 480px) {
+      width: 100%;
+    }
+  `
 
-const EditButton = styled.button`
-  background: #4ecdc4;
-  color: white;
-  border: none;
-  padding: 0.75rem 1.4rem;
-  border-radius: 12px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 700;
-  transition: all 0.3s ease;
-  flex: 1;
-  box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
+const SidebarCloseButton = styled.button`
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: #6c757d;
+    padding: 0.25rem;
+    
+    &:hover {
+      color: #2c3e50;
+    }
+  `
 
-  &:hover {
-    background: #45b7b8;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(78, 205, 196, 0.4);
-  }
-`;
-
-const DeleteButton = styled.button`
-  background: #e74c3c;
-  color: white;
-  border: none;
-  padding: 0.75rem 1.4rem;
-  border-radius: 12px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 700;
-  transition: all 0.3s ease;
-  flex: 1;
-  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3);
-
-  &:hover {
-    background: #c0392b;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(231, 76, 60, 0.4);
-  }
-`;
-
-const NoAppointments = styled.div`
-  text-align: center;
-  padding: 3.5rem 2rem;
-  background: white;
-  border-radius: 24px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
-  border: 2px solid #e9ecef;
-  border-top: 5px solid #4ecdc4;
-
-  @media (max-width: 768px) {
-    padding: 2.5rem 1.5rem;
-  }
-`;
-
-const NoAppointmentsIcon = styled.div`
-  font-size: 4rem;
-  margin-bottom: 1.5rem;
-  opacity: 0.6;
-  filter: grayscale(0.3);
-`;
-
-const NoAppointmentsText = styled.p`
-  font-size: 1.15rem;
-  color: #6c757d;
-  margin-bottom: 2rem;
-  font-weight: 500;
-`;
-
-const ScheduleButton = styled.button`
-  background: #4ecdc4;
-  color: white;
-  border: none;
-  padding: 1rem 2rem;
-  border-radius: 12px;
-  font-size: 1rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.3);
-
-  &:hover {
-    background: #45b7b8;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(78, 205, 196, 0.4);
-  }
-`;
-
-const MedicalRecordsSection = styled.div`
-  padding: 2rem;
-  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-  border-radius: 16px;
-  border-left: 5px solid #4ecdc4;
-  text-align: center;
-`;
-
-const SectionSubtitle = styled.h3`
-  font-size: 1.3rem;
-  font-weight: 700;
-  color: #2c3e50;
-  margin: 0 0 1.5rem 0;
-  letter-spacing: -0.3px;
-`;
-
-const ViewRecordsButton = styled.button`
-  background: #4ecdc4;
-  color: white;
-  border: none;
-  padding: 1rem 2rem;
-  border-radius: 12px;
-  font-size: 1rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.3);
-
-  &:hover {
-    background: #45b7b8;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(78, 205, 196, 0.4);
-  }
-`;
+const SidebarContent = styled.div`
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+  `
 
 const NoHistoryMessage = styled.div`
-  text-align: center;
-  padding: 3rem 2rem;
-  background: #f8f9fa;
-  border-radius: 16px;
-  border: 2px solid #e9ecef;
-`;
+    text-align: center;
+    padding: 3rem 2rem;
+    color: #6c757d;
+  `
 
 const NoHistoryIcon = styled.div`
-  font-size: 3rem;
-  margin-bottom: 1.5rem;
-  opacity: 0.5;
-`;
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+  `
 
 const NoHistoryText = styled.p`
-  color: #6c757d;
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 500;
-`;
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 500;
+  `
 
-const PetName = styled.div`
-  font-weight: 700;
-  color: #2c3e50;
-  font-size: 1rem;
-  letter-spacing: -0.2px;
-`;
+const SidebarHistoryList = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  `
+
+const SidebarHistoryCard = styled.div`
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 1.25rem;
+  border: 1px solid #e9ecef;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    border-color: #34B89C;
+    transform: translateX(-4px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+`
+
+const SidebarCardHeader = styled.div`
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  `
 
 const ServiceInfo = styled.div`
-  color: #4ecdc4;
-  font-size: 0.9rem;
-  font-weight: 600;
-`;
+    color: #6c757d;
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+    font-size: 0.9rem;
+  `
 
 const DateInfo = styled.div`
-  color: #6c757d;
-  font-size: 0.85rem;
-  font-weight: 500;
-`;
+    color: #6c757d;
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+  `
 
 const ClickHint = styled.div`
-  font-size: 0.75rem;
-  color: #4ecdc4;
-  font-weight: 600;
-  text-align: center;
-  opacity: 0.8;
-  margin-top: 0.3rem;
-`;
+    color: #34B89C;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-align: right;
+  `
+
+// MODAL COMPONENTS
+const SuccessNotification = styled.div`
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    background: #d4edda;
+    color: #155724;
+    padding: 1rem 1.5rem;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    z-index: 2000;
+    border: 1px solid #c3e6cb;
+    animation: slideInRight 0.3s ease;
+    
+    @keyframes slideInRight {
+      from {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+  `
+
+const SuccessIcon = styled.div`
+    font-size: 1.2rem;
+    font-weight: bold;
+  `
+
+const SuccessText = styled.div`
+    font-weight: 600;
+    flex: 1;
+  `
+
+const CloseSuccessButton = styled.button`
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    color: #155724;
+    padding: 0.25rem;
+    
+    &:hover {
+      opacity: 0.7;
+    }
+  `
 
 const ModalOverlay = styled.div`
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  padding: 1rem;
-  animation: fadeIn 0.3s ease;
-  
-  @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-`;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    padding: 1rem;
+  `
 
 const ModalContainer = styled.div`
-  background: white;
-  border-radius: 24px;
-  width: 90%;
-  max-width: 540px;
-  max-height: 90vh;
-  overflow-y: auto;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-  animation: slideUp 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-  
-  @keyframes slideUp {
-    from {
-      transform: translateY(50px);
-      opacity: 0;
+    background: white;
+    border-radius: 20px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    width: 100%;
+    max-width: 500px;
+    max-height: 90vh;
+    overflow-y: auto;
+    animation: modalAppear 0.3s ease;
+    
+    @keyframes modalAppear {
+      from {
+        opacity: 0;
+        transform: scale(0.9) translateY(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
     }
-    to {
-      transform: translateY(0);
-      opacity: 1;
-    }
-  }
-  
-  &::-webkit-scrollbar {
-    width: 8px;
-  }
-  
-  &::-webkit-scrollbar-track {
-    background: #f1f1f1;
-    border-radius: 0 24px 24px 0;
-  }
-  
-  &::-webkit-scrollbar-thumb {
-    background: #4ecdc4;
-    border-radius: 4px;
-  }
-`;
+  `
 
 const ModalHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 2rem;
-  border-bottom: 2px solid #e9ecef;
-`;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem 2rem;
+    border-bottom: 1px solid #e9ecef;
+  `
 
-const ModalTitle = styled.h3`
-  margin: 0;
-  font-size: 1.5rem;
-  color: #2c3e50;
-  font-weight: 700;
-  letter-spacing: -0.5px;
-`;
+const ModalTitle = styled.h2`
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #2c3e50;
+  `
 
 const CloseButton = styled.button`
-  background: #f8f9fa;
-  border: none;
-  font-size: 1.8rem;
-  cursor: pointer;
-  color: #6c757d;
-  padding: 0;
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  transition: all 0.3s ease;
-  font-weight: 300;
-
-  &:hover {
-    background: #e9ecef;
-    color: #2c3e50;
-    transform: rotate(90deg);
-  }
-`;
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: #6c757d;
+    padding: 0.25rem;
+    
+    &:hover {
+      color: #2c3e50;
+    }
+  `
 
 const ModalContent = styled.div`
-  padding: 2rem;
-`;
+    padding: 2rem;
+  `
 
 const ModalActions = styled.div`
-  display: flex;
-  justify-content: flex-end;
-  gap: 1rem;
-  padding: 2rem;
-  border-top: 2px solid #e9ecef;
+    display: flex;
+    gap: 1rem;
+    padding: 1.5rem 2rem;
+    border-top: 1px solid #e9ecef;
+    justify-content: flex-end;
+    
+    @media (max-width: 480px) {
+      flex-direction: column;
+    }
+  `
 
-  @media (max-width: 480px) {
-    flex-direction: column;
-  }
-`;
-
-const CancelModalButton = styled.button`
-  background: #6c757d;
-  color: white;
-  border: none;
-  padding: 0.85rem 1.8rem;
-  border-radius: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  flex: 1;
-  box-shadow: 0 4px 12px rgba(108, 117, 125, 0.3);
-
-  &:hover {
-    background: #5a6268;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(108, 117, 125, 0.4);
-  }
-`;
-
-const ConfirmButton = styled.button`
-  background: #4ecdc4;
-  color: white;
-  border: none;
-  padding: 0.85rem 1.8rem;
-  border-radius: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  flex: 1;
-  box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
-
-  &:hover {
-    background: #45b7b8;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(78, 205, 196, 0.4);
-  }
-`;
-
-const DeleteModalButton = styled.button`
-  background: #e74c3c;
-  color: white;
-  border: none;
-  padding: 0.85rem 1.8rem;
-  border-radius: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  flex: 1;
-  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3);
-
-  &:hover {
-    background: #c0392b;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(231, 76, 60, 0.4);
-  }
-`;
-
-const SaveProfileButton = styled(ConfirmButton)``;
-
-const AppointmentInfoModal = styled.div`
-  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-  padding: 1.5rem;
-  border-radius: 16px;
-  margin-bottom: 1.8rem;
-  border-left: 5px solid #4ecdc4;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-`;
-
-const InfoItem = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.8rem;
-  padding-bottom: 0.8rem;
-  border-bottom: 1px solid #dee2e6;
-
-  &:last-child {
-    margin-bottom: 0;
-    padding-bottom: 0;
-    border-bottom: none;
-  }
-`;
-
-const InfoLabel = styled.span`
-  font-weight: 700;
-  color: #495057;
-  font-size: 0.95rem;
-`;
-
-const InfoValue = styled.span`
-  color: #2c3e50;
-  font-weight: 600;
-  font-size: 0.95rem;
-`;
-
-const WarningMessage = styled.div`
-  display: flex;
-  align-items: flex-start;
-  gap: 1.2rem;
-  background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
-  border: 2px solid #ffc107;
-  border-radius: 16px;
-  padding: 1.5rem;
-  margin-bottom: 1.8rem;
-  box-shadow: 0 4px 12px rgba(255, 193, 7, 0.2);
-`;
-
-const WarningIcon = styled.div`
-  font-size: 2rem;
-  flex-shrink: 0;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
-`;
-
-const WarningText = styled.p`
-  color: #856404;
-  margin: 0;
-  line-height: 1.6;
-  font-weight: 600;
-  font-size: 0.95rem;
-`;
-
-const AppointmentDetails = styled.div`
-  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-  padding: 1.5rem;
-  border-radius: 16px;
-  border-left: 5px solid #e74c3c;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-`;
-
-const DetailItem = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.8rem;
-  padding-bottom: 0.8rem;
-  border-bottom: 1px solid #dee2e6;
-
-  &:last-child {
-    margin-bottom: 0;
-    padding-bottom: 0;
-    border-bottom: none;
-  }
-`;
-
-const DetailLabel = styled.span`
-  font-weight: 700;
-  color: #495057;
-  font-size: 0.95rem;
-`;
-
-const DetailValue = styled.span`
-  color: #2c3e50;
-  font-weight: 600;
-  font-size: 0.95rem;
-`;
-
+// FORM COMPONENTS
 const FormGroup = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 0.7rem;
-  margin-bottom: 1.5rem;
-`;
+    margin-bottom: 1.5rem;
+  `
 
 const Label = styled.label`
-  font-weight: 700;
-  color: #495057;
-  font-size: 0.95rem;
-`;
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+    color: #2c3e50;
+    font-size: 0.9rem;
+  `
 
-const DateInput = styled.input`
-  padding: 0.9rem;
-  border: 2px solid #ced4da;
-  border-radius: 12px;
-  font-size: 1rem;
-  transition: all 0.3s ease;
-  background: white;
-  width: 100%;
-  
-  &:focus {
-    outline: none;
-    border-color: #4ecdc4;
-    box-shadow: 0 0 0 4px rgba(78, 205, 196, 0.15);
-  }
-`;
+const EditInput = styled.input`
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border: 2px solid rgba(107, 193, 225, 0.3);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+    
+    &:focus {
+      outline: none;
+      border-color: #34B89C;
+      box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.1);
+    }
+  `
+
+const DateInput = styled(EditInput)``
 
 const SelectInput = styled.select`
-  padding: 0.9rem;
-  border: 2px solid #ced4da;
-  border-radius: 12px;
-  font-size: 1rem;
-  background: white;
-  transition: all 0.3s ease;
-  cursor: pointer;
-  width: 100%;
-  
-  &:focus {
-    outline: none;
-    border-color: #4ecdc4;
-    box-shadow: 0 0 0 4px rgba(78, 205, 196, 0.15);
-  }
-`;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border: 2px solid rgba(107, 193, 225, 0.3);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+    background: white;
+    
+    &:focus {
+      outline: none;
+      border-color: #34B89C;
+      box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.1);
+    }
+  `
 
-const ProfileModalOverlay = styled(ModalOverlay)``;
+const EmailDisplay = styled.div`
+    padding: 0.75rem 1rem;
+    background: linear-gradient(135deg, #f0f9ff 0%, #ffffff 100%);
+    border: 2px solid rgba(107, 193, 225, 0.2);
+    border-radius: 8px;
+    color: #6c757d;
+    font-size: 0.9rem;
+  `
 
-const LargeProfileModal = styled(ModalContainer)`
-  max-width: 640px;
-`;
+// PROFILE MODAL COMPONENTS
+const ProfileSection = styled.div`
+    margin-bottom: 2rem;
+  `
+
+const SecuritySection = styled.div`
+    margin-bottom: 1rem;
+  `
 
 const ProfileImageSection = styled.div`
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  margin-bottom: 2rem;
-  gap: 1.2rem;
-`;
+    text-align: center;
+    margin-bottom: 1.5rem;
+  `
 
 const ProfileImagePreview = styled.div`
-  width: 140px;
-  height: 140px;
+  width: 100px;
+  height: 100px;
   border-radius: 50%;
   overflow: hidden;
-  border: 4px solid #4ecdc4;
+  border: 3px solid #34B89C;
+  margin: 0 auto 1rem auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f8f9fa;
-  box-shadow: 0 8px 24px rgba(78, 205, 196, 0.3);
-  transition: all 0.3s ease;
-  
-  &:hover {
-    transform: scale(1.05);
-    box-shadow: 0 12px 32px rgba(78, 205, 196, 0.4);
-  }
-`;
+  background: #f0f9f7;
+`
 
 const ImageUploadLabel = styled.label`
-  padding: 0.8rem 1.6rem;
-  background: #4ecdc4;
+  display: inline-block;
+  background: #34B89C;
   color: white;
-  border-radius: 12px;
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
   cursor: pointer;
-  font-size: 0.95rem;
-  font-weight: 700;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
+  transition: all 0.2s ease;
   
   &:hover {
-    background: #45b7b8;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(78, 205, 196, 0.4);
+    background: #2a9d7f;
   }
-`;
+`
 
 const ImageUploadInput = styled.input`
-  display: none;
-`;
+    display: none;
+  `
 
-// FIXED EditInput component with proper styling
-const EditInput = styled.input`
-  padding: 0.9rem;
-  border: 2px solid #ced4da;
-  border-radius: 12px;
-  font-size: 1rem;
-  transition: all 0.3s ease;
-  background: white;
-  width: 100%;
-  
-  &:focus {
-    outline: none;
-    border-color: #4ecdc4;
-    box-shadow: 0 0 0 4px rgba(78, 205, 196, 0.15);
-  }
-  
-  // Ensure the input is clickable and typeable
-  pointer-events: auto;
-  opacity: 1;
-`;
-
-const EmailDisplay = styled.div`
-  padding: 0.9rem;
-  background: #f8f9fa;
-  border-radius: 12px;
-  color: #6c757d;
-  font-size: 1rem;
-  border: 2px solid #e9ecef;
-  font-weight: 500;
-  width: 100%;
-`;
-
-const SecuritySection = styled.div`
-  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-  padding: 2rem;
-  border-radius: 16px;
-  margin-top: 2rem;
-  border: 2px solid #dee2e6;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-`;
-
-const SecurityTitle = styled.h4`
-  margin: 0 0 1.5rem 0;
-  font-size: 1.2rem;
-  color: #2c3e50;
-  font-weight: 700;
-  letter-spacing: -0.3px;
-`;
+const ImageUploadHint = styled.div`
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-top: 0.5rem;
+  `
 
 const TwoFactorContainer = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 1.2rem;
-  background: white;
-  padding: 1.5rem;
+  padding: 1rem;
+  background: #f8f9fa;
   border-radius: 12px;
-  border: 2px solid #dee2e6;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-`;
+  border: 1px solid #e9ecef;
+`
 
 const TwoFactorInfo = styled.div`
-  flex: 1;
-`;
+    flex: 1;
+  `
 
 const TwoFactorLabel = styled.div`
-  font-weight: 700;
-  color: #2c3e50;
-  margin-bottom: 0.4rem;
-  font-size: 1rem;
-`;
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 0.25rem;
+  `
 
 const TwoFactorDescription = styled.div`
-  font-size: 0.85rem;
-  color: #6c757d;
-  line-height: 1.5;
-  font-weight: 500;
-`;
+    font-size: 0.85rem;
+    color: #6c757d;
+    line-height: 1.4;
+  `
 
-const ToggleSwitch = styled.label`
-  position: relative;
-  display: inline-block;
-  width: 64px;
-  height: 36px;
-  flex-shrink: 0;
+// BUTTON COMPONENTS
+const CancelModalButton = styled.button`
+    background: #6c757d;
+    color: white;
+    border: none;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    
+    &:hover {
+      background: #5a6268;
+    }
+    
+    @media (max-width: 480px) {
+      order: 2;
+    }
+  `
+
+const SaveProfileButton = styled.button`
+  background: #34B89C;
+  color: white;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
   cursor: pointer;
-`;
-
-const ToggleInput = styled.input`
-  opacity: 0;
-  width: 0;
-  height: 0;
-
-  &:checked + span {
-    background-color: #4ecdc4;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background: #2a9d7f;
   }
+`
 
-  &:checked + span:before {
-    transform: translateX(28px);
-  }
-`;
+const ConfirmButton = styled(SaveProfileButton)``
 
-const ToggleSlider = styled.span`
-  position: absolute;
+const DeleteModalButton = styled.button`
+    background: #e74c3c;
+    color: white;
+    border: none;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    
+    &:hover {
+      background: #c0392b;
+    }
+  `
+
+// APPOINTMENT INFO COMPONENTS
+const AppointmentInfoModal = styled.div`
+  background: #f8f9fa;
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  border: 1px solid #e9ecef;
+`
+
+const InfoItem = styled.div`
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid #e9ecef;
+    
+    &:last-child {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+  `
+
+const InfoLabel = styled.span`
+    font-weight: 600;
+    color: #6c757d;
+    font-size: 0.9rem;
+  `
+
+const InfoValue = styled.span`
+    color: #2c3e50;
+    font-weight: 500;
+    text-align: right;
+    flex: 1;
+    margin-left: 1rem;
+  `
+
+const WarningMessage = styled.div`
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  `
+
+const WarningIcon = styled.div`
+    font-size: 1.5rem;
+    color: #856404;
+  `
+
+const WarningText = styled.div`
+    color: #856404;
+    font-weight: 500;
+    line-height: 1.4;
+    flex: 1;
+  `
+
+const AppointmentDetails = styled.div`
+  background: #f8f9fa;
+  border-radius: 12px;
+  padding: 1.5rem;
+  border: 1px solid #e9ecef;
+`
+
+const DetailItem = styled.div`
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+    
+    &:last-child {
+      margin-bottom: 0;
+    }
+  `
+
+const DetailLabel = styled.span`
+    font-weight: 600;
+    color: #6c757d;
+    font-size: 0.9rem;
+  `
+
+const DetailValue = styled.span`
+    color: #2c3e50;
+    font-weight: 500;
+  `
+
+const HistoryStatusBadge = styled.span<{ status: string }>`
+    padding: 0.4rem 0.8rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    background: ${(props) => {
+      switch (props.status) {
+        case "Done":
+          return "#d4edda"
+        case "Not Attend":
+          return "#f8d7da"
+        case "Cancelled":
+          return "#f8d7da"
+        default:
+          return "#d1ecf1"
+      }
+    }};
+    color: ${(props) => {
+      switch (props.status) {
+        case "Done":
+          return "#155724"
+        case "Not Attend":
+          return "#721c24"
+        case "Cancelled":
+          return "#721c24"
+        default:
+          return "#0c5460"
+      }
+    }};
+  `
+
+// Added button to show sidebar when hidden
+const ShowSidebarButton = styled.button`
+  background: #ffffff;
+  color: black;
+  border: none;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  font-size: 1.2rem;
+  font-weight: 600;
   cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: #ccc;
-  transition: 0.4s;
-  border-radius: 36px;
-  box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
-
-  &:before {
-    position: absolute;
-    content: "";
-    height: 28px;
-    width: 28px;
-    left: 4px;
-    bottom: 4px;
-    background-color: white;
-    transition: 0.4s;
-    border-radius: 50%;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 40px;
+  
+  &:hover {
+    background: #2a9d7f;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    transform: translateY(-1px);
   }
-
-  &.active {
-    background-color: #4ecdc4;
-    box-shadow: 0 0 0 2px rgba(78, 205, 196, 0.2);
+  
+  &:active {
+    transform: translateY(0);
   }
-`;
+  
+  @media (max-width: 768px) {
+    padding: 0.4rem 0.6rem; 
+    min-width: 36px;
+    height: 36px;
+    font-size: 1rem;
+  }
+`

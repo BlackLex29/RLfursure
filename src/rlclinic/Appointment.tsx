@@ -16,7 +16,7 @@ import {
   updateDoc,
   getDoc
 } from "firebase/firestore";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, User } from "firebase/auth";
 
 // 🔹 Enhanced Types with Pricing
 interface Pet {
@@ -57,16 +57,6 @@ interface AppointmentType {
   value: string;
   label: string;
   price: number;
-}
-
-interface AppointmentNotificationData {
-  clientName: string | null | undefined;
-  petName: string | undefined;
-  date: string;
-  timeSlot: string | null;
-  appointmentType: string;
-  price: number;
-  appointmentId?: string;
 }
 
 // 🔹 State Management with useReducer
@@ -150,6 +140,7 @@ const paymentMethods = [
 ];
 
 // 🔹 FIXED: Custom Hook for Appointment Data
+// 🔹 FIXED: Custom Hook for Appointment Data
 const useAppointmentData = () => {
   const [pets, setPets] = useState<Pet[]>([]);
   const [bookedSlots, setBookedSlots] = useState<Appointment[]>([]);
@@ -158,78 +149,92 @@ const useAppointmentData = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    let unsubscribeAuth: () => void;
-    let unsubscribePets: () => void;
-    let unsubscribeAppointments: () => void;
-    let unsubscribeUnavailable: () => void;
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      let unsubscribePets: () => void;
+      let unsubscribeAppointments: () => void;
+      let unsubscribeUnavailable: () => void;
 
-    const fetchData = async (user: any) => {
-      setIsLoading(true);
-      try {
-        if (!user) {
-          setIsLoading(false);
-          return;
-        }
+      const fetchData = async (user: User) => {
+        setIsLoading(true);
+        try {
+          if (!user) {
+            setIsLoading(false);
+            return;
+          }
 
-        // ✅ FIXED: Query pets collection
-        const petsQuery = query(
-          collection(db, "pets"), 
-          where("ownerId", "==", user.uid)
-        );
-        
-        const petsSnapshot = await getDocs(petsQuery);
-        
-        const userPets: Pet[] = [];
-        petsSnapshot.forEach((doc) => {
-          const petData = doc.data();
-          const petName = petData.petName || petData.name || "Unnamed Pet";
+          console.log("🔄 Fetching pets for user:", user.uid, user.email);
+
+          // ✅ FIXED: Query pets collection with correct field name
+      const petsQuery = query(
+  collection(db, "pets"), 
+  where("ownerId", "==", user.uid) // Now both work
+  // OR: where("ownerEmail", "==", user.email)
+);
           
-          if (petData.ownerId === user.uid) {
+          const petsSnapshot = await getDocs(petsQuery);
+          console.log("📊 Pets snapshot size:", petsSnapshot.size);
+          
+          const userPets: Pet[] = [];
+          petsSnapshot.forEach((doc) => {
+            const petData = doc.data();
+            console.log("🐾 Pet data:", petData);
+            
+            // ✅ FIXED: Handle both possible field names
+            const petName = petData.petName || petData.name || "Unnamed Pet";
+            
             userPets.push({ 
               id: doc.id, 
               name: petName
             });
-          }
-        });
-        
-        setPets(userPets);
-
-        // Fetch doctors
-        const doctorsSnapshot = await getDocs(query(collection(db, "users"), where("role", "==", "veterinarian")));
-        const doctorsData: Doctor[] = [];
-        doctorsSnapshot.forEach((doc) => {
-          const data = doc.data();
-          doctorsData.push({
-            id: doc.id,
-            name: data.name,
-            email: data.email
           });
-        });
-        setDoctors(doctorsData);
+          
+          console.log("✅ Final pets array:", userPets);
+          setPets(userPets);
 
-      } catch (error) {
-        console.error("❌ Error fetching initial data:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+          // Fetch doctors
+          const doctorsSnapshot = await getDocs(query(collection(db, "users"), where("role", "==", "veterinarian")));
+          const doctorsData: Doctor[] = [];
+          doctorsSnapshot.forEach((doc) => {
+            const data = doc.data();
+            doctorsData.push({
+              id: doc.id,
+              name: data.name,
+              email: data.email
+            });
+          });
+          setDoctors(doctorsData);
 
-    unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+        } catch (error) {
+          console.error("❌ Error fetching initial data:", error);
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
       if (user) {
         fetchData(user);
         
-        // Set up real-time listeners only after user is authenticated
+        // Set up real-time listeners with correct query
         try {
-          // Real-time pets listener
-          const petsQuery = query(collection(db, "pets"), where("ownerId", "==", user.uid));
+          // ✅ FIXED: Real-time pets listener with correct field
+          const petsQuery = query(
+            collection(db, "pets"), 
+            where("ownerEmail", "==", user.email)
+          );
+          
           unsubscribePets = onSnapshot(petsQuery, 
             (snapshot) => {
+              console.log("🔄 Real-time pets update, count:", snapshot.size);
               const userPets: Pet[] = [];
               snapshot.forEach((doc) => {
                 const petData = doc.data();
                 const petName = petData.petName || petData.name || "Unnamed Pet";
-                userPets.push({ id: doc.id, name: petName });
+                userPets.push({ 
+                  id: doc.id, 
+                  name: petName 
+                });
               });
+              console.log("✅ Updated pets:", userPets);
               setPets(userPets);
             },
             (error) => {
@@ -237,7 +242,7 @@ const useAppointmentData = () => {
             }
           );
 
-          // Real-time appointments listener
+          // Keep other listeners the same...
           unsubscribeAppointments = onSnapshot(collection(db, "appointments"), 
             (snapshot) => {
               const appointmentsData: Appointment[] = [];
@@ -261,7 +266,6 @@ const useAppointmentData = () => {
             }
           );
 
-          // Real-time unavailable slots listener
           unsubscribeUnavailable = onSnapshot(collection(db, "unavailableSlots"), 
             (snapshot) => {
               const unavailableData: Unavailable[] = [];
@@ -292,24 +296,27 @@ const useAppointmentData = () => {
         }
 
       } else {
+        console.log("👤 No user logged in");
         setPets([]);
         setBookedSlots([]);
         setUnavailableSlots([]);
         setIsLoading(false);
       }
+
+      return () => {
+        if (unsubscribePets) unsubscribePets();
+        if (unsubscribeAppointments) unsubscribeAppointments();
+        if (unsubscribeUnavailable) unsubscribeUnavailable();
+      };
     });
 
     return () => {
-      if (unsubscribeAuth) unsubscribeAuth();
-      if (unsubscribePets) unsubscribePets();
-      if (unsubscribeAppointments) unsubscribeAppointments();
-      if (unsubscribeUnavailable) unsubscribeUnavailable();
+      unsubscribeAuth();
     };
   }, []);
 
   return { pets, bookedSlots, unavailableSlots, doctors, isLoading };
 };
-
 // 🔹 Custom Hook for Availability Logic
 const useAvailability = (unavailableSlots: Unavailable[]) => {
   const isDateUnavailable = useCallback((date: string) => {
@@ -333,43 +340,63 @@ const useAvailability = (unavailableSlots: Unavailable[]) => {
 };
 
 // 🔹 Pet Selector Component
+// 🔹 Fixed Pet Selector Component - Shows only pet names
 const PetSelector: React.FC<{
   pets: Pet[];
   selectedPet: string | null;
   onPetChange: (petId: string) => void;
-}> = ({ pets, selectedPet, onPetChange }) => (
-  <FormSection>
-    <SectionTitle>
-      <SectionIcon>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-          <path fillRule="evenodd" d="M12 6.75a5.25 5.25 0 016.775-5.025.75.75 0 01.313 1.248l-3.32 3.319c.063.475.276.934.627 1.33.35.389.820.729 1.382.963.56.235 1.217.389 1.925.389a.75.75 0 010 1.5c-.898 0-1.7-.192-2.375-.509A5.221 5.221 0 0115.75 8.25c0-.65-.126-1.275-.356-1.85l-2.57 2.57a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06l2.57-2.57a5.25 5.25 0 00-1.834 2.606A5.25 5.25 0 0012 6.75z" clipRule="evenodd" />
-        </svg>
-      </SectionIcon>
-      Select Your Pet
-    </SectionTitle>
-    <PetSelect
-      value={selectedPet || ""}
-      onChange={(e) => onPetChange(e.target.value)}
-      disabled={pets.length === 0}
-    >
-      <option value="">Select a pet</option>
-      {pets.length === 0 ? (
-        <option value="" disabled>No pets found. Please register a pet first.</option>
-      ) : (
-        pets.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
-          </option>
-        ))
+}> = ({ pets, selectedPet, onPetChange }) => {
+  console.log("🔍 PetSelector received pets:", pets);
+  console.log("🔍 Selected pet:", selectedPet);
+
+  return (
+    <FormSection>
+      <SectionTitle>
+        <SectionIcon>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+            <path fillRule="evenodd" d="M12 6.75a5.25 5.25 0 016.775-5.025.75.75 0 01.313 1.248l-3.32 3.319c.063.475.276.934.627 1.33.35.389.820.729 1.382.963.56.235 1.217.389 1.925.389a.75.75 0 010 1.5c-.898 0-1.7-.192-2.375-.509A5.221 5.221 0 0115.75 8.25c0-.65-.126-1.275-.356-1.85l-2.57 2.57a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06l2.57-2.57a5.25 5.25 0 00-1.834 2.606A5.25 5.25 0 0012 6.75z" clipRule="evenodd" />
+          </svg>
+        </SectionIcon>
+        Select Your Pet
+        <PetsCount>({pets.length} pets found)</PetsCount>
+      </SectionTitle>
+      
+      <PetSelect
+        value={selectedPet || ""}
+        onChange={(e) => {
+          console.log("🔄 Pet changed to:", e.target.value);
+          onPetChange(e.target.value);
+        }}
+        disabled={pets.length === 0}
+      >
+        <option value="">Select a pet</option>
+        {pets.length === 0 ? (
+          <option value="" disabled>No pets found. Please register a pet first.</option>
+        ) : (
+          pets.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name} {/* ✅ Fixed: Only shows pet name now */}
+            </option>
+          ))
+        )}
+      </PetSelect>
+      
+      {pets.length === 0 && (
+        <NoPetsWarning>
+          ⚠️ No pets found. Please register your pet first before booking an appointment.
+          
+        </NoPetsWarning>
       )}
-    </PetSelect>
-    {pets.length === 0 && (
-      <NoPetsWarning>
-        ⚠️ No pets found. Please register your pet first before booking an appointment.
-      </NoPetsWarning>
-    )}
-  </FormSection>
-);
+      
+      {/* Debug info */}
+      {pets.length > 0 && (
+        <DebugInfo>
+          Found {pets.length} pets. First pet: {pets[0]?.name}
+        </DebugInfo>
+      )}
+    </FormSection>
+  );
+};
 
 // 🔹 Enhanced Appointment Type Grid with Pricing
 const AppointmentTypeGrid: React.FC<{
@@ -1504,7 +1531,22 @@ const SectionIcon = styled.span`
   justify-content: center;
   color: #34B89C;
 `;
+const PetsCount = styled.span`
+  margin-left: auto;
+  font-size: 14px;
+  color: #666;
+  font-weight: normal;
+`;
 
+const DebugInfo = styled.div`
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #6c757d;
+`;
 const PetSelect = styled.select`
   padding: 14px 16px;
   border: 2px solid #e0e0e0;
