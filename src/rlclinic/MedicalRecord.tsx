@@ -41,7 +41,7 @@ interface MedicalRecord {
   date: string;
   notes: string;
   veterinarian: string;
-  createdAt: any;
+  createdAt: Date | null;
   status?: string;
   petId?: string;
   appointmentId?: string;
