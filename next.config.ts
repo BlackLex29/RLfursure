@@ -1,6 +1,4 @@
 // next.config.js
-import type { NextConfig } from "next";
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   images: {
@@ -14,6 +12,11 @@ const nextConfig = {
       },
     ],
   },
-}
 
-module.exports = nextConfig
+  // ✅ Important for styled-components in production
+  compiler: {
+    styledComponents: true,
+  },
+};
+
+module.exports = nextConfig;
