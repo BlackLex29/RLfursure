@@ -981,4 +981,4 @@ const FooterBottomLink = styled.span`
   &:hover {
     color: #20c997;
   }
-`;//walang cssss
+`;

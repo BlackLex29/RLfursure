@@ -92,43 +92,86 @@ const Login: React.FC = () => {
         return;
       }
 
-    const userData = userDoc.data() as UserRole;
-    console.log("👤 User data:", userData);
-    console.log("🔐 2FA enabled:", userData.twoFactorEnabled);
-    console.log("🎯 User role:", userData.role);
-    
-    if (userData.twoFactorEnabled) {
-      console.log("🔐 2FA required, proceeding with OTP flow...");
-      // ... rest of your 2FA code
-    } else {
-      console.log("🎯 No 2FA required, navigating to:", userData.role);
-      navigateBasedOnRole(userData.role);
+      const userData = userDoc.data() as UserRole;
+      console.log("👤 User data:", userData);
+      console.log("🔐 2FA enabled:", userData.twoFactorEnabled);
+      console.log("🎯 User role:", userData.role);
+      
+      if (userData.twoFactorEnabled) {
+        console.log("🔐 2FA required, proceeding with OTP flow...");
+        setUserId(user.uid);
+        setUserRole(userData.role);
+        setOtpRequired(true);
+        
+        const otp = generateOTP();
+        const expiresAt = Date.now() + 10 * 60 * 1000;
+        
+        const userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || userData.email;
+        console.log("📧 Sending OTP to:", userData.email);
+        
+        const emailResponse = await fetch('/api/send-email-otp', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: userData.email,
+            otp: otp,
+            name: userName
+          }),
+        });
+
+        const emailData = await emailResponse.json();
+        console.log("📨 Email API response:", emailData);
+        
+        if (!emailResponse.ok) {
+          throw new Error(emailData.error || "Failed to send verification code. Please try again.");
+        }
+
+        console.log("💾 Storing verification code in Firestore...");
+        await setDoc(doc(db, "verificationCodes", user.uid), {
+          code: otp,
+          otpHash: emailData.otpHash,
+          email: userData.email.toLowerCase(),
+          createdAt: Date.now(),
+          expiresAt: expiresAt,
+          verified: false
+        });
+
+        console.log("🚪 Signing out for OTP verification...");
+        await auth.signOut();
+        
+        setError("✅ A verification code has been sent to your email.");
+      } else {
+        console.log("🎯 No 2FA required, navigating to:", userData.role);
+        navigateBasedOnRole(userData.role);
+      }
+      
+    } catch (err) {
+      const firebaseError = err as FirebaseError;
+      console.error("❌ Login error:", firebaseError);
+      
+      if (firebaseError?.code === "permission-denied") {
+        console.error("🔐 Firestore Permission Details:", {
+          currentUser: auth.currentUser?.uid,
+          errorCode: firebaseError.code,
+          errorMessage: firebaseError.message
+        });
+        setError("Database access denied. Please check Firestore rules or contact support.");
+      } else if (firebaseError?.code === "auth/invalid-credential") {
+        setError("Invalid email or password.");
+      } else if (firebaseError?.code === "auth/user-not-found") {
+        setError("No account found with this email.");
+      } else {
+        setError(firebaseError?.message || "An error occurred during authentication.");
+      }
+      
+      await auth.signOut();
+    } finally {
+      setLoading(false);
     }
-    
-  } catch (err) {
-    const firebaseError = err as FirebaseError;
-    console.error("❌ Login error:", firebaseError);
-    
-    if (firebaseError?.code === "permission-denied") {
-      console.error("🔐 Firestore Permission Details:", {
-        currentUser: auth.currentUser?.uid,
-        errorCode: firebaseError.code,
-        errorMessage: firebaseError.message
-      });
-      setError("Database access denied. Please check Firestore rules or contact support.");
-    } else if (firebaseError?.code === "auth/invalid-credential") {
-      setError("Invalid email or password.");
-    } else if (firebaseError?.code === "auth/user-not-found") {
-      setError("No account found with this email.");
-    } else {
-      setError(firebaseError?.message || "An error occurred during authentication.");
-    }
-    
-    await auth.signOut();
-  } finally {
-    setLoading(false);
-  }
-};
+  };
+
   const navigateBasedOnRole = (role: string) => {
     console.log("Navigating based on role:", role);
     switch (role) {
@@ -320,6 +363,7 @@ const Login: React.FC = () => {
     }
   };  
 
+  // SIMPLIFIED FORGOT PASSWORD FUNCTION - DIRECT FIREBASE
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -332,48 +376,35 @@ const Login: React.FC = () => {
     setError("");
 
     try {
-      console.log("Processing forgot password for:", resetEmail);
+      console.log("🔑 Processing forgot password for:", resetEmail);
       
-      const userName = resetEmail;
-
-      console.log("Sending password reset email...");
-      const response = await fetch('/api/send-password-reset', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: resetEmail,
-          name: userName
-        }),
-      });
-
-      const data = await response.json();
-      console.log("Password reset API response:", data);
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to send reset email');
-      }
-
-      console.log("Sending Firebase reset email...");
+      // DIRECT FIREBASE PASSWORD RESET
+      console.log("📧 Sending Firebase password reset email...");
       await sendPasswordResetEmail(auth, resetEmail);
 
+      console.log("✅ Password reset email sent successfully");
       setResetSuccess(true);
       setError("✅ Password reset link has been sent to your email!");
       
+      // Reset form after success
       setTimeout(() => {
         setShowForgotPassword(false);
         setResetEmail("");
         setResetSuccess(false);
         setError("");
       }, 3000);
+      
     } catch (err) {
       const firebaseError = err as FirebaseError;
-      console.error("Forgot password error:", firebaseError);
+      console.error("❌ Forgot password error:", firebaseError);
+      
+      // Handle specific Firebase errors
       if (firebaseError?.code === "auth/user-not-found") {
         setError("No account found with this email.");
       } else if (firebaseError?.code === "auth/invalid-email") {
         setError("Invalid email address.");
+      } else if (firebaseError?.code === "auth/too-many-requests") {
+        setError("Too many attempts. Please try again later.");
       } else {
         setError(firebaseError?.message || "Failed to send reset email. Please try again.");
       }
@@ -729,6 +760,7 @@ const Login: React.FC = () => {
 
 export default Login;
 
+// ... (LAHAT NG STYLED COMPONENTS AY NANDITO NA, WALANG BINAGO)
 const LoginContainer = styled.div`
   display: flex;
   min-height: 100vh;
