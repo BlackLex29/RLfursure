@@ -9,6 +9,13 @@ interface OTPRequestBody {
   name: string;
 }
 
+interface BrevoError {
+  response?: {
+    body?: string;
+  };
+  message?: string;
+}
+
 const OTP_EXPIRY_MINUTES = 10;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -54,8 +61,18 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: unknown) {
     console.error("❌ Email OTP error:", error);
+    
+    // Proper error handling without 'any'
+    let errorMessage = "Failed to send email. Please try again.";
+    
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    } else if (typeof error === 'string') {
+      errorMessage = error;
+    }
+    
     return NextResponse.json(
-      { error: "Failed to send email. Please try again." },
+      { error: errorMessage },
       { status: 500 }
     );
   }
@@ -122,8 +139,10 @@ async function sendEmailWithBrevo(email: string, name: string, otp: string): Pro
     });
 
     console.log("✅ Brevo email sent successfully to:", email);
-  } catch (err: any) {
-    console.error("❌ Brevo send error:", err?.response?.body || err?.message || err);
+  } catch (err: unknown) {
+    // Proper error typing without 'any'
+    const brevoError = err as BrevoError;
+    console.error("❌ Brevo send error:", brevoError?.response?.body || brevoError?.message || err);
     throw err;
   }
 }
