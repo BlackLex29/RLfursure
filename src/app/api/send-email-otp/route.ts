@@ -1,8 +1,8 @@
 // app/api/send-email-otp/route.ts
 export const runtime = "nodejs";
 
-import { NextRequest, NextResponse } from 'next/server';
-import SibApiV3Sdk from '@getbrevo/brevo';
+import { NextRequest, NextResponse } from "next/server";
+import SibApiV3Sdk from "@getbrevo/brevo";
 
 interface OTPRequestBody {
   email: string;
@@ -13,56 +13,56 @@ const OTP_EXPIRY_MINUTES = 10;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(request: NextRequest) {
-  console.log('🚨 === send-email-otp ===');
+  console.log("🚨 === send-email-otp ===");
 
   try {
     const body: OTPRequestBody = await request.json();
     const { email, name } = body;
 
     if (!email || !name) {
-      return NextResponse.json({ error: 'Email and name are required' }, { status: 400 });
+      return NextResponse.json({ error: "Email and name are required" }, { status: 400 });
     }
 
     if (!EMAIL_REGEX.test(email)) {
-      return NextResponse.json({ error: 'Invalid email format' }, { status: 400 });
+      return NextResponse.json({ error: "Invalid email format" }, { status: 400 });
     }
 
     if (name.trim().length < 2) {
-      return NextResponse.json({ error: 'Name must be at least 2 characters long' }, { status: 400 });
+      return NextResponse.json({ error: "Name must be at least 2 characters long" }, { status: 400 });
     }
 
     if (!process.env.BREVO_API_KEY) {
-      return NextResponse.json({ error: 'Email service is not configured' }, { status: 503 });
+      console.error("❌ Missing BREVO_API_KEY in environment variables");
+      return NextResponse.json({ error: "Email service not configured" }, { status: 503 });
     }
 
     const OTP_CODE = generateOTP();
-    console.log('🔐 Generated OTP for:', email);
+    console.log("🔐 Generated OTP for:", email);
 
     const timestamp = Date.now();
-    const otpHash = Buffer.from(`${email.toLowerCase()}:${OTP_CODE}:${timestamp}`).toString('base64');
-    const expiresAt = timestamp + (OTP_EXPIRY_MINUTES * 60 * 1000);
+    const otpHash = Buffer.from(`${email.toLowerCase()}:${OTP_CODE}:${timestamp}`).toString("base64");
+    const expiresAt = timestamp + OTP_EXPIRY_MINUTES * 60 * 1000;
 
     await sendEmailWithBrevo(email, name.trim(), OTP_CODE);
 
-    console.log('✅ Email sent successfully');
-    return NextResponse.json({ 
-      success: true, 
-      message: 'OTP sent successfully',
+    console.log("✅ Email sent successfully");
+    return NextResponse.json({
+      success: true,
+      message: "OTP sent successfully",
       otpHash,
-      expiresAt
+      expiresAt,
     });
-
   } catch (error: unknown) {
-    console.error('❌ Email OTP error:', error);
+    console.error("❌ Email OTP error:", error);
     return NextResponse.json(
-      { error: 'Failed to send email. Please try again.' },
+      { error: "Failed to send email. Please try again." },
       { status: 500 }
     );
   }
 }
 
 function generateOTP(): string {
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
     const array = new Uint32Array(1);
     crypto.getRandomValues(array);
     return ((array[0] % 900000) + 100000).toString();
@@ -72,18 +72,20 @@ function generateOTP(): string {
 
 async function sendEmailWithBrevo(email: string, name: string, otp: string): Promise<void> {
   const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
-  
-  apiInstance.setApiKey(SibApiV3Sdk.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY!);
 
-  // IMPORTANT: Use exact sender name and email from Brevo dashboard
-  await apiInstance.sendTransacEmail({
-    subject: `Your FurSureCare Verification Code: ${otp}`,
-    sender: {
-      name: 'FURSURE',
-      email: 'lextermilo@gmail.com'
-    },
-    to: [{ email, name }],
-    htmlContent: `
+  try {
+    apiInstance.setApiKey(SibApiV3Sdk.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY!);
+
+    console.log("📤 Sending email to:", email);
+
+    await apiInstance.sendTransacEmail({
+      subject: `Your FurSureCare Verification Code: ${otp}`,
+      sender: {
+        name: "FURSURE",
+        email: "lextermilo@gmail.com", // must be verified sender sa Brevo
+      },
+      to: [{ email, name }],
+      htmlContent: `
 <!DOCTYPE html>
 <html>
 <body style="margin:0;padding:0;font-family:Arial,sans-serif;background:#f4f4f4;">
@@ -116,6 +118,12 @@ async function sendEmailWithBrevo(email: string, name: string, otp: string): Pro
     </tr>
   </table>
 </body>
-</html>`.trim()
-  });
+</html>`.trim(),
+    });
+
+    console.log("✅ Brevo email sent successfully to:", email);
+  } catch (err: any) {
+    console.error("❌ Brevo send error:", err?.response?.body || err?.message || err);
+    throw err;
+  }
 }
