@@ -1,4 +1,6 @@
 // app/api/send-email-otp/route.ts
+export const runtime = "nodejs";
+
 import { NextRequest, NextResponse } from 'next/server';
 import SibApiV3Sdk from '@getbrevo/brevo';
 
