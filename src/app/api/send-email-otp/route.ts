@@ -2,7 +2,8 @@
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
-import SibApiV3Sdk from "@getbrevo/brevo";
+import * as SibApiV3Sdk from '@getbrevo/brevo';
+
 
 interface OTPRequestBody {
   email: string;
