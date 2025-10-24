@@ -622,7 +622,7 @@ const UserMedicalRecords: React.FC = () => {
       <PageContainer>
         <HeaderBar>
           <BrandSection>
-            <ClinicLogo>🐾</ClinicLogo>
+            <ClinicLogo><LogoImage src="/RL.jpg" alt="RL Clinic Logo" /></ClinicLogo>
             <div>
               <ClinicName>RL Clinic</ClinicName>
               <Tagline>Fursure Care - My Medical Records</Tagline>
@@ -630,7 +630,7 @@ const UserMedicalRecords: React.FC = () => {
           </BrandSection>
           <ButtonGroup>
             <BackButton onClick={() => router.push("/userdashboard")}>
-              <Icon className="material-icons">arrow_back</Icon>
+              <Icon className="material-icons">◀</Icon>
               Back
             </BackButton>
           </ButtonGroup>
@@ -808,6 +808,13 @@ const BrandSection = styled.div`
 
 const ClinicLogo = styled.div`
   font-size: 2.5rem;
+`;
+
+const LogoImage = styled.img`
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  object-fit: cover;
 `;
 
 const ClinicName = styled.h1`

@@ -1,19 +1,211 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Medical records - admin can create for any user, users can only read their own
-    match /medicalRecords/{document} {
-      allow write: if request.auth.token.email in ['admin@rlclinic.com', 'veterinarian@rlclinic.com', 'staff@rlclinic.com', 'youradminemail@gmail.com'];
-      allow read: if request.auth != null && 
-        (resource.data.ownerEmail == request.auth.token.email || 
-         request.auth.token.email in ['admin@rlclinic.com', 'veterinarian@rlclinic.com', 'staff@rlclinic.com', 'youradminemail@gmail.com']);
+
+    // --- Helper functions ---
+    function isSignedIn() {
+      return request.auth != null;
     }
-    
-    // Pet profiles - users can manage their own, admins can read all
-    match /petProfiles/{document} {
-      allow read, write: if request.auth != null && 
-        (resource.data.ownerEmail == request.auth.token.email ||
-         request.auth.token.email in ['admin@rlclinic.com', 'veterinarian@rlclinic.com', 'staff@rlclinic.com', 'youradminemail@gmail.com']);
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.admin == true ||
+        request.auth.token.role == 'admin' ||
+        request.auth.token.email.matches('(?i).*admin.*') ||
+        request.auth.token.email in [
+          'admin@rlclinic.com',
+          'madulcedecahvez@gmail.com'
+        ]
+      );
+    }
+
+    function isVeterinarian() {
+      return isSignedIn() && (
+        request.auth.token.role == 'veterinarian' ||
+        request.auth.token.veterinarian == true ||
+        isAdmin()
+      );
+    }
+
+    // --- USERS ---
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isOwner(userId) || isAdmin();
+    }
+
+    // --- OTPs / Verification ---
+    match /verificationCodes/{docId} {
+      allow read, write: if true;
+    }
+
+    match /otps/{otpId} {
+      allow read, write: if true;
+    }
+
+    // ✅ VET OTP - For veterinarian verification or login
+    match /vetOtps/{otpId} {
+      allow read, write: if true;
+    }
+
+    // --- 2FA / SECURITY / PREFERENCES ---
+    match /twoFactorSettings/{userId} {
+      allow read, write: if isSignedIn() && (isOwner(userId) || isAdmin());
+    }
+
+    match /securitySettings/{userId} {
+      allow read, write: if isSignedIn() && (isOwner(userId) || isAdmin());
+    }
+
+    match /userPreferences/{userId} {
+      allow read, write: if isSignedIn() && (isOwner(userId) || isAdmin());
+    }
+
+    // --- APPOINTMENTS ---
+    match /appointments/{appointmentId} {
+      // ALLOW READ for all signed-in users
+      allow read: if isSignedIn();
+      
+      // ALLOW CREATE for all signed-in users
+      allow create: if isSignedIn();
+      
+      // ALLOW UPDATE (for Done/Cancel, admin edits, etc.)
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        isVeterinarian() ||
+        (request.resource.data.status != resource.data.status &&
+         request.resource.data.status in ['Done', 'Cancelled', 'Confirmed']) ||
+        (resource.data.userId == request.auth.uid ||
+         resource.data.bookedBy == request.auth.uid ||
+         resource.data.clientName == request.auth.token.email)
+      );
+      
+      // ALLOW DELETE for admins, vets, or owners
+      allow delete: if isSignedIn() && (
+        isAdmin() ||
+        isVeterinarian() ||
+        resource.data.userId == request.auth.uid ||
+        resource.data.bookedBy == request.auth.uid ||
+        resource.data.clientName == request.auth.token.email
+      );
+    }
+
+    // --- UNAVAILABLE SLOTS ---
+   // --- UNAVAILABLE SLOTS ---
+match /unavailableSlots/{slotId} {
+  allow read: if isSignedIn();
+
+  // Allow vets and admins to create, update, or delete unavailable slots
+  allow create, update, delete: if isVeterinarian() || isAdmin();
+}
+
+
+    // --- PETS ---
+    match /pets/{petId} {
+      allow read, create: if isSignedIn();
+      allow update, delete: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid ||
+        resource.data.ownerEmail == request.auth.token.email ||
+        isAdmin() ||
+        isVeterinarian()
+      );
+    }
+
+    // --- PET REGISTRATIONS ---
+    match /petRegistrations/{regId} {
+      allow read, create: if isSignedIn();
+      allow update, delete: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid ||
+        resource.data.ownerEmail == request.auth.token.email ||
+        isAdmin() ||
+        isVeterinarian()
+      );
+    }
+
+    // --- MEDICAL RECORDS ---
+    match /medicalRecords/{recordId} {
+      // ALLOW READ: Signed-in users can read their own records or admins/vets can read all
+      allow read: if isSignedIn() && (
+        resource.data.ownerEmail == request.auth.token.email ||
+        resource.data.clientEmail == request.auth.token.email ||
+        isAdmin() ||
+        isVeterinarian()
+      );
+
+      // ALLOW CREATE: Admins, vets, or specific users
+      allow create: if isSignedIn() && (
+        isAdmin() ||
+        isVeterinarian() ||
+        request.auth.token.email.matches('.*@gmail\\.com$')
+      );
+
+      // ALLOW UPDATE: Admins, vets, or record owners
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        isVeterinarian() ||
+        resource.data.ownerEmail == request.auth.token.email ||
+        resource.data.clientEmail == request.auth.token.email ||
+        request.auth.token.email.matches('.*@gmail\\.com$')
+      );
+
+      // ✅ FIXED: ENHANCED DELETE PERMISSIONS
+      allow delete: if isSignedIn() && (
+        isAdmin() ||
+        isVeterinarian() ||
+        // Allow deletion by record owner
+        resource.data.ownerEmail == request.auth.token.email ||
+        resource.data.clientEmail == request.auth.token.email ||
+        // Allow deletion by the veterinarian who created it
+        resource.data.veterinarian == request.auth.token.email ||
+        resource.data.veterinarian == request.auth.uid ||
+        // Development fallback
+        request.auth.token.email.matches('.*@gmail\\.com$') ||
+        // Additional safety net for specific admin emails
+        request.auth.token.email in [
+          'admin@rlclinic.com',
+          'madulcedecahvez@gmail.com',
+          'rlclinic@gmail.com'
+        ]
+      );
+    }
+
+    // --- NOTIFICATIONS ---
+    match /notifications/{notifId} {
+      allow read: if isSignedIn() && (
+        resource.data.recipientId == request.auth.uid ||
+        resource.data.recipientEmail == request.auth.token.email ||
+        isAdmin()
+      );
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && (
+        resource.data.recipientId == request.auth.uid ||
+        resource.data.recipientEmail == request.auth.token.email ||
+        isAdmin()
+      );
+    }
+
+    // --- VETS ---
+    match /vets/{vetId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // --- PAYMENTS / TRANSACTIONS ---
+    match /payments/{paymentId} {
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.clientEmail == request.auth.token.email ||
+        isAdmin()
+      );
+      allow create, update, delete: if isAdmin();
+    }
+
+    // --- Default block ---
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

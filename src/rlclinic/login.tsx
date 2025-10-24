@@ -1,7 +1,8 @@
-"use client";
-import React, { useState } from "react";
+'use client';
+
+import React, { useState, useEffect } from "react";
 import styled, { createGlobalStyle } from "styled-components";
-import { signInWithEmailAndPassword, sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { signInWithEmailAndPassword, sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup, } from "firebase/auth";
 import { doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 import { auth, db } from "../firebaseConfig";
 import { useRouter } from "next/navigation";
@@ -10,7 +11,7 @@ const GlobalStyle = createGlobalStyle`
   body {
     margin: 0;
     padding: 0;
-    box-sizing: border-box;
+    box-sizing: border-box; 
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     background: #f5f7fa;
     min-height: 100vh;
@@ -51,14 +52,44 @@ const Login: React.FC = () => {
   const [resetEmail, setResetEmail] = useState("");
   const [resetLoading, setResetLoading] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
+  const [googleUserData, setGoogleUserData] = useState<{uid: string; email: string; role: string} | null>(null);
   const router = useRouter();
+
+  // IDAGDAG: Check kung may reset password action sa URL
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const mode = urlParams.get('mode');
+    const oobCode = urlParams.get('oobCode');
+    
+    if (mode === 'resetPassword' && oobCode) {
+      // I-redirect sa reset password page
+      router.push(`/reset-password?oobCode=${oobCode}`);
+    }
+  }, [router]);
 
   const generateOTP = () => {
     return Math.floor(100000 + Math.random() * 900000).toString();
   };
 
+  // Helper function para i-debug ang API responses
+  const debugAPIResponse = async (response: Response) => {
+    const text = await response.text();
+    console.log("🔍 Raw API response:", text);
+    try {
+      return JSON.parse(text);
+    } catch {
+      console.error("❌ Invalid JSON response:", text);
+      return { error: "Invalid JSON response", raw: text };
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    
+    if (showForgotPassword) {
+      return;
+    }
+    
     setLoading(true);
     setError("");
     setOtpRequired(false);
@@ -66,18 +97,12 @@ const Login: React.FC = () => {
     try {
       console.log("🔄 Attempting login with:", email);
       
-      // Sign in with Firebase Auth
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       console.log("✅ Firebase auth success, user ID:", user.uid);
       
-      // Wait for auth state to propagate
       await new Promise(resolve => setTimeout(resolve, 1000));
       
-      console.log("🔑 Current auth state:", auth.currentUser?.uid);
-      console.log("📊 Auth current user:", auth.currentUser);
-      
-      // Get user data from Firestore
       console.log("📄 Attempting to fetch user document...");
       const userDocRef = doc(db, "users", user.uid);
       const userDoc = await getDoc(userDocRef);
@@ -109,6 +134,7 @@ const Login: React.FC = () => {
         const userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || userData.email;
         console.log("📧 Sending OTP to:", userData.email);
         
+        // ✅ FIXED: Changed 'otp' to 'code' to match API
         const emailResponse = await fetch('/api/send-email-otp', {
           method: 'POST',
           headers: {
@@ -116,12 +142,12 @@ const Login: React.FC = () => {
           },
           body: JSON.stringify({
             email: userData.email,
-            otp: otp,
+            code: otp, // ✅ CHANGED: 'otp' → 'code'
             name: userName
           }),
         });
 
-        const emailData = await emailResponse.json();
+        const emailData = await debugAPIResponse(emailResponse);
         console.log("📨 Email API response:", emailData);
         
         if (!emailResponse.ok) {
@@ -152,11 +178,6 @@ const Login: React.FC = () => {
       console.error("❌ Login error:", firebaseError);
       
       if (firebaseError?.code === "permission-denied") {
-        console.error("🔐 Firestore Permission Details:", {
-          currentUser: auth.currentUser?.uid,
-          errorCode: firebaseError.code,
-          errorMessage: firebaseError.message
-        });
         setError("Database access denied. Please check Firestore rules or contact support.");
       } else if (firebaseError?.code === "auth/invalid-credential") {
         setError("Invalid email or password.");
@@ -205,7 +226,6 @@ const Login: React.FC = () => {
 
     try {
       console.log("🔐 Verifying OTP for user:", userId);
-      console.log("⌨️ OTP entered:", otpCode);
       
       const otpDoc = await getDoc(doc(db, "verificationCodes", userId));
       console.log("📄 OTP document exists:", otpDoc.exists());
@@ -215,11 +235,6 @@ const Login: React.FC = () => {
       }
 
       const otpData = otpDoc.data();
-      console.log("📋 OTP data from Firestore:", otpData);
-      console.log("🔢 Stored OTP code:", otpData.code);
-      console.log("⌨️ Entered OTP code:", otpCode);
-      console.log("⏰ Expires at:", new Date(otpData.expiresAt).toLocaleString());
-      console.log("🕒 Current time:", new Date().toLocaleString());
 
       if (Date.now() > otpData.expiresAt) {
         await deleteDoc(doc(db, "verificationCodes", userId));
@@ -228,28 +243,31 @@ const Login: React.FC = () => {
 
       let verificationSuccessful = false;
 
-      // Method 1: Direct code comparison
       if (otpData.code && otpData.code === otpCode) {
         console.log("✅ OTP verification successful via direct code");
         verificationSuccessful = true;
       }
-      // Method 2: API verification
       else if (otpData.otpHash) {
         console.log("🌐 Attempting API verification...");
+        
+        // ✅ FIXED: Changed field names to match API
+        const requestBody = {
+          email: email.toLowerCase(),
+          code: otpCode, // ✅ CHANGED: 'otp' → 'code'
+          otpHash: otpData.otpHash
+        };
+        
+        console.log("📨 Sending OTP verification request:", requestBody);
+        
         const response = await fetch('/api/verify-otp', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            email: email.toLowerCase(),
-            otp: otpCode,
-            otpHash: otpData.otpHash,
-            expiresAt: otpData.expiresAt
-          }),
+          body: JSON.stringify(requestBody),
         });
 
-        const data = await response.json();
+        const data = await debugAPIResponse(response);
         console.log("📨 OTP verification API response:", data);
         
         if (response.ok && data.success) {
@@ -267,7 +285,6 @@ const Login: React.FC = () => {
         await deleteDoc(doc(db, "verificationCodes", userId));
         
         console.log("🔑 Re-authenticating user...");
-        // Re-authenticate user for 2FA flow
         await signInWithEmailAndPassword(auth, email, password);
         
         console.log("🧭 Navigation to:", userRole);
@@ -282,6 +299,109 @@ const Login: React.FC = () => {
       setOtpLoading(false);
     }
   };  
+
+  // BAGONG: Handle Google OTP Verification
+  const handleGoogleOTPVerification = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!otpCode || otpCode.length !== 6) {
+      setError("Please enter a valid 6-digit code.");
+      return;
+    }
+
+    setOtpLoading(true);
+    setError("");
+
+    try {
+      if (!googleUserData) {
+        throw new Error("Google sign-in session expired. Please try again.");
+      }
+
+      console.log("🔐 Verifying Google OTP for user:", googleUserData.uid);
+      
+      const otpDoc = await getDoc(doc(db, "verificationCodes", googleUserData.uid));
+      console.log("📄 OTP document exists:", otpDoc.exists());
+      
+      if (!otpDoc.exists()) {
+        throw new Error("Verification code has expired. Please login again.");
+      }
+
+      const otpData = otpDoc.data();
+
+      if (Date.now() > otpData.expiresAt) {
+        await deleteDoc(doc(db, "verificationCodes", googleUserData.uid));
+        throw new Error("Verification code has expired. Please request a new one.");
+      }
+
+      let verificationSuccessful = false;
+
+      if (otpData.code && otpData.code === otpCode) {
+        console.log("✅ Google OTP verification successful via direct code");
+        verificationSuccessful = true;
+      }
+      else if (otpData.otpHash) {
+        console.log("🌐 Attempting API verification for Google...");
+        
+        // ✅ FIXED: Changed field names to match API
+        const response = await fetch('/api/verify-otp', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: googleUserData.email.toLowerCase(),
+            code: otpCode, // ✅ CHANGED: 'otp' → 'code'
+            otpHash: otpData.otpHash
+          }),
+        });
+
+        const data = await debugAPIResponse(response);
+        console.log("📨 Google OTP verification API response:", data);
+        
+        if (response.ok && data.success) {
+          console.log("✅ Google OTP verification successful via API");
+          verificationSuccessful = true;
+        } else {
+          throw new Error(data.error || 'Invalid verification code');
+        }
+      } else {
+        throw new Error("Invalid verification code format.");
+      }
+
+      if (verificationSuccessful) {
+        console.log("✅ Google OTP verification successful, cleaning up...");
+        await deleteDoc(doc(db, "verificationCodes", googleUserData.uid));
+        
+        console.log("🔑 Re-authenticating Google user...");
+        const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({
+          prompt: 'select_account'
+        });
+        
+        console.log("✅ Google re-authentication successful");
+        
+        console.log("🧭 Navigation to:", googleUserData.role);
+        navigateBasedOnRole(googleUserData.role);
+        
+        // Clean up
+        setGoogleUserData(null);
+      }
+    } catch (err) {
+      const firebaseError = err as FirebaseError;
+      console.error("❌ Google OTP verification error:", firebaseError);
+      
+      if (firebaseError?.code === "auth/popup-closed-by-user") {
+        setError("Sign-in cancelled. Please try again.");
+      } else if (firebaseError?.code === "auth/popup-blocked") {
+        setError("Pop-up was blocked. Please allow pop-ups for this site.");
+      } else {
+        setError(firebaseError?.message || "Verification failed. Please try again.");
+      }
+      setOtpCode("");
+    } finally {
+      setOtpLoading(false);
+    }
+  };
 
   const handleResendOTP = async () => {
     if (resendCooldown > 0) return;
@@ -300,34 +420,37 @@ const Login: React.FC = () => {
     }, 1000);
 
     try {
-      const userDoc = await getDoc(doc(db, "users", userId));
+      const userEmail = googleUserData ? googleUserData.email : email;
+      const userUid = googleUserData ? googleUserData.uid : userId;
+      
+      const userDoc = await getDoc(doc(db, "users", userUid));
       
       if (!userDoc.exists()) {
         throw new Error("User data not found. Please login again.");
       }
 
       const userData = userDoc.data() as UserRole;
-      const userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || email;
+      const userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || userEmail;
       
       const newOtp = generateOTP();
       const expiresAt = Date.now() + 10 * 60 * 1000;
 
-      console.log("Sending new OTP to:", email);
-      console.log("New OTP:", newOtp);
+      console.log("Sending new OTP to:", userEmail);
       
+      // ✅ FIXED: Changed 'otp' to 'code' to match API
       const response = await fetch('/api/send-email-otp', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          email: email,
-          otp: newOtp,
+          email: userEmail,
+          code: newOtp, // ✅ CHANGED: 'otp' → 'code'
           name: userName
         }),
       });
 
-      const data = await response.json();
+      const data = await debugAPIResponse(response);
       console.log("Resend OTP API response:", data);
 
       if (!response.ok) {
@@ -335,18 +458,16 @@ const Login: React.FC = () => {
       }
 
       console.log("Storing new verification code...");
-      // Delete old OTP first
       try {
-        await deleteDoc(doc(db, "verificationCodes", userId));
+        await deleteDoc(doc(db, "verificationCodes", userUid));
       } catch {
         console.log("No existing OTP to delete");
       }
       
-      // Store new OTP
-      await setDoc(doc(db, "verificationCodes", userId), {
+      await setDoc(doc(db, "verificationCodes", userUid), {
         code: newOtp,
         otpHash: data.otpHash,
-        email: email.toLowerCase(),
+        email: userEmail.toLowerCase(),
         createdAt: Date.now(),
         expiresAt: expiresAt,
         verified: false
@@ -359,11 +480,11 @@ const Login: React.FC = () => {
       const firebaseError = error as FirebaseError;
       console.error("❌ Resend OTP error:", firebaseError);
       setError("❌ Failed to resend code. Please try again.");
-      setResendCooldown(0); // Reset cooldown on error
+      setResendCooldown(0);
     }
   };  
 
-  // SIMPLIFIED FORGOT PASSWORD FUNCTION - DIRECT FIREBASE
+  // BAGONG FORGOT PASSWORD HANDLER
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -372,33 +493,43 @@ const Login: React.FC = () => {
       return;
     }
 
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(resetEmail)) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+
     setResetLoading(true);
     setError("");
 
     try {
-      console.log("🔑 Processing forgot password for:", resetEmail);
+      console.log("Processing forgot password for:", resetEmail);
       
-      // DIRECT FIREBASE PASSWORD RESET
-      console.log("📧 Sending Firebase password reset email...");
-      await sendPasswordResetEmail(auth, resetEmail);
+      // IDAGDAG: Action code settings para sa tamang redirect
+      const actionCodeSettings = {
+        url: "https://r-lfursure-niln.vercel.app/reset-password", // ✅ direct link sa reset page
+        handleCodeInApp: true, // tells Firebase to use your app's page
+      };
+ 
+      console.log("Sending password reset email...");
+      await sendPasswordResetEmail(auth, resetEmail, actionCodeSettings);
 
       console.log("✅ Password reset email sent successfully");
       setResetSuccess(true);
       setError("✅ Password reset link has been sent to your email!");
       
-      // Reset form after success
       setTimeout(() => {
         setShowForgotPassword(false);
         setResetEmail("");
         setResetSuccess(false);
         setError("");
-      }, 3000);
+      }, 5000);
       
     } catch (err) {
       const firebaseError = err as FirebaseError;
       console.error("❌ Forgot password error:", firebaseError);
       
-      // Handle specific Firebase errors
       if (firebaseError?.code === "auth/user-not-found") {
         setError("No account found with this email.");
       } else if (firebaseError?.code === "auth/invalid-email") {
@@ -413,6 +544,12 @@ const Login: React.FC = () => {
     }
   };
 
+  const handleForgotPasswordClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setShowForgotPassword(true);
+    setError("");
+  };
+
   const handleCancelReset = () => {
     setShowForgotPassword(false);
     setResetEmail("");
@@ -425,6 +562,7 @@ const Login: React.FC = () => {
     setOtpCode("");
     setUserId("");
     setUserRole("");
+    setGoogleUserData(null);
     setError("");
     setEmail("");
     setPassword("");
@@ -462,8 +600,9 @@ const Login: React.FC = () => {
           const expiresAt = Date.now() + 10 * 60 * 1000;
           
           const userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || userData.email;
-          console.log("📧 Sending OTP to:", userData.email);
+          console.log("✉️ Sending OTP to:", userData.email);
           
+          // ✅ FIXED: Changed 'otp' to 'code' to match API
           const emailResponse = await fetch('/api/send-email-otp', {
             method: 'POST',
             headers: {
@@ -471,13 +610,13 @@ const Login: React.FC = () => {
             },
             body: JSON.stringify({
               email: userData.email,
-              otp: otp,
+              code: otp, // ✅ CHANGED: 'otp' → 'code'
               name: userName
             }),
           });
 
-          const emailData = await emailResponse.json();
-          console.log("📨 Email API response:", emailData);
+          const emailData = await debugAPIResponse(emailResponse);
+          console.log("📩 Email API response:", emailData);
           
           if (!emailResponse.ok) {
             throw new Error(emailData.error || "Failed to send verification code. Please try again.");
@@ -493,55 +632,60 @@ const Login: React.FC = () => {
             verified: false
           });
 
-        console.log("🚪 Signing out for OTP verification...");
-        await auth.signOut();
+          console.log("🚪 Signing out for OTP verification...");
+          await auth.signOut();
         
-        setUserId(user.uid);
-        setUserRole(userData.role);
-        setEmail(userData.email);
-        setOtpRequired(true);
-        setError("✅ A verification code has been sent to your email.");
+          // Store Google user data for OTP verification
+          setGoogleUserData({
+            uid: user.uid,
+            email: userData.email,
+            role: userData.role
+          });
+        
+          setOtpRequired(true);
+          setError("✅ A verification code has been sent to your email.");
+        } else {
+          console.log(" No 2FA required, navigating to:", userData.role);
+          navigateBasedOnRole(userData.role);
+        }
       } else {
-        console.log("🎯 No 2FA required, navigating to:", userData.role);
-        // DITO IMPORTANTE - WAG MAG-SIGNOUT KAPAG WALANG 2FA
-        navigateBasedOnRole(userData.role);
-      }
-    } else {
-      console.log("🆕 New Google user, creating user document...");
-      const newUserData: UserRole = {
-        role: 'user',
-        firstName: user.displayName?.split(' ')[0] || '',
-        lastName: user.displayName?.split(' ').slice(1).join(' ') || '',
-        email: user.email || '',
-        twoFactorEnabled: false
-      };
+        console.log("New Google user, creating user document...");
+        const newUserData: UserRole = {
+          role: 'user',
+          firstName: user.displayName?.split(' ')[0] || '',
+          lastName: user.displayName?.split(' ').slice(1).join(' ') || '',
+          email: user.email || '',
+          twoFactorEnabled: false
+        };
       
-      await setDoc(doc(db, "users", user.uid), newUserData);
-      console.log("✅ User document created, navigating to user dashboard");
-      navigateBasedOnRole('user');
-    }
-  } catch (err) {
-    const firebaseError = err as FirebaseError;
-    console.error("❌ Google login error:", firebaseError);
+        await setDoc(doc(db, "users", user.uid), newUserData);
+        console.log("✅ User document created, navigating to user dashboard");
+        navigateBasedOnRole('user');
+      }
+    } catch (err) {
+      const firebaseError = err as FirebaseError;
+      console.error("❌ Google login error:", firebaseError);
     
-    if (firebaseError?.code === "auth/popup-closed-by-user") {
-      setError("Sign-in cancelled. Please try again.");
-    } else if (firebaseError?.code === "auth/popup-blocked") {
-      setError("Pop-up was blocked. Please allow pop-ups for this site.");
-    } else {
-      setError(firebaseError?.message || "Failed to sign in with Google. Please try again.");
-    }
+      if (firebaseError?.code === "auth/popup-closed-by-user") {
+        setError("Sign-in cancelled. Please try again.");
+      } else if (firebaseError?.code === "auth/popup-blocked") {
+        setError("Pop-up was blocked. Please allow pop-ups for this site.");
+      } else {
+        setError(firebaseError?.message || "Failed to sign in with Google. Please try again.");
+      }
     
-    // Sign out only on error
-    try {
-      await auth.signOut();
-    } catch (signOutError) {
-      console.log("Sign out error:", signOutError);
+      try {
+        await auth.signOut();
+      } catch (signOutError) {
+        console.log("Sign out error:", signOutError);
+      }
+    } finally {
+      setLoading(false);
     }
-  } finally {
-    setLoading(false);
-  }
-};
+  };
+
+  // Check if we're in a Google OTP flow
+  const isGoogleOTPFlow = otpRequired && googleUserData;
 
   return (
     <>
@@ -556,7 +700,7 @@ const Login: React.FC = () => {
           
           <CenteredLogoSection>
             <LogoImage 
-              src="https://scontent.fmnl13-4.fna.fbcdn.net/v/t39.30808-1/308051699_1043145306431767_6902051210877649285_n.jpg?stp=dst-jpg_s100x100_tt6&_nc_cat=108&ccb=1-7&_nc_sid=2d3e12&_nc_eui2=AeH7C3PaObQLeqOOxA3pTYw1U6XSiAPBS_lTpdKIA8FL-aWJ6pOqX-tCsYAmdUOHVzzxg-T9gjpVH_1PkEO0urYZ&_nc_ohc=HDN02MpNKCUQ7kNvwFHDNEA&_nc_oc=Adkyj-8KGLXSyRtGZDYLXHDy0BAwHJkWJ_Dp6ZfVTK_TueLGn92_GWOIIzoZ2Qe73po&_nc_zt=24&_nc_ht=scontent.fmnl13-4.fna&_nc_gid=Qy8sBvTkAlBpHY2TPmskQA&oh=00_AfceD8P4qHoaFoZIybO2nZt10Jr_3D_Do-Qet1BlD0LBDQ&oe=68EA19DB"
+              src="/RL.jpg"
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
                 target.style.display = 'none';
@@ -587,7 +731,7 @@ const Login: React.FC = () => {
 
             {!otpRequired ? (
               showForgotPassword ? (
-                <StyledForm onSubmit={handleForgotPassword}>
+                <ForgotPasswordForm onSubmit={handleForgotPassword}>
                   <ResetDescription>
                     <ResetIcon>🔑</ResetIcon>
                     <ResetText>
@@ -620,7 +764,7 @@ const Login: React.FC = () => {
                       onClick={handleCancelReset} 
                       disabled={resetLoading}
                     >
-                      Back to Login
+                      ⮜ Back to Login
                     </CancelButton>
                     <VerifyButton 
                       type="submit" 
@@ -629,9 +773,9 @@ const Login: React.FC = () => {
                       {resetLoading ? "Sending..." : resetSuccess ? "Sent!" : "Send Reset Link"}
                     </VerifyButton>
                   </ButtonRow>
-                </StyledForm>
+                </ForgotPasswordForm>
               ) : (
-                <StyledForm onSubmit={handleSubmit}>
+                <LoginForm onSubmit={handleSubmit}>
                   <InputGroup>
                     <InputLabel>Email</InputLabel>
                     <StyledInput
@@ -659,12 +803,12 @@ const Login: React.FC = () => {
                         type="button" 
                         onClick={togglePasswordVisibility}
                       >
-                        {showPassword ? "🙈" : "👁"}
+                        {showPassword ?  "🔓":"🔒"}
                       </PasswordToggle>
                     </PasswordContainer>
                   </InputGroup>
 
-                  <ForgotPasswordLink onClick={() => setShowForgotPassword(true)}>
+                  <ForgotPasswordLink onClick={handleForgotPasswordClick}>
                     Forgot password?
                   </ForgotPasswordLink>
 
@@ -691,14 +835,14 @@ const Login: React.FC = () => {
                     </GoogleIcon>
                     Continue with Google
                   </GoogleLoginButton>
-                </StyledForm>
+                </LoginForm>
               )
             ) : (
-              <StyledForm onSubmit={handleOTPVerification}>
+              <OTPForm onSubmit={isGoogleOTPFlow ? handleGoogleOTPVerification : handleOTPVerification}>
                 <OTPDescription>
                   <EmailIcon>📧</EmailIcon>
                   <OTPText>
-                    We&apos;ve sent a 6-digit verification code to <strong>{email}</strong>
+                    We&apos;ve sent a 6-digit verification code to <strong>{isGoogleOTPFlow ? googleUserData.email : email}</strong>
                   </OTPText>
                 </OTPDescription>
 
@@ -740,7 +884,7 @@ const Login: React.FC = () => {
                 </ButtonRow>
 
                 <OTPExpiryNote>Code expires in 10 minutes</OTPExpiryNote>
-              </StyledForm>
+              </OTPForm>
             )}
 
             {!otpRequired && !showForgotPassword && (
@@ -760,7 +904,25 @@ const Login: React.FC = () => {
 
 export default Login;
 
-// ... (LAHAT NG STYLED COMPONENTS AY NANDITO NA, WALANG BINAGO)
+// STYLED COMPONENTS (SAME AS BEFORE)
+const LoginForm = styled.form`
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+`;
+
+const ForgotPasswordForm = styled.form`
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+`;
+
+const OTPForm = styled.form`
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+`;
+
 const LoginContainer = styled.div`
   display: flex;
   min-height: 100vh;
@@ -897,12 +1059,6 @@ const FormSubtitle = styled.p`
   color: #666;
   margin: 0;
   font-size: 1rem;
-`;
-
-const StyledForm = styled.form`
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
 `;
 
 const InputGroup = styled.div`

@@ -1,19 +1,18 @@
 "use client"
-
 import type React from "react"
 import { useEffect, useState } from "react"
 import styled, { createGlobalStyle, keyframes } from "styled-components"
 import { useRouter } from "next/navigation"
 import { auth, db } from "../firebaseConfig"
-import { signOut } from "firebase/auth"
-import { collection, getDocs, addDoc, onSnapshot, deleteDoc, doc, updateDoc } from "firebase/firestore"
+import { signOut, createUserWithEmailAndPassword, updateProfile } from "firebase/auth"
+import { collection, getDocs, addDoc, onSnapshot, deleteDoc, doc, updateDoc, setDoc } from "firebase/firestore"
 
 // Global Styles
 const GlobalStyle = createGlobalStyle`
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    background-color: #fafafa;
+    background-color: #f8fafc;
     margin: 0;
     padding: 0;
     overflow-x: hidden;
@@ -30,6 +29,11 @@ const fadeInUp = keyframes`
   to { opacity: 1; transform: translateY(0); }
 `
 
+const slideIn = keyframes`
+  from { transform: translateY(-20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+`
+
 interface AppointmentType {
   id: string
   clientName: string
@@ -41,7 +45,7 @@ interface AppointmentType {
   gender?: string
   date: string
   timeSlot: string
-  status?: string
+  status?: "Pending" | "Confirmed" | "Done" | "Cancelled"
   bookedByAdmin?: boolean
   createdAt?: string
 }
@@ -74,6 +78,11 @@ interface MenuItemProps {
   $active?: boolean
 }
 
+// Type guard for Firebase Auth error
+function isAuthError(error: unknown): error is { code: string; message: string } {
+  return typeof error === 'object' && error !== null && 'code' in error
+}
+
 const Admindashboard: React.FC = () => {
   const router = useRouter()
   const [appointments, setAppointments] = useState<AppointmentType[]>([])
@@ -97,6 +106,21 @@ const Admindashboard: React.FC = () => {
   const [selectedMonth, setSelectedMonth] = useState<string>("")
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
+  // Modal States
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deleteItemId, setDeleteItemId] = useState<string>("")
+  const [deleteItemType, setDeleteItemType] = useState<"appointment" | "unavailable">("appointment")
+  const [deleteItemName, setDeleteItemName] = useState<string>("") // New state for item name
+  const [showStatusModal, setShowStatusModal] = useState(false)
+  const [statusItemId, setStatusItemId] = useState<string>("")
+  const [newStatus, setNewStatus] = useState<string>("")
+  const [showMedicalRecordsModal, setShowMedicalRecordsModal] = useState(false)
+  const [medicalRecordAppointment, setMedicalRecordAppointment] = useState<AppointmentType | null>(null)
+  const [showAppointmentDetails, setShowAppointmentDetails] = useState(false)
+  const [selectedAppointment, setSelectedAppointment] = useState<AppointmentType | null>(null)
+  const [showUnavailableDetails, setShowUnavailableDetails] = useState(false)
+  const [selectedUnavailable, setSelectedUnavailable] = useState<UnavailableSlot | null>(null)
+
   // OTP 2FA States
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false)
   const [showOTPSetup, setShowOTPSetup] = useState(false)
@@ -104,6 +128,15 @@ const Admindashboard: React.FC = () => {
   const [otpSent, setOtpSent] = useState(false)
   const [isSendingOTP, setIsSendingOTP] = useState(false)
   const [otpEmail, setOtpEmail] = useState("")
+
+  // Create Account States
+  const [showCreateAccount, setShowCreateAccount] = useState(false)
+  const [newAccountEmail, setNewAccountEmail] = useState("")
+  const [newAccountPassword, setNewAccountPassword] = useState("")
+  const [newAccountName, setNewAccountName] = useState("")
+  const [newAccountRole, setNewAccountRole] = useState<"admin" | "doctor">("doctor")
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false)
+  const [createAccountMessage, setCreateAccountMessage] = useState("")
 
   const timeSlots = [
     "8:00 AM–8:30 AM",
@@ -268,6 +301,7 @@ const Admindashboard: React.FC = () => {
         alert("This time slot is already taken.")
         return
       }
+      
       await addDoc(collection(db, "appointments"), {
         clientName: selectedClient,
         petName: petName.trim(),
@@ -280,6 +314,9 @@ const Admindashboard: React.FC = () => {
         timeSlot: appointmentTime,
         status: "Confirmed",
         bookedByAdmin: true,
+        userId: auth.currentUser?.uid,
+        bookedBy: auth.currentUser?.uid,
+        userEmail: auth.currentUser?.email,
         createdAt: new Date().toISOString(),
       })
       alert("Appointment booked successfully!")
@@ -294,50 +331,137 @@ const Admindashboard: React.FC = () => {
     }
   }
 
-  const handleDeleteUnavailable = async (id: string) => {
-    if (!confirm("Are you sure you want to remove this unavailable date?")) return
+  // Delete Confirmation Modal Functions
+  const openDeleteModal = (id: string, type: "appointment" | "unavailable", name?: string) => {
+    setDeleteItemId(id)
+    setDeleteItemType(type)
+    setDeleteItemName(name || "")
+    setShowDeleteModal(true)
+  }
 
-    setDeletingId(id)
+  const closeDeleteModal = () => {
+    setShowDeleteModal(false)
+    setDeleteItemId("")
+    setDeleteItemType("appointment")
+    setDeleteItemName("")
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteItemId) return
+
+    setDeletingId(deleteItemId)
     try {
-      await deleteDoc(doc(db, "unavailableSlots", id))
-      alert("Unavailable date removed successfully!")
-      fetchUnavailableSlots()
+      if (deleteItemType === "appointment") {
+        await deleteDoc(doc(db, "appointments", deleteItemId))
+        alert("Appointment deleted successfully!")
+        fetchAppointments()
+      } else {
+        await deleteDoc(doc(db, "unavailableSlots", deleteItemId))
+        alert("Unavailable date removed successfully!")
+        fetchUnavailableSlots()
+      }
+      closeDeleteModal()
     } catch (error) {
-      console.error("Error deleting unavailable slot:", error)
-      alert("Failed to remove unavailable date. Please try again.")
+      console.error("Error deleting:", error)
+      alert("Failed to delete. Please try again.")
     } finally {
       setDeletingId(null)
     }
   }
 
-  const handleDeleteAppointment = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this appointment?")) return
-
-    setDeletingId(id)
-    try {
-      await deleteDoc(doc(db, "appointments", id))
-      alert("Appointment deleted successfully!")
-      fetchAppointments()
-    } catch (error) {
-      console.error("Error deleting appointment:", error)
-      alert("Failed to delete appointment. Please try again.")
-    } finally {
-      setDeletingId(null)
-    }
+  // Status Change Modal
+  const openStatusModal = (id: string, currentStatus: string) => {
+    setStatusItemId(id)
+    setNewStatus(currentStatus === "Confirmed" ? "Cancelled" : "Confirmed")
+    setShowStatusModal(true)
   }
 
-  const handleStatusChange = async (id: string, newStatus: string) => {
+  const closeStatusModal = () => {
+    setShowStatusModal(false)
+    setStatusItemId("")
+    setNewStatus("")
+  }
+
+  const handleStatusConfirm = async () => {
+    if (!statusItemId || !newStatus) return
+
     try {
-      const appointmentRef = doc(db, "appointments", id)
+      const appointmentRef = doc(db, "appointments", statusItemId)
       await updateDoc(appointmentRef, {
         status: newStatus,
       })
       alert(`Appointment status updated to ${newStatus}!`)
       fetchAppointments()
+      closeStatusModal()
     } catch (error) {
       console.error("Error updating appointment status:", error)
       alert("Failed to update appointment status. Please try again.")
     }
+  }
+
+  // Medical Records Modal
+  const openMedicalRecordsModal = (appointment: AppointmentType) => {
+    setMedicalRecordAppointment(appointment)
+    setShowMedicalRecordsModal(true)
+  }
+
+  const closeMedicalRecordsModal = () => {
+    setShowMedicalRecordsModal(false)
+    setMedicalRecordAppointment(null)
+  }
+
+  const handleMoveToMedicalRecords = async () => {
+    if (!medicalRecordAppointment) return
+
+    try {
+      // First update the status to "Done"
+      const appointmentRef = doc(db, "appointments", medicalRecordAppointment.id)
+      await updateDoc(appointmentRef, {
+        status: "Done",
+      })
+      
+      // Then create a medical record entry
+      await addDoc(collection(db, "medicalRecords"), {
+        clientName: medicalRecordAppointment.clientName,
+        petName: medicalRecordAppointment.petName,
+        petType: medicalRecordAppointment.petType,
+        petBreed: medicalRecordAppointment.petBreed,
+        gender: medicalRecordAppointment.gender,
+        appointmentDate: medicalRecordAppointment.date,
+        appointmentTime: medicalRecordAppointment.timeSlot,
+        status: "Done",
+        completedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      })
+      
+      alert("Appointment marked as done and added to medical records!")
+      fetchAppointments()
+      closeMedicalRecordsModal()
+    } catch (error) {
+      console.error("Error moving to medical records:", error)
+      alert("Failed to update medical records. Please try again.")
+    }
+  }
+
+  // View Details Modals
+  const openAppointmentDetails = (appointment: AppointmentType) => {
+    setSelectedAppointment(appointment)
+    setShowAppointmentDetails(true)
+  }
+
+  const closeAppointmentDetails = () => {
+    setShowAppointmentDetails(false)
+    setSelectedAppointment(null)
+  }
+
+  const openUnavailableDetails = (slot: UnavailableSlot) => {
+    setSelectedUnavailable(slot)
+    setShowUnavailableDetails(true)
+  }
+
+  const closeUnavailableDetails = () => {
+    setShowUnavailableDetails(false)
+    setSelectedUnavailable(null)
   }
 
   // OTP 2FA Functions
@@ -401,6 +525,87 @@ const Admindashboard: React.FC = () => {
     }
   }
 
+  // Create Account Function
+  const handleCreateAccount = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newAccountEmail || !newAccountPassword || !newAccountName) {
+      setCreateAccountMessage("Please fill all required fields.")
+      return
+    }
+
+    if (newAccountPassword.length < 6) {
+      setCreateAccountMessage("Password must be at least 6 characters long.")
+      return
+    }
+
+    setIsCreatingAccount(true)
+    setCreateAccountMessage("")
+
+    try {
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        newAccountEmail,
+        newAccountPassword
+      )
+
+      const user = userCredential.user
+
+      await updateProfile(user, {
+        displayName: newAccountName
+      })
+
+      const userDocData = {
+        name: newAccountName,
+        email: newAccountEmail.toLowerCase(),
+        role: newAccountRole,
+        createdAt: new Date().toISOString(),
+        createdBy: auth.currentUser?.email || "admin",
+        lastLogin: new Date().toISOString(),
+        emailVerified: false,
+        status: "active"
+      }
+
+      await setDoc(doc(db, "users", user.uid), userDocData)
+
+      setCreateAccountMessage(`✅ Successfully created ${newAccountRole} account for ${newAccountName}!`)
+      
+      setTimeout(() => {
+        setNewAccountEmail("")
+        setNewAccountPassword("")
+        setNewAccountName("")
+        setNewAccountRole("doctor")
+        setShowCreateAccount(false)
+        setCreateAccountMessage("")
+      }, 3000)
+
+    } catch (error: unknown) {
+      console.error("Error creating account:", error)
+      
+      if (isAuthError(error)) {
+        switch (error.code) {
+          case 'auth/email-already-in-use':
+            setCreateAccountMessage("This email is already registered. Please use a different email.");
+            break;
+          case 'auth/invalid-email':
+            setCreateAccountMessage("Invalid email address format.");
+            break;
+          case 'auth/weak-password':
+            setCreateAccountMessage("Password is too weak. Please choose a stronger password.");
+            break;
+          case 'auth/operation-not-allowed':
+            setCreateAccountMessage("Email/password accounts are not enabled. Please contact support.");
+            break;
+          default:
+            setCreateAccountMessage(error.message || "Failed to create account. Please try again.");
+        }
+      } else {
+        setCreateAccountMessage("Failed to create account. Please try again.");
+      }
+    } finally {
+      setIsCreatingAccount(false)
+    }
+  }
+
   const resetForm = () => {
     setSelectedClient("")
     setPetName("")
@@ -419,12 +624,12 @@ const Admindashboard: React.FC = () => {
         return "#28a745"
       case "Cancelled":
         return "#dc3545"
-      case "Pet Registered":
+      case "Done":
         return "#007bff"
+      case "Pet Registered":
+        return "#17a2b8"
       case "Booked by Admin":
         return "#17a2b8"
-      case "Completed":
-        return "#007bff"
       default:
         return "#ffc107"
     }
@@ -444,21 +649,6 @@ const Admindashboard: React.FC = () => {
       })
     : unavailableSlots
 
-  const getDisplayData = () => {
-    switch (viewMode) {
-      case "today":
-        return { data: todaysAppointments, type: "appointments" }
-      case "all":
-        return { data: filteredAppointments, type: "appointments" }
-      case "unavailable":
-        return { data: filteredUnavailableSlots, type: "unavailable" }
-      default:
-        return { data: [], type: "appointments" }
-    }
-  }
-
-  const displayData = getDisplayData()
-
   const formatDate = (dateString: string) => {
     const date = new Date(dateString)
     return date.toLocaleDateString("en-PH", {
@@ -477,13 +667,16 @@ const Admindashboard: React.FC = () => {
       <PageContainer>
         <HeaderBar>
           <BrandSection>
-            <MenuToggle onClick={() => setIsSidebarOpen(!isSidebarOpen)} $isOpen={isSidebarOpen}>
+            <MenuToggle 
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
+              $isOpen={isSidebarOpen}
+            >
               <span></span>
               <span></span>
               <span></span>
             </MenuToggle>
             <Logo>
-              <LogoIcon>🏥</LogoIcon>
+              <LogoImage src="/RL.jpg" alt="RL Clinic Logo" />
               <LogoText>
                 <ClinicName>RL Clinic</ClinicName>
                 <LogoSubtext>Fursure Care - Admin Dashboard</LogoSubtext>
@@ -501,9 +694,6 @@ const Admindashboard: React.FC = () => {
             <SidebarHeader>
               <SidebarTitleRow>
                 <SidebarTitle>Main Menu</SidebarTitle>
-                <SidebarToggleButton onClick={() => setIsSidebarOpen(false)} title="Hide sidebar">
-                  ×
-                </SidebarToggleButton>
               </SidebarTitleRow>
             </SidebarHeader>
 
@@ -522,7 +712,9 @@ const Admindashboard: React.FC = () => {
               >
                 <MenuIcon>📅</MenuIcon>
                 <MenuText>Today&apos;s Appointments</MenuText>
-                {todaysAppointments.length > 0 && <MenuCount>{todaysAppointments.length}</MenuCount>}
+                {todaysAppointments.filter(appt => appt.status !== "Done" && appt.status !== "Cancelled").length > 0 && (
+                  <MenuCount>{todaysAppointments.filter(appt => appt.status !== "Done" && appt.status !== "Cancelled").length}</MenuCount>
+                )}
               </MenuItem>
 
               <MenuItem 
@@ -531,7 +723,9 @@ const Admindashboard: React.FC = () => {
               >
                 <MenuIcon>📋</MenuIcon>
                 <MenuText>List Appointments</MenuText>
-                {appointments.length > 0 && <MenuCount>{appointments.length}</MenuCount>}
+                {appointments.filter(appt => appt.status !== "Done" && appt.status !== "Cancelled").length > 0 && (
+                  <MenuCount>{appointments.filter(appt => appt.status !== "Done" && appt.status !== "Cancelled").length}</MenuCount>
+                )}
               </MenuItem>
 
               <MenuItem onClick={() => setShowBookingModal(true)}>
@@ -575,6 +769,13 @@ const Admindashboard: React.FC = () => {
             </SidebarFooter>
           </Sidebar>
 
+          {/* Floating Menu Button for Mobile */}
+          {!isSidebarOpen && (
+            <FloatingMenuButton onClick={() => setIsSidebarOpen(true)}>
+              ☰
+            </FloatingMenuButton>
+          )}
+
           <ContentArea $sidebarOpen={isSidebarOpen}>
             {viewMode === "dashboard" && (
               <>
@@ -591,64 +792,79 @@ const Admindashboard: React.FC = () => {
                 </DashboardHeader>
 
                 <AppointmentsSection>
-                  {todaysAppointments.length === 0 ? (
+                  {todaysAppointments.filter(appt => appt.status !== "Done" && appt.status !== "Cancelled").length === 0 ? (
                     <EmptyState>
                       <EmptyStateIcon>📅</EmptyStateIcon>
                       <EmptyStateText>No appointments scheduled for today</EmptyStateText>
                     </EmptyState>
                   ) : (
                     <AppointmentsGrid>
-                      {todaysAppointments.map((appointment, index) => {
-                        const borderColor = statusColor(appointment.status)
-                        return (
-                          <AppointmentCard
-                            key={appointment.id}
-                            $delay={index * 0.1}
-                            $borderLeftColor={borderColor}
-                          >
-                            <AppointmentHeader>
-                              <AppointmentTime>{appointment.timeSlot}</AppointmentTime>
-                              <StatusBadge $status={appointment.status} style={{ backgroundColor: borderColor }}>
-                                {appointment.status}
-                              </StatusBadge>
-                            </AppointmentHeader>
-                            <AppointmentDetails>
-                              <DetailRow>
-                                <DetailLabel>Client:</DetailLabel>
-                                <DetailValue>{appointment.clientName}</DetailValue>
-                              </DetailRow>
-                              <DetailRow>
-                                <DetailLabel>Pet:</DetailLabel>
-                                <DetailValue>{appointment.petName || "-"}</DetailValue>
-                              </DetailRow>
-                              <DetailRow>
-                                <DetailLabel>Type:</DetailLabel>
-                                <DetailValue>{appointment.petType || "-"}</DetailValue>
-                              </DetailRow>
-                              <DetailRow>
-                                <DetailLabel>Breed:</DetailLabel>
-                                <DetailValue>{appointment.petBreed || "-"}</DetailValue>
-                              </DetailRow>
-                            </AppointmentDetails>
-                            <AppointmentActions>
-                              <ActionButton
-                                $variant="complete"
-                                onClick={() => handleStatusChange(appointment.id, "Completed")}
-                                disabled={appointment.status === "Completed" || appointment.status === "Cancelled"}
-                              >
-                                ✓ Complete
-                              </ActionButton>
-                              <ActionButton
-                                $variant="cancel"
-                                onClick={() => handleStatusChange(appointment.id, "Cancelled")}
-                                disabled={appointment.status === "Cancelled"}
-                              >
-                                ✕ Cancel
-                              </ActionButton>
-                            </AppointmentActions>
-                          </AppointmentCard>
-                        )
-                      })}
+                      {todaysAppointments
+                        .filter(appt => appt.status !== "Done" && appt.status !== "Cancelled")
+                        .map((appointment, index) => {
+                          const borderColor = statusColor(appointment.status)
+                          return (
+                            <AppointmentCard
+                              key={appointment.id}
+                              $delay={index * 0.1}
+                              $borderLeftColor={borderColor}
+                            >
+                              <AppointmentHeader>
+                                <AppointmentTime>{appointment.timeSlot}</AppointmentTime>
+                                <StatusBadge $status={appointment.status} style={{ backgroundColor: borderColor }}>
+                                  {appointment.status}
+                                </StatusBadge>
+                              </AppointmentHeader>
+                              <AppointmentDetails>
+                                <DetailRow>
+                                  <DetailLabelShort>Client:</DetailLabelShort>
+                                  <DetailValueShort>{appointment.clientName}</DetailValueShort>
+                                </DetailRow>
+                                <DetailRow>
+                                  <DetailLabelShort>Pet:</DetailLabelShort>
+                                  <DetailValueShort>{appointment.petName || "-"}</DetailValueShort>
+                                </DetailRow>
+                                <DetailRow>
+                                  <DetailLabelShort>Type:</DetailLabelShort>
+                                  <DetailValueShort>{appointment.petType || "-"}</DetailValueShort>
+                                </DetailRow>
+                                <DetailRow>
+                                  <DetailLabelShort>Breed:</DetailLabelShort>
+                                  <DetailValueShort>{appointment.petBreed || "-"}</DetailValueShort>
+                                </DetailRow>
+                              </AppointmentDetails>
+                              <AppointmentActions>
+                                <ActionButton
+                                  $variant="primary"
+                                  onClick={() => openAppointmentDetails(appointment)}
+                                >
+                                  👁 View
+                                </ActionButton>
+                                <ActionButton
+                                  $variant="success"
+                                  onClick={() => openMedicalRecordsModal(appointment)}
+                                  disabled={appointment.status === "Done" || appointment.status === "Cancelled"}
+                                >
+                                  ✓ Done
+                                </ActionButton>
+                                <ActionButton
+                                  $variant="warning"
+                                  onClick={() => openStatusModal(appointment.id, appointment.status || "Pending")}
+                                  disabled={appointment.status === "Cancelled"}
+                                >
+                                  {appointment.status === "Confirmed" ? "✕ Cancel" : "✓ Confirm"}
+                                </ActionButton>
+                                <ActionButton
+                                  $variant="danger"
+                                  onClick={() => openDeleteModal(appointment.id, "appointment", `${appointment.clientName}'s appointment on ${appointment.date}`)}
+                                  disabled={deletingId === appointment.id}
+                                >
+                                  {deletingId === appointment.id ? "⏳" : "🗑 Delete"}
+                                </ActionButton>
+                              </AppointmentActions>
+                            </AppointmentCard>
+                          )
+                        })}
                     </AppointmentsGrid>
                   )}
                 </AppointmentsSection>
@@ -671,77 +887,85 @@ const Admindashboard: React.FC = () => {
                           fetchUnavailableSlots()
                         }}
                       >
-                        Refresh
+                       ⟳ Refresh
                       </RefreshButton>
                     </ControlsContainer>
                   </SectionHeader>
 
-                  {filteredAppointments.length === 0 ? (
+                  {filteredAppointments.filter(appt => appt.status !== "Done" && appt.status !== "Cancelled").length === 0 ? (
                     <EmptyState>
                       <EmptyStateIcon>📋</EmptyStateIcon>
                       <EmptyStateText>No appointments found</EmptyStateText>
                     </EmptyState>
                   ) : (
                     <AppointmentsGrid>
-                      {filteredAppointments.map((appointment, index) => {
-                        const borderColor = statusColor(appointment.status)
-                        return (
-                          <AppointmentCard
-                            key={appointment.id}
-                            $delay={index * 0.1}
-                            $borderLeftColor={borderColor}
-                          >
-                            <AppointmentHeader>
-                              <AppointmentDate>{appointment.date}</AppointmentDate>
-                              <StatusBadge $status={appointment.status} style={{ backgroundColor: borderColor }}>
-                                {appointment.status}
-                              </StatusBadge>
-                            </AppointmentHeader>
-                            <AppointmentTime>{appointment.timeSlot}</AppointmentTime>
-                            <AppointmentDetails>
-                              <DetailRow>
-                                <DetailLabel>Client:</DetailLabel>
-                                <DetailValue>{appointment.clientName}</DetailValue>
-                              </DetailRow>
-                              <DetailRow>
-                                <DetailLabel>Pet:</DetailLabel>
-                                <DetailValue>{appointment.petName || "-"}</DetailValue>
-                              </DetailRow>
-                              <DetailRow>
-                                <DetailLabel>Type:</DetailLabel>
-                                <DetailValue>{appointment.petType || "-"}</DetailValue>
-                              </DetailRow>
-                              <DetailRow>
-                                <DetailLabel>Breed:</DetailLabel>
-                                <DetailValue>{appointment.petBreed || "-"}</DetailValue>
-                              </DetailRow>
-                            </AppointmentDetails>
-                            <AppointmentActions>
-                              <ActionButton
-                                $variant="complete"
-                                onClick={() => handleStatusChange(appointment.id, "Completed")}
-                                disabled={appointment.status === "Completed" || appointment.status === "Cancelled"}
-                              >
-                                ✓ Complete
-                              </ActionButton>
-                              <ActionButton
-                                $variant="cancel"
-                                onClick={() => handleStatusChange(appointment.id, "Cancelled")}
-                                disabled={appointment.status === "Cancelled"}
-                              >
-                                ✕ Cancel
-                              </ActionButton>
-                              <ActionButton
-                                $variant="delete"
-                                onClick={() => handleDeleteAppointment(appointment.id)}
-                                disabled={deletingId === appointment.id}
-                              >
-                                {deletingId === appointment.id ? "Deleting..." : "🗑 Delete"}
-                              </ActionButton>
-                            </AppointmentActions>
-                          </AppointmentCard>
-                        )
-                      })}
+                      {filteredAppointments
+                        .filter(appt => appt.status !== "Done" && appt.status !== "Cancelled")
+                        .map((appointment, index) => {
+                          const borderColor = statusColor(appointment.status)
+                          return (
+                            <AppointmentCard
+                              key={appointment.id}
+                              $delay={index * 0.1}
+                              $borderLeftColor={borderColor}
+                            >
+                              <AppointmentHeader>
+                                <AppointmentDate>{appointment.date}</AppointmentDate>
+                                <StatusBadge $status={appointment.status} style={{ backgroundColor: borderColor }}>
+                                  {appointment.status}
+                                </StatusBadge>
+                              </AppointmentHeader>
+                              <AppointmentTime>{appointment.timeSlot}</AppointmentTime>
+                              <AppointmentDetails>
+                                <DetailRow>
+                                  <DetailLabel>Client:</DetailLabel>
+                                  <DetailValue>{appointment.clientName}</DetailValue>
+                                </DetailRow>
+                                <DetailRow>
+                                  <DetailLabel>Pet:</DetailLabel>
+                                  <DetailValue>{appointment.petName || "-"}</DetailValue>
+                                </DetailRow>
+                                <DetailRow>
+                                  <DetailLabel>Type:</DetailLabel>
+                                  <DetailValue>{appointment.petType || "-"}</DetailValue>
+                                </DetailRow>
+                                <DetailRow>
+                                  <DetailLabel>Breed:</DetailLabel>
+                                  <DetailValue>{appointment.petBreed || "-"}</DetailValue>
+                                </DetailRow>
+                              </AppointmentDetails>
+                              <AppointmentActions>
+                                <ActionButton
+                                  $variant="primary"
+                                  onClick={() => openAppointmentDetails(appointment)}
+                                >
+                                  👁 View
+                                </ActionButton>
+                                <ActionButton
+                                  $variant="success"
+                                  onClick={() => openMedicalRecordsModal(appointment)}
+                                  disabled={appointment.status === "Done" || appointment.status === "Cancelled"}
+                                >
+                                  ✓ Done
+                                </ActionButton>
+                                <ActionButton
+                                  $variant="warning"
+                                  onClick={() => openStatusModal(appointment.id, appointment.status || "Pending")}
+                                  disabled={appointment.status === "Cancelled"}
+                                >
+                                  {appointment.status === "Confirmed" ? "✕ Cancel" : "✓ Confirm"}
+                                </ActionButton>
+                                <ActionButton
+                                  $variant="danger"
+                                  onClick={() => openDeleteModal(appointment.id, "appointment", `${appointment.clientName}'s appointment on ${appointment.date}`)}
+                                  disabled={deletingId === appointment.id}
+                                >
+                                  {deletingId === appointment.id ? "⏳" : "🗑 Delete"}
+                                </ActionButton>
+                              </AppointmentActions>
+                            </AppointmentCard>
+                          )
+                        })}
                     </AppointmentsGrid>
                   )}
                 </AppointmentsSection>
@@ -756,6 +980,19 @@ const Admindashboard: React.FC = () => {
                 </DashboardHeader>
 
                 <SettingsContainer>
+                  <SettingsSection>
+                    <SettingsSectionTitle>Account Management</SettingsSectionTitle>
+                    <SettingsSectionDesc>
+                      Create new administrator or doctor accounts for your clinic.
+                    </SettingsSectionDesc>
+
+                    <TwoFactorCard>
+                      <CreateAccountButton onClick={() => setShowCreateAccount(true)}>
+                        Create New Account
+                      </CreateAccountButton>
+                    </TwoFactorCard>
+                  </SettingsSection>
+
                   <SettingsSection>
                     <SettingsSectionTitle>Two-Factor Authentication (2FA)</SettingsSectionTitle>
                     <SettingsSectionDesc>
@@ -884,133 +1121,376 @@ const Admindashboard: React.FC = () => {
                         fetchUnavailableSlots()
                       }}
                     >
-                      Refresh
+                      ⟳ Refresh
                     </RefreshButton>
                   </ControlsContainer>
                 </SectionHeader>
 
-                {todaysAppointments.length === 0 ? (
+                {todaysAppointments.filter(appt => appt.status !== "Done" && appt.status !== "Cancelled").length === 0 ? (
                   <NoAppointments>
                     No appointments for today.
                   </NoAppointments>
                 ) : (
                   <AppointmentsGrid>
-                    {todaysAppointments.map((appt, index) => {
-                      const borderColor = statusColor(appt.status)
-                      return (
-                        <AppointmentCard key={appt.id} $delay={index * 0.1} $borderLeftColor={borderColor}>
-                          <InfoRow>
-                            <strong>Owner:</strong> {appt.clientName}
-                          </InfoRow>
-                          <InfoRow>
-                            <strong>Pet:</strong> {appt.petName || "-"}
-                          </InfoRow>
-                          <InfoRow>
-                            <strong>Date:</strong> {appt.date} | <strong>Time:</strong> {appt.timeSlot}
-                          </InfoRow>
-                          <InfoRow>
-                            <strong>Type:</strong> {appt.petType || "-"} | <strong>Breed:</strong>{" "}
-                            {appt.petBreed || "-"}
-                          </InfoRow>
-                          <StatusLabel style={{ backgroundColor: borderColor }}>
-                            {appt.status || "Pending"}
-                            {appt.bookedByAdmin && " (by Admin)"}
-                          </StatusLabel>
-                        </AppointmentCard>
-                      )
-                    })}
+                    {todaysAppointments
+                      .filter(appt => appt.status !== "Done" && appt.status !== "Cancelled")
+                      .map((appt, index) => {
+                        const borderColor = statusColor(appt.status)
+                        return (
+                          <AppointmentCard key={appt.id} $delay={index * 0.1} $borderLeftColor={borderColor}>
+                            <InfoRow>
+                              <strong>Owner:</strong> {appt.clientName}
+                            </InfoRow>
+                            <InfoRow>
+                              <strong>Pet:</strong> {appt.petName || "-"}
+                            </InfoRow>
+                            <InfoRow>
+                              <strong>Date:</strong> {appt.date} | <strong>Time:</strong> {appt.timeSlot}
+                            </InfoRow>
+                            <InfoRow>
+                              <strong>Type:</strong> {appt.petType || "-"} | <strong>Breed:</strong>{" "}
+                              {appt.petBreed || "-"}
+                            </InfoRow>
+                            <StatusLabel style={{ backgroundColor: borderColor }}>
+                              {appt.status || "Pending"}
+                              {appt.bookedByAdmin && " (by Admin)"}
+                            </StatusLabel>
+                            <AppointmentActions>
+                              <ActionButton
+                                $variant="primary"
+                                onClick={() => openAppointmentDetails(appt)}
+                              >
+                                👁 View
+                              </ActionButton>
+                              <ActionButton
+                                $variant="success"
+                                onClick={() => openMedicalRecordsModal(appt)}
+                                disabled={appt.status === "Done" || appt.status === "Cancelled"}
+                              >
+                                ✓ Done
+                              </ActionButton>
+                              <ActionButton
+                                $variant="warning"
+                                onClick={() => openStatusModal(appt.id, appt.status || "Pending")}
+                                disabled={appt.status === "Cancelled"}
+                              >
+                                {appt.status === "Confirmed" ? "✕ Cancel" : "✓ Confirm"}
+                              </ActionButton>
+                              <ActionButton
+                                $variant="danger"
+                                onClick={() => openDeleteModal(appt.id, "appointment", `${appt.clientName}'s appointment on ${appt.date}`)}
+                                disabled={deletingId === appt.id}
+                              >
+                                {deletingId === appt.id ? "⏳" : "🗑 Delete"}
+                              </ActionButton>
+                            </AppointmentActions>
+                          </AppointmentCard>
+                        )
+                      })}
                   </AppointmentsGrid>
                 )}
               </AppointmentsSection>
             )}
 
-            {(viewMode === "all" || viewMode === "unavailable") && (
+            {viewMode === "all" && (
               <AppointmentsSection>
                 <SectionHeader>
-                  <SectionTitle>
-                    {viewMode === "all" && "All Appointments"}
-                    {viewMode === "unavailable" && "Doctor Unavailable Dates"}
-                  </SectionTitle>
+                  <SectionTitle>All Appointments</SectionTitle>
                   <ControlsContainer>
-                    {(viewMode === "all" || viewMode === "unavailable") && (
-                      <MonthFilter>
-                        <MonthSelect value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)}>
-                          <option value="">All Months</option>
-                          {months.map((month) => (
-                            <option key={month} value={month}>
-                              {month}
-                            </option>
-                          ))}
-                        </MonthSelect>
-                      </MonthFilter>
-                    )}
+                    <MonthFilter>
+                      <MonthSelect value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)}>
+                        <option value="">All Months</option>
+                        {months.map((month) => (
+                          <option key={month} value={month}>
+                            {month}
+                          </option>
+                        ))}
+                      </MonthSelect>
+                    </MonthFilter>
                     <RefreshButton
                       onClick={() => {
                         fetchAppointments()
                         fetchUnavailableSlots()
                       }}
                     >
-                      Refresh
+                      ⟳ Refresh
                     </RefreshButton>
                   </ControlsContainer>
                 </SectionHeader>
 
-                {displayData.data.length === 0 ? (
+                {/* Active Appointments Section */}
+                <SectionSubtitle>Active Appointments</SectionSubtitle>
+                {filteredAppointments.filter(appt => appt.status !== "Done" && appt.status !== "Cancelled").length === 0 ? (
                   <NoAppointments>
-                    {viewMode === "all" && "No appointments found."}
-                    {viewMode === "unavailable" && "No unavailable dates set by doctors."}
+                    No active appointments found.
                   </NoAppointments>
                 ) : (
                   <AppointmentsGrid>
-                    {viewMode === "unavailable"
-                      ? (displayData.data as UnavailableSlot[]).map((slot, index) => (
-                          <UnavailableCard key={slot.id} $delay={index * 0.1}>
-                            <UnavailableIcon>🚫</UnavailableIcon>
-                            <UnavailableInfo>
-                              <UnavailableDate>{formatDate(slot.date)}</UnavailableDate>
-                              <UnavailableDoctor>Doctor: {slot.veterinarian}</UnavailableDoctor>
-                              <UnavailableTime>
-                                {slot.isAllDay ? "All Day" : `${slot.startTime} - ${slot.endTime}`}
-                              </UnavailableTime>
-                              <UnavailableStatus>Unavailable</UnavailableStatus>
-                            </UnavailableInfo>
-                            <DeleteButton
-                              onClick={() => handleDeleteUnavailable(slot.id)}
-                              disabled={deletingId === slot.id}
-                            >
-                              {deletingId === slot.id ? "Deleting..." : "Delete"}
-                            </DeleteButton>
-                          </UnavailableCard>
-                        ))
-                      : (displayData.data as AppointmentType[]).map((appt, index) => {
-                          const borderColor = statusColor(appt.status)
-                          return (
-                            <AppointmentCard key={appt.id} $delay={index * 0.1} $borderLeftColor={borderColor}>
-                              <InfoRow>
-                                <strong>Owner:</strong> {appt.clientName}
-                              </InfoRow>
-                              <InfoRow>
-                                <strong>Pet:</strong> {appt.petName || "-"}
-                              </InfoRow>
-                              <InfoRow>
-                                <strong>Date:</strong> {appt.date} | <strong>Time:</strong> {appt.timeSlot}
-                              </InfoRow>
-                              <InfoRow>
-                                <strong>Type:</strong> {appt.petType || "-"} | <strong>Breed:</strong>{" "}
-                                {appt.petBreed || "-"}
-                              </InfoRow>
-                              <StatusLabel style={{ backgroundColor: borderColor }}>
-                                {appt.status || "Pending"}
-                                {appt.bookedByAdmin && " (by Admin)"}
-                              </StatusLabel>
-                            </AppointmentCard>
-                          )
-                        })}
+                    {filteredAppointments
+                      .filter(appt => appt.status !== "Done" && appt.status !== "Cancelled")
+                      .map((appointment, index) => {
+                        const borderColor = statusColor(appointment.status)
+                        return (
+                          <AppointmentCard key={appointment.id} $delay={index * 0.1} $borderLeftColor={borderColor}>
+                            <AppointmentHeader>
+                              <AppointmentDate>{appointment.date}</AppointmentDate>
+                              <StatusBadge $status={appointment.status} style={{ backgroundColor: borderColor }}>
+                                {appointment.status}
+                              </StatusBadge>
+                            </AppointmentHeader>
+                            <AppointmentTime>{appointment.timeSlot}</AppointmentTime>
+                            <AppointmentDetails>
+                              <DetailRow>
+                                <DetailLabel>Client:</DetailLabel>
+                                <DetailValue>{appointment.clientName}</DetailValue>
+                              </DetailRow>
+                              <DetailRow>
+                                <DetailLabel>Pet:</DetailLabel>
+                                <DetailValue>{appointment.petName || "-"}</DetailValue>
+                              </DetailRow>
+                              <DetailRow>
+                                <DetailLabel>Type:</DetailLabel>
+                                <DetailValue>{appointment.petType || "-"}</DetailValue>
+                              </DetailRow>
+                              <DetailRow>
+                                <DetailLabel>Breed:</DetailLabel>
+                                <DetailValue>{appointment.petBreed || "-"}</DetailValue>
+                              </DetailRow>
+                            </AppointmentDetails>
+                            <AppointmentActions>
+                              <ActionButton
+                                $variant="primary"
+                                onClick={() => openAppointmentDetails(appointment)}
+                              >
+                                👁 View
+                              </ActionButton>
+                              <ActionButton
+                                $variant="success"
+                                onClick={() => openMedicalRecordsModal(appointment)}
+                                disabled={appointment.status === "Done" || appointment.status === "Cancelled"}
+                              >
+                                ✓ Done
+                              </ActionButton>
+                              <ActionButton
+                                $variant="warning"
+                                onClick={() => openStatusModal(appointment.id, appointment.status || "Pending")}
+                                disabled={appointment.status === "Cancelled"}
+                              >
+                                {appointment.status === "Confirmed" ? "✕ Cancel" : "✓ Confirm"}
+                              </ActionButton>
+                              <ActionButton
+                                $variant="danger"
+                                onClick={() => openDeleteModal(appointment.id, "appointment", `${appointment.clientName}'s appointment on ${appointment.date}`)}
+                                disabled={deletingId === appointment.id}
+                              >
+                                {deletingId === appointment.id ? "⏳" : "🗑 Delete"}
+                              </ActionButton>
+                            </AppointmentActions>
+                          </AppointmentCard>
+                        )
+                      })}
+                  </AppointmentsGrid>
+                )}
+
+                {/* Completed Appointments Section */}
+                <SectionSubtitle style={{ marginTop: '3rem', color: '#007bff' }}>
+                  Completed Appointments
+                </SectionSubtitle>
+                {filteredAppointments.filter(appt => appt.status === "Done").length === 0 ? (
+                  <NoAppointments>
+                    No completed appointments.
+                  </NoAppointments>
+                ) : (
+                  <AppointmentsGrid>
+                    {filteredAppointments
+                      .filter(appt => appt.status === "Done")
+                      .map((appointment, index) => {
+                        const borderColor = statusColor(appointment.status)
+                        return (
+                          <AppointmentCard key={appointment.id} $delay={index * 0.1} $borderLeftColor={borderColor}>
+                            <AppointmentHeader>
+                              <AppointmentDate>{appointment.date}</AppointmentDate>
+                              <StatusBadge $status={appointment.status} style={{ backgroundColor: borderColor }}>
+                                {appointment.status} ✅
+                              </StatusBadge>
+                            </AppointmentHeader>
+                            <AppointmentTime>{appointment.timeSlot}</AppointmentTime>
+                            <AppointmentDetails>
+                              <DetailRow>
+                                <DetailLabel>Client:</DetailLabel>
+                                <DetailValue>{appointment.clientName}</DetailValue>
+                              </DetailRow>
+                              <DetailRow>
+                                <DetailLabel>Pet:</DetailLabel>
+                                <DetailValue>{appointment.petName || "-"}</DetailValue>
+                              </DetailRow>
+                              <DetailRow>
+                                <DetailLabel>Type:</DetailLabel>
+                                <DetailValue>{appointment.petType || "-"}</DetailValue>
+                              </DetailRow>
+                              <DetailRow>
+                                <DetailLabel>Breed:</DetailLabel>
+                                <DetailValue>{appointment.petBreed || "-"}</DetailValue>
+                              </DetailRow>
+                            </AppointmentDetails>
+                            <AppointmentActions>
+                              <ActionButton
+                                $variant="primary"
+                                onClick={() => openAppointmentDetails(appointment)}
+                              >
+                                👁 View
+                              </ActionButton>
+                              <ActionButton
+                                $variant="info"
+                                onClick={() => router.push("/medicalrecord")}
+                              >
+                                📋 Records
+                              </ActionButton>
+                              <ActionButton
+                                $variant="danger"
+                                onClick={() => openDeleteModal(appointment.id, "appointment", `${appointment.clientName}'s appointment on ${appointment.date}`)}
+                                disabled={deletingId === appointment.id}
+                              >
+                                {deletingId === appointment.id ? "⏳" : "🗑 Delete"}
+                              </ActionButton>
+                            </AppointmentActions>
+                          </AppointmentCard>
+                        )
+                      })}
+                  </AppointmentsGrid>
+                )}
+
+                {/* Cancelled Appointments Section */}
+                <SectionSubtitle style={{ marginTop: '3rem', color: '#dc3545' }}>
+                  Cancelled Appointments
+                </SectionSubtitle>
+                {filteredAppointments.filter(appt => appt.status === "Cancelled").length === 0 ? (
+                  <NoAppointments>
+                    No cancelled appointments.
+                  </NoAppointments>
+                ) : (
+                  <AppointmentsGrid>
+                    {filteredAppointments
+                      .filter(appt => appt.status === "Cancelled")
+                      .map((appointment, index) => {
+                        const borderColor = statusColor(appointment.status)
+                        return (
+                          <AppointmentCard key={appointment.id} $delay={index * 0.1} $borderLeftColor={borderColor}>
+                            <AppointmentHeader>
+                              <AppointmentDate>{appointment.date}</AppointmentDate>
+                              <StatusBadge $status={appointment.status} style={{ backgroundColor: borderColor }}>
+                                {appointment.status} ❌
+                              </StatusBadge>
+                            </AppointmentHeader>
+                            <AppointmentTime>{appointment.timeSlot}</AppointmentTime>
+                            <AppointmentDetails>
+                              <DetailRow>
+                                <DetailLabel>Client:</DetailLabel>
+                                <DetailValue>{appointment.clientName}</DetailValue>
+                              </DetailRow>
+                              <DetailRow>
+                                <DetailLabel>Pet:</DetailLabel>
+                                <DetailValue>{appointment.petName || "-"}</DetailValue>
+                              </DetailRow>
+                              <DetailRow>
+                                <DetailLabel>Type:</DetailLabel>
+                                <DetailValue>{appointment.petType || "-"}</DetailValue>
+                              </DetailRow>
+                              <DetailRow>
+                                <DetailLabel>Breed:</DetailLabel>
+                                <DetailValue>{appointment.petBreed || "-"}</DetailValue>
+                              </DetailRow>
+                            </AppointmentDetails>
+                            <AppointmentActions>
+                              <ActionButton
+                                $variant="primary"
+                                onClick={() => openAppointmentDetails(appointment)}
+                              >
+                                👁 View
+                              </ActionButton>
+                              <ActionButton
+                                $variant="danger"
+                                onClick={() => openDeleteModal(appointment.id, "appointment", `${appointment.clientName}'s appointment on ${appointment.date}`)}
+                                disabled={deletingId === appointment.id}
+                              >
+                                {deletingId === appointment.id ? "⏳" : "🗑 Delete"}
+                              </ActionButton>
+                            </AppointmentActions>
+                          </AppointmentCard>
+                        )
+                      })}
                   </AppointmentsGrid>
                 )}
               </AppointmentsSection>
             )}
 
+            {/* Unavailable Dates Section */}
+            {viewMode === "unavailable" && (
+              <AppointmentsSection>
+                <SectionHeader>
+                  <SectionTitle>Doctor Unavailable Dates</SectionTitle>
+                  <ControlsContainer>
+                    <MonthFilter>
+                      <MonthSelect value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)}>
+                        <option value="">All Months</option>
+                        {months.map((month) => (
+                          <option key={month} value={month}>
+                            {month}
+                          </option>
+                        ))}
+                      </MonthSelect>
+                    </MonthFilter>
+                    <RefreshButton
+                      onClick={() => {
+                        fetchAppointments()
+                        fetchUnavailableSlots()
+                      }}
+                    >
+                      ⟳ Refresh
+                    </RefreshButton>
+                  </ControlsContainer>
+                </SectionHeader>
+
+                {filteredUnavailableSlots.length === 0 ? (
+                  <NoAppointments>
+                    No unavailable dates set by doctors.
+                  </NoAppointments>
+                ) : (
+                  <AppointmentsGrid>
+                    {filteredUnavailableSlots.map((slot, index) => (
+                      <UnavailableCard key={slot.id} $delay={index * 0.1}>
+                        <UnavailableIcon>🚫</UnavailableIcon>
+                        <UnavailableInfo>
+                          <UnavailableDate>{formatDate(slot.date)}</UnavailableDate>
+                          <UnavailableDoctor>Doctor: {slot.veterinarian}</UnavailableDoctor>
+                          <UnavailableTime>
+                            {slot.isAllDay ? "All Day" : `${slot.startTime} - ${slot.endTime}`}
+                          </UnavailableTime>
+                          <UnavailableStatus>Unavailable</UnavailableStatus>
+                        </UnavailableInfo>
+                        <UnavailableActions>
+                          <ActionButton
+                            $variant="primary"
+                            onClick={() => openUnavailableDetails(slot)}
+                          >
+                            👁 View
+                          </ActionButton>
+                          <ActionButton
+                            $variant="danger"
+                            onClick={() => openDeleteModal(slot.id, "unavailable", `unavailable date on ${formatDate(slot.date)}`)}
+                            disabled={deletingId === slot.id}
+                          >
+                            {deletingId === slot.id ? "⏳" : "🗑 Delete"}
+                          </ActionButton>
+                        </UnavailableActions>
+                      </UnavailableCard>
+                    ))}
+                  </AppointmentsGrid>
+                )}
+              </AppointmentsSection>
+            )}
+
+            {/* Book Appointment Modal */}
             {showBookingModal && (
               <ModalOverlay onClick={() => !isLoading && setShowBookingModal(false)}>
                 <ModalContent onClick={(e) => e.stopPropagation()}>
@@ -1058,8 +1538,6 @@ const Admindashboard: React.FC = () => {
                             <option value="">Select pet type</option>
                             <option value="Dog">Dog</option>
                             <option value="Cat">Cat</option>
-                            <option value="Bird">Bird</option>
-                            <option value="Other">Other</option>
                           </Select>
                         </FormGroup>
 
@@ -1117,7 +1595,7 @@ const Admindashboard: React.FC = () => {
                             disabled={isLoading}
                           />
                           {appointmentDate && unavailableSlots.some((slot) => slot.date === appointmentDate) && (
-                            <UnavailableWarning>⚠️ Warning: A doctor is unavailable on this date</UnavailableWarning>
+                            <UnavailableWarning>⚠️ Warning: A doctor has marked this date as unavailable</UnavailableWarning>
                           )}
                         </FormGroup>
 
@@ -1157,6 +1635,275 @@ const Admindashboard: React.FC = () => {
                 </ModalContent>
               </ModalOverlay>
             )}
+
+            {/* Create Account Modal */}
+            {showCreateAccount && (
+              <ModalOverlay onClick={() => !isCreatingAccount && setShowCreateAccount(false)}>
+                <ModalContent onClick={(e) => e.stopPropagation()}>
+                  <ModalHeader>
+                    <ModalTitle>Create New Account</ModalTitle>
+                    <CloseButton onClick={() => !isCreatingAccount && setShowCreateAccount(false)} disabled={isCreatingAccount}>
+                      ×
+                    </CloseButton>
+                  </ModalHeader>
+                  <Form onSubmit={handleCreateAccount}>
+                    <FormColumns>
+                      <FormColumn>
+                        <FormGroup>
+                          <Label>Full Name *</Label>
+                          <Input
+                            type="text"
+                            value={newAccountName}
+                            onChange={(e) => setNewAccountName(e.target.value)}
+                            placeholder="Enter full name"
+                            required
+                            disabled={isCreatingAccount}
+                          />
+                        </FormGroup>
+
+                        <FormGroup>
+                          <Label>Email Address *</Label>
+                          <Input
+                            type="email"
+                            value={newAccountEmail}
+                            onChange={(e) => setNewAccountEmail(e.target.value)}
+                            placeholder="Enter email address"
+                            required
+                            disabled={isCreatingAccount}
+                          />
+                        </FormGroup>
+                      </FormColumn>
+
+                      <FormColumn>
+                        <FormGroup>
+                          <Label>Password *</Label>
+                          <Input
+                            type="password"
+                            value={newAccountPassword}
+                            onChange={(e) => setNewAccountPassword(e.target.value)}
+                            placeholder="Enter password (min. 6 characters)"
+                            required
+                            disabled={isCreatingAccount}
+                          />
+                        </FormGroup>
+
+                        <FormGroup>
+                          <Label>Role *</Label>
+                          <Select 
+                            value={newAccountRole} 
+                            onChange={(e) => setNewAccountRole(e.target.value as "admin" | "doctor")} 
+                            disabled={isCreatingAccount}
+                          >
+                            <option value="doctor">Doctor</option>
+                            <option value="admin">Administrator</option>
+                          </Select>
+                        </FormGroup>
+                      </FormColumn>
+                    </FormColumns>
+
+                    {createAccountMessage && (
+                      <Message $type={createAccountMessage.includes("Successfully") ? "success" : "error"}>
+                        {createAccountMessage}
+                      </Message>
+                    )}
+
+                    <ButtonGroup>
+                      <CancelButton type="button" onClick={() => setShowCreateAccount(false)} disabled={isCreatingAccount}>
+                        Cancel
+                      </CancelButton>
+                      <SubmitButton
+                        type="submit"
+                        disabled={isCreatingAccount || !newAccountEmail || !newAccountPassword || !newAccountName}
+                      >
+                        {isCreatingAccount ? "Creating Account..." : "Create Account"}
+                      </SubmitButton>
+                    </ButtonGroup>
+                  </Form>
+                </ModalContent>
+              </ModalOverlay>
+            )}
+
+            {/* DELETE CONFIRMATION MODAL */}
+            {showDeleteModal && (
+              <ModalOverlay onClick={closeDeleteModal}>
+                <ConfirmationModal onClick={(e) => e.stopPropagation()}>
+                  <ModalIcon>🗑️</ModalIcon>
+                  <ModalTitle>Confirm Deletion</ModalTitle>
+                  <ModalText>
+                    Are you sure you want to delete{" "}
+                    <strong>
+                      {deleteItemName || `this ${deleteItemType === "appointment" ? "appointment" : "unavailable date"}`}
+                    </strong>
+                    ? 
+                    <br /><br />
+                    This action cannot be undone.
+                  </ModalText>
+                  <ModalButtonGroup>
+                    <CancelButton onClick={closeDeleteModal}>
+                      Cancel
+                    </CancelButton>
+                    <DeleteConfirmButton onClick={handleDeleteConfirm} disabled={deletingId === deleteItemId}>
+                      {deletingId === deleteItemId ? "Deleting..." : "Yes, Delete"}
+                    </DeleteConfirmButton>
+                  </ModalButtonGroup>
+                </ConfirmationModal>
+              </ModalOverlay>
+            )}
+
+            {/* Status Change Modal */}
+            {showStatusModal && (
+              <ModalOverlay onClick={closeStatusModal}>
+                <ConfirmationModal onClick={(e) => e.stopPropagation()}>
+                  <ModalIcon>🔄</ModalIcon>
+                  <ModalTitle>Change Status</ModalTitle>
+                  <ModalText>
+                    Are you sure you want to change this appointment status to <strong>{newStatus}</strong>?
+                  </ModalText>
+                  <ModalButtonGroup>
+                    <CancelButton onClick={closeStatusModal}>
+                      Cancel
+                    </CancelButton>
+                    <SubmitButton onClick={handleStatusConfirm}>
+                      Yes, Change Status
+                    </SubmitButton>
+                  </ModalButtonGroup>
+                </ConfirmationModal>
+              </ModalOverlay>
+            )}
+
+            {/* Medical Records Modal */}
+            {showMedicalRecordsModal && medicalRecordAppointment && (
+              <ModalOverlay onClick={closeMedicalRecordsModal}>
+                <ConfirmationModal onClick={(e) => e.stopPropagation()}>
+                  <ModalIcon>📋</ModalIcon>
+                  <ModalTitle>Move to Medical Records</ModalTitle>
+                  <ModalText>
+                    Are you sure you want to mark this appointment as done and move it to medical records?
+                    <br /><br />
+                    <strong>Client:</strong> {medicalRecordAppointment.clientName}<br />
+                    <strong>Pet:</strong> {medicalRecordAppointment.petName}<br />
+                    <strong>Date:</strong> {medicalRecordAppointment.date}<br />
+                    <strong>Time:</strong> {medicalRecordAppointment.timeSlot}
+                  </ModalText>
+                  <ModalButtonGroup>
+                    <CancelButton onClick={closeMedicalRecordsModal}>
+                      Cancel
+                    </CancelButton>
+                    <SubmitButton onClick={handleMoveToMedicalRecords}>
+                      Yes, Move to Records
+                    </SubmitButton>
+                  </ModalButtonGroup>
+                </ConfirmationModal>
+              </ModalOverlay>
+            )}
+
+            {/* Appointment Details Modal */}
+            {showAppointmentDetails && selectedAppointment && (
+              <ModalOverlay onClick={closeAppointmentDetails}>
+                <DetailsModal onClick={(e) => e.stopPropagation()}>
+                  <ModalHeader>
+                    <ModalTitle>Appointment Details</ModalTitle>
+                    <CloseButton onClick={closeAppointmentDetails}>×</CloseButton>
+                  </ModalHeader>
+                  <DetailsContent>
+                    <DetailSection>
+                      <DetailSectionTitle>Client Information</DetailSectionTitle>
+                      <DetailItem>
+                        <DetailLabel>Client Name:</DetailLabel>
+                        <DetailValue>{selectedAppointment.clientName}</DetailValue>
+                      </DetailItem>
+                    </DetailSection>
+
+                    <DetailSection>
+                      <DetailSectionTitle>Pet Information</DetailSectionTitle>
+                      <DetailItem>
+                        <DetailLabel>Pet Name:</DetailLabel>
+                        <DetailValue>{selectedAppointment.petName || "-"}</DetailValue>
+                      </DetailItem>
+                      <DetailItem>
+                        <DetailLabel>Pet Type:</DetailLabel>
+                        <DetailValue>{selectedAppointment.petType || "-"}</DetailValue>
+                      </DetailItem>
+                      <DetailItem>
+                        <DetailLabel>Breed:</DetailLabel>
+                        <DetailValue>{selectedAppointment.petBreed || "-"}</DetailValue>
+                      </DetailItem>
+                      <DetailItem>
+                        <DetailLabel>Gender:</DetailLabel>
+                        <DetailValue>{selectedAppointment.gender || "-"}</DetailValue>
+                      </DetailItem>
+                      <DetailItem>
+                        <DetailLabel>Birthday:</DetailLabel>
+                        <DetailValue>{selectedAppointment.birthday || "-"}</DetailValue>
+                      </DetailItem>
+                      <DetailItem>
+                        <DetailLabel>Color/Markings:</DetailLabel>
+                        <DetailValue>{selectedAppointment.color || "-"}</DetailValue>
+                      </DetailItem>
+                    </DetailSection>
+
+                    <DetailSection>
+                      <DetailSectionTitle>Appointment Information</DetailSectionTitle>
+                      <DetailItem>
+                        <DetailLabel>Date:</DetailLabel>
+                        <DetailValue>{selectedAppointment.date}</DetailValue>
+                      </DetailItem>
+                      <DetailItem>
+                        <DetailLabel>Time Slot:</DetailLabel>
+                        <DetailValue>{selectedAppointment.timeSlot}</DetailValue>
+                      </DetailItem>
+                      <DetailItem>
+                        <DetailLabel>Status:</DetailLabel>
+                        <StatusBadge $status={selectedAppointment.status} style={{ backgroundColor: statusColor(selectedAppointment.status) }}>
+                          {selectedAppointment.status}
+                        </StatusBadge>
+                      </DetailItem>
+                      {selectedAppointment.bookedByAdmin && (
+                        <DetailItem>
+                          <DetailLabel>Booked By:</DetailLabel>
+                          <DetailValue>Administrator</DetailValue>
+                        </DetailItem>
+                      )}
+                    </DetailSection>
+                  </DetailsContent>
+                </DetailsModal>
+              </ModalOverlay>
+            )}
+
+            {/* Unavailable Details Modal */}
+            {showUnavailableDetails && selectedUnavailable && (
+              <ModalOverlay onClick={closeUnavailableDetails}>
+                <DetailsModal onClick={(e) => e.stopPropagation()}>
+                  <ModalHeader>
+                    <ModalTitle>Unavailable Date Details</ModalTitle>
+                    <CloseButton onClick={closeUnavailableDetails}>×</CloseButton>
+                  </ModalHeader>
+                  <DetailsContent>
+                    <DetailSection>
+                      <DetailSectionTitle>Unavailability Information</DetailSectionTitle>
+                      <DetailItem>
+                        <DetailLabel>Date:</DetailLabel>
+                        <DetailValue>{formatDate(selectedUnavailable.date)}</DetailValue>
+                      </DetailItem>
+                      <DetailItem>
+                        <DetailLabel>Veterinarian:</DetailLabel>
+                        <DetailValue>{selectedUnavailable.veterinarian}</DetailValue>
+                      </DetailItem>
+                      <DetailItem>
+                        <DetailLabel>Duration:</DetailLabel>
+                        <DetailValue>
+                          {selectedUnavailable.isAllDay ? "All Day" : `${selectedUnavailable.startTime} - ${selectedUnavailable.endTime}`}
+                        </DetailValue>
+                      </DetailItem>
+                      <DetailItem>
+                        <DetailLabel>Status:</DetailLabel>
+                        <UnavailableStatus>Unavailable</UnavailableStatus>
+                      </DetailItem>
+                    </DetailSection>
+                  </DetailsContent>
+                </DetailsModal>
+              </ModalOverlay>
+            )}
           </ContentArea>
         </DashboardLayout>
       </PageContainer>
@@ -1164,11 +1911,10 @@ const Admindashboard: React.FC = () => {
   )
 }
 
-/* Styled Components */
-
+// Styled Components (same as before, no changes needed)
 const PageContainer = styled.div`
   min-height: 100vh;
-  background: #fafafa;
+  background: #f8fafc;
 `
 
 const HeaderBar = styled.header`
@@ -1179,6 +1925,9 @@ const HeaderBar = styled.header`
   background: #4ECDC4;
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
   border-bottom: 1px solid #e9ecef;
+  position: sticky;
+  top: 0;
+  z-index: 100;
 
   @media (max-width: 768px) {
     padding: 1rem;
@@ -1233,9 +1982,11 @@ const Logo = styled.div`
   gap: 0.75rem;
 `
 
-const LogoIcon = styled.div`
-  font-size: 2rem;
-  color: #2c3e50;
+const LogoImage = styled.img`
+  width: 60px;
+  height: 60px;
+  border-radius: 8px;
+  object-fit: cover;
 `
 
 const LogoText = styled.div`
@@ -1332,7 +2083,7 @@ const Sidebar = styled.aside<SidebarProps>`
   flex-direction: column;
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.05);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  z-index: 50;
+  z-index: 90;
 
   @media (max-width: 1024px) {
     position: fixed;
@@ -1345,6 +2096,7 @@ const Sidebar = styled.aside<SidebarProps>`
 
   @media (min-width: 1025px) {
     transform: translateX(${(props) => (props.$isOpen ? "0" : "-280px")});
+    position: ${(props) => (props.$isOpen ? "static" : "fixed")};
   }
 `
 
@@ -1362,30 +2114,6 @@ const SidebarTitleRow = styled.div`
   justify-content: space-between;
   align-items: center;
   width: 100%;
-`
-
-const SidebarToggleButton = styled.button`
-  background: #6BC1E1;
-  border: none;
-  font-size: 1.5rem;
-  color: #000000;
-  cursor: pointer;
-  padding: 0.5rem 0.75rem;
-  border-radius: 8px;
-  transition: all 0.2s ease;
-  font-weight: 700;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 40px;
-  height: 40px;
-  
-  &:hover {
-    background: #34B89C;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-    transform: translateY(-1px);
-  }
 `
 
 const SidebarTitle = styled.h3`
@@ -1409,7 +2137,7 @@ const MenuItem = styled.div<MenuItemProps>`
   cursor: pointer;
   transition: all 0.2s ease;
   border-left: 3px solid ${(props) => (props.$active ? "#34B89C" : "transparent")};
-  background: ${(props) => (props.$active ? "#34B89C" : "transparent")};
+  background: ${(props) => (props.$active ? "#f8f9fa" : "transparent")};
   
   &:hover {
     background: #f8f9fa;
@@ -1485,15 +2213,45 @@ const SupportButton = styled.button`
   }
 `
 
+const FloatingMenuButton = styled.button`
+  position: fixed;
+  top: 90px;
+  left: 15px;
+  z-index: 80;
+  background: #34B89C;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 50px;
+  height: 50px;
+  font-size: 1.5rem;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover {
+    background: #2a9d7f;
+    transform: scale(1.1);
+  }
+
+  @media (min-width: 1025px) {
+    display: none;
+  }
+`
+
 const ContentArea = styled.div<{ $sidebarOpen: boolean }>`
   flex: 1;
-  background: #ffffff;
+  background: #f8fafc;
   overflow-y: auto;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   min-width: 0;
+  padding: 2rem;
   
   @media (min-width: 1025px) {
-    margin-left: ${(props) => (props.$sidebarOpen ? "0" : "-280px")};
+    margin-left: ${(props) => (props.$sidebarOpen ? "280px" : "0")};
     width: ${(props) => (props.$sidebarOpen ? "calc(100% - 280px)" : "100%")};
   }
 
@@ -1513,6 +2271,7 @@ const ContentArea = styled.div<{ $sidebarOpen: boolean }>`
 
 const DashboardHeader = styled.div`
   margin-bottom: 2rem;
+  padding: 0;
 `
 
 const ContentTitle = styled.h1`
@@ -1539,7 +2298,8 @@ const ContentSubtitle = styled.p`
 `
 
 const AppointmentsSection = styled.section`
-  margin-top: 2rem;
+  margin: 2rem 0;
+  padding: 0;
 `
 
 const SectionHeader = styled.div`
@@ -1564,6 +2324,20 @@ const SectionTitle = styled.h2`
 
   @media (max-width: 768px) {
     font-size: 1.3rem;
+  }
+`
+
+const SectionSubtitle = styled.h3`
+  margin: 2rem 0 1rem 0;
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: #2c3e50;
+  border-bottom: 2px solid #e9ecef;
+  padding-bottom: 0.5rem;
+  
+  @media (max-width: 768px) {
+    font-size: 1.1rem;
+    margin: 1.5rem 0 0.8rem 0;
   }
 `
 
@@ -1628,7 +2402,7 @@ const RefreshButton = styled.button`
 const AppointmentsGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: 1.2rem;
+  gap: 1.5rem;
   align-items: start;
 
   @media (max-width: 1024px) {
@@ -1637,17 +2411,18 @@ const AppointmentsGrid = styled.div`
 
   @media (max-width: 768px) {
     grid-template-columns: 1fr;
+    gap: 1.2rem;
   }
 `
 
 const AppointmentCard = styled.div<AppointmentCardProps>`
   animation: ${fadeInUp} 0.4s ease forwards;
-  padding: 1.2rem; 
+  padding: 1.5rem; 
   background: white; 
   border-radius: 12px;
-  box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+  box-shadow: 0 3px 15px rgba(0,0,0,0.08);
   border: 1px solid #e9ecef;
-  transition: transform 0.2s;
+  transition: transform 0.2s, box-shadow 0.2s;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -1655,11 +2430,11 @@ const AppointmentCard = styled.div<AppointmentCardProps>`
 
   &:hover {
     transform: translateY(-3px);
-    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+    box-shadow: 0 5px 20px rgba(0,0,0,0.12);
   }
 
   @media (max-width: 480px) {
-    padding: 1rem;
+    padding: 1.2rem;
   }
 `
 
@@ -1667,7 +2442,7 @@ const AppointmentHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.8rem;
+  margin-bottom: 1rem;
 `
 
 const AppointmentDate = styled.div`
@@ -1699,18 +2474,18 @@ const AppointmentDetails = styled.div`
 const DetailRow = styled.div`
   display: flex;
   gap: 0.5rem;
-  margin-bottom: 0.4rem;
+  margin-bottom: 0.5rem;
   font-size: 0.9rem;
   color: #444;
 `
 
-const DetailLabel = styled.span`
+const DetailLabelShort = styled.span`
   font-weight: 500;
   color: #2c3e50;
   min-width: 60px;
 `
 
-const DetailValue = styled.span`
+const DetailValueShort = styled.span`
   flex-grow: 1;
   color: #666;
 `
@@ -1721,44 +2496,85 @@ const AppointmentActions = styled.div`
   margin-top: auto;
   padding-top: 1rem;
   border-top: 1px solid #eee;
+  flex-wrap: wrap;
 `
 
-const ActionButton = styled.button<{ $variant?: "complete" | "cancel" | "delete" }>`
+const ActionButton = styled.button<{ $variant?: "primary" | "success" | "warning" | "danger" | "info" }>`
   padding: 0.6rem 1rem;
   border: none;
   border-radius: 6px;
   cursor: pointer;
   font-weight: 500;
   font-size: 0.85rem;
-  transition: background 0.2s, opacity 0.2s;
+  transition: all 0.2s;
+  flex: 1;
+  min-width: 80px;
   
   ${(props) =>
-    props.$variant === "complete" &&
+    props.$variant === "primary" &&
+    `
+    background: #007bff;
+    color: white;
+    &:hover:not(:disabled) { 
+      background: #0056b3;
+      transform: translateY(-1px);
+    }
+  `}
+  
+  ${(props) =>
+    props.$variant === "success" &&
     `
     background: #28a745;
     color: white;
-    &:hover:not(:disabled) { background: #218838; }
-  `}
-  
-  ${(props) =>
-    props.$variant === "cancel" &&
-    `
-    background: #dc3545;
-    color: white;
-    &:hover:not(:disabled) { background: #c82333; }
+    &:hover:not(:disabled) { 
+      background: #1e7e34;
+      transform: translateY(-1px);
+    }
   `}
 
   ${(props) =>
-    props.$variant === "delete" &&
+    props.$variant === "warning" &&
     `
-    background: #6c757d;
+    background: #ffc107;
+    color: #212529;
+    &:hover:not(:disabled) { 
+      background: #e0a800;
+      transform: translateY(-1px);
+    }
+  `}
+
+  ${(props) =>
+    props.$variant === "danger" &&
+    `
+    background: #dc3545;
     color: white;
-    &:hover:not(:disabled) { background: #5a6268; }
+    &:hover:not(:disabled) { 
+      background: #c82333;
+      transform: translateY(-1px);
+    }
+  `}
+
+  ${(props) =>
+    props.$variant === "info" &&
+    `
+    background: #17a2b8;
+    color: white;
+    &:hover:not(:disabled) { 
+      background: #138496;
+      transform: translateY(-1px);
+    }
   `}
 
   &:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+    transform: none !important;
+  }
+
+  @media (max-width: 480px) {
+    min-width: 70px;
+    font-size: 0.8rem;
+    padding: 0.5rem 0.8rem;
   }
 `
 
@@ -1766,7 +2582,7 @@ const EmptyState = styled.div`
   text-align: center;
   padding: 3rem 1rem;
   background: white;
-  border-radius: 10px;
+  border-radius: 12px;
   box-shadow: 0 3px 10px rgba(0,0,0,0.05);
   grid-column: 1 / -1;
 `
@@ -1781,6 +2597,16 @@ const EmptyStateText = styled.p`
   font-size: 1.1rem;
   color: #666;
   margin: 0;
+`
+
+const NoAppointments = styled.p`
+  color: #666;
+  font-style: italic;
+  text-align: center;
+  padding: 2rem;
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.05);
 `
 
 const SettingsContainer = styled.div`
@@ -1839,6 +2665,23 @@ const StatusText = styled.span`
   color: #2c3e50;
 `
 
+const CreateAccountButton = styled.button`
+  padding: 0.8rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  background: #34B89C;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  width: 100%;
+
+  &:hover {
+    background: #2a9d7f;
+    transform: translateY(-1px);
+  }
+`
+
 const EnableButton = styled.button`
   padding: 0.8rem 1.5rem;
   border: none;
@@ -1847,10 +2690,11 @@ const EnableButton = styled.button`
   color: white;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
 
   &:hover {
     background: #2a9d7f;
+    transform: translateY(-1px);
   }
 `
 
@@ -1862,10 +2706,11 @@ const DisableButton = styled.button`
   color: white;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
 
   &:hover {
     background: #bd2130;
+    transform: translateY(-1px);
   }
 `
 
@@ -1916,11 +2761,12 @@ const SendOTPButton = styled.button`
   color: white;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
   align-self: flex-start;
 
   &:hover:not(:disabled) {
     background: #2a9d7f;
+    transform: translateY(-1px);
   }
 
   &:disabled {
@@ -2017,26 +2863,16 @@ const InfoValue = styled.span`
   color: #666;
 `
 
-const NoAppointments = styled.p`
-  color: #666;
-  font-style: italic;
-  text-align: center;
-  padding: 2rem;
-  background: white;
-  border-radius: 10px;
-  box-shadow: 0 3px 10px rgba(0,0,0,0.05);
-`
-
 const UnavailableCard = styled.div<{ $delay: number }>`
   animation: ${fadeInUp} 0.4s ease forwards;
   animation-delay: ${(props) => props.$delay}s;
   opacity: 0;
-  padding: 1.2rem; 
+  padding: 1.5rem; 
   border-left: 6px solid #dc3545; 
   background: white; 
-  border-radius: 10px;
-  box-shadow: 0 3px 10px rgba(0,0,0,0.08);
-  transition: transform 0.2s;
+  border-radius: 12px;
+  box-shadow: 0 3px 15px rgba(0,0,0,0.08);
+  transition: transform 0.2s, box-shadow 0.2s;
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -2044,11 +2880,11 @@ const UnavailableCard = styled.div<{ $delay: number }>`
 
   &:hover {
     transform: translateY(-3px);
-    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+    box-shadow: 0 5px 20px rgba(0,0,0,0.12);
   }
 
   @media (max-width: 480px) {
-    padding: 1rem;
+    padding: 1.2rem;
     flex-direction: column;
     text-align: center;
     gap: 0.8rem;
@@ -2093,28 +2929,13 @@ const UnavailableStatus = styled.div`
   font-weight: 500;
 `
 
-const DeleteButton = styled.button`
-  background: #dc3545;
-  color: white;
-  border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-  white-space: nowrap;
-
-  &:hover:not(:disabled) {
-    background: #bd2130;
-  }
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
+const UnavailableActions = styled.div`
+  display: flex;
+  gap: 0.7rem;
+  flex-direction: column;
 
   @media (max-width: 480px) {
+    flex-direction: row;
     width: 100%;
   }
 `
@@ -2153,6 +2974,7 @@ const StatusLabel = styled.span`
   flex: 0 0 auto;
 `
 
+// Modal Styles
 const ModalOverlay = styled.div`
   position: fixed; 
   top: 0; 
@@ -2166,6 +2988,7 @@ const ModalOverlay = styled.div`
   padding: 1rem;
   z-index: 1000;
   overflow-y: auto;
+  animation: ${fadeInUp} 0.3s ease;
 `
 
 const ModalContent = styled.div`
@@ -2177,10 +3000,42 @@ const ModalContent = styled.div`
   max-height: 90vh;
   overflow-y: auto;
   box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  animation: ${slideIn} 0.3s ease;
 
   @media (max-width: 768px) {
     padding: 1.2rem;
     max-height: 85vh;
+  }
+`
+
+const ConfirmationModal = styled.div`
+  background: white; 
+  padding: 2rem; 
+  border-radius: 12px; 
+  width: 100%; 
+  max-width: 500px;
+  text-align: center;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  animation: ${slideIn} 0.3s ease;
+
+  @media (max-width: 768px) {
+    padding: 1.5rem;
+  }
+`
+
+const DetailsModal = styled.div`
+  background: white; 
+  padding: 0; 
+  border-radius: 12px; 
+  width: 100%; 
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  animation: ${slideIn} 0.3s ease;
+
+  @media (max-width: 768px) {
+    max-width: 95%;
   }
 `
 
@@ -2191,6 +3046,7 @@ const ModalHeader = styled.div`
   margin-bottom: 1.5rem;
   padding-bottom: 0.8rem;
   border-bottom: 1px solid #eee;
+  padding: 1.5rem 1.5rem 0.8rem 1.5rem;
 `
 
 const ModalTitle = styled.h2`
@@ -2203,6 +3059,29 @@ const ModalTitle = styled.h2`
   }
 `
 
+const ModalIcon = styled.div`
+  font-size: 3rem;
+  margin-bottom: 1rem;
+`
+
+const ModalText = styled.p`
+  margin: 1rem 0 2rem 0;
+  color: #666;
+  line-height: 1.6;
+  font-size: 1.1rem;
+`
+
+const ModalButtonGroup = styled.div`
+  display: flex; 
+  justify-content: center; 
+  gap: 1rem;
+  margin-top: 2rem;
+
+  @media (max-width: 480px) {
+    flex-direction: column;
+  }
+`
+
 const CloseButton = styled.button`
   border: none; 
   background: none; 
@@ -2210,6 +3089,12 @@ const CloseButton = styled.button`
   cursor: pointer;
   color: #666;
   transition: color 0.2s;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 
   &:hover {
     color: #333;
@@ -2340,16 +3225,88 @@ const SubmitButton = styled.button`
   background: #34B89C; 
   color: white; 
   font-weight: 600;
-  transition: background 0.2s;
+  transition: all 0.2s;
 
   &:hover:not(:disabled) {
     background: #2a9d7f;
+    transform: translateY(-1px);
   }
 
   &:disabled {
     opacity: 0.6;
     cursor: not-allowed;
   }
+`
+
+const DeleteConfirmButton = styled.button`
+  padding: 0.7rem 1.4rem; 
+  border: none; 
+  border-radius: 8px; 
+  cursor: pointer; 
+  background: #dc3545; 
+  color: white; 
+  font-weight: 600;
+  transition: all 0.2s;
+
+  &:hover:not(:disabled) {
+    background: #bd2130;
+    transform: translateY(-1px);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+`
+
+const Message = styled.div<{ $type: "success" | "error" }>`
+  padding: 0.8rem 1rem;
+  border-radius: 6px;
+  font-weight: 500;
+  background: ${(props) => (props.$type === "success" ? "#d4edda" : "#f8d7da")};
+  color: ${(props) => (props.$type === "success" ? "#155724" : "#721c24")};
+  border: 1px solid ${(props) => (props.$type === "success" ? "#c3e6cb" : "#f5c6cb")};
+`
+
+const DetailsContent = styled.div`
+  padding: 0 1.5rem 1.5rem 1.5rem;
+`
+
+const DetailSection = styled.div`
+  margin-bottom: 2rem;
+`
+
+const DetailSectionTitle = styled.h3`
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+  color: #2c3e50;
+  font-weight: 600;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 0.5rem;
+`
+
+const DetailItem = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.8rem 0;
+  border-bottom: 1px solid #f8f9fa;
+
+  &:last-child {
+    border-bottom: none;
+  }
+`
+
+const DetailLabel = styled.span`
+  font-weight: 500;
+  color: #2c3e50;
+  min-width: 140px;
+`
+
+const DetailValue = styled.span`
+  color: #666;
+  text-align: right;
+  flex: 1;
 `
 
 export default Admindashboard

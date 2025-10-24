@@ -16,7 +16,8 @@ import {
   doc,
   limit,
   startAfter,
-  DocumentSnapshot
+  DocumentSnapshot,
+  updateDoc
 } from "firebase/firestore";
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter } from 'next/navigation';
@@ -49,6 +50,7 @@ interface User {
   name: string;
   role: 'admin' | 'veterinarian' | 'user';
   email: string;
+  twoFactorEnabled?: boolean;
 }
 
 const VetDashboard: React.FC = () => {
@@ -63,13 +65,15 @@ const VetDashboard: React.FC = () => {
     startTime: new Date(),
     endTime: new Date(new Date().setHours(new Date().getHours() + 1))
   });
-  const [activeTab, setActiveTab] = useState<'appointments' | 'unavailable'>('appointments');
+  const [activeTab, setActiveTab] = useState<'appointments' | 'unavailable' | 'settings'>('appointments');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userLoading, setUserLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [lastVisible, setLastVisible] = useState<DocumentSnapshot | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [logoError, setLogoError] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [updating2FA, setUpdating2FA] = useState(false);
   const router = useRouter();
 
   // Handle sign out
@@ -211,16 +215,15 @@ const VetDashboard: React.FC = () => {
       const unavailableData: Unavailable[] = [];
       snapshot.forEach((doc) => {
         const data = doc.data();
-        if (data.veterinarian === currentUser.name) {
-          unavailableData.push({ 
-            id: doc.id, 
-            date: data.date || '',
-            veterinarian: data.veterinarian || '',
-            isAllDay: data.isAllDay || true,
-            startTime: data.startTime || '',
-            endTime: data.endTime || ''
-          } as Unavailable);
-        }
+        // Include all unavailable slots or filter by veterinarian if needed
+        unavailableData.push({ 
+          id: doc.id, 
+          date: data.date || '',
+          veterinarian: data.veterinarian || '',
+          isAllDay: data.isAllDay || true,
+          startTime: data.startTime || '',
+          endTime: data.endTime || ''
+        } as Unavailable);
       });
       setUnavailable(unavailableData);
     });
@@ -295,6 +298,30 @@ const VetDashboard: React.FC = () => {
 
   const handleLogoError = () => {
     setLogoError(true);
+  };
+
+  // Handle 2FA toggle
+  const handleToggle2FA = async () => {
+    if (!currentUser) return;
+    
+    try {
+      setUpdating2FA(true);
+      const userRef = doc(db, 'users', currentUser.id);
+      const new2FAStatus = !currentUser.twoFactorEnabled;
+      
+      await updateDoc(userRef, {
+        twoFactorEnabled: new2FAStatus
+      });
+      
+      setCurrentUser(prev => prev ? { ...prev, twoFactorEnabled: new2FAStatus } : null);
+      
+      alert(`Two-factor authentication ${new2FAStatus ? 'enabled' : 'disabled'} successfully!`);
+    } catch (error) {
+      console.error('Error updating 2FA status:', error);
+      alert('Failed to update two-factor authentication. Please try again.');
+    } finally {
+      setUpdating2FA(false);
+    }
   };
 
   if (loading || userLoading) {
@@ -381,50 +408,76 @@ const VetDashboard: React.FC = () => {
 
   return (
     <div className="vet-dashboard">
-      <header className="dashboard-header">
-        <div className="header-content">
-          <div className="header-brand">
-            <div className="clinic-logo">
-              {!logoError ? (
-                <Image 
-                  src="https://scontent.fmnl13-4.fna.fbcdn.net/v/t39.30808-1/308051699_1043145306431767_6902051210877649285_n.jpg?stp=cp0_dst-jpg_s60x60_tt6&_nc_cat=108&ccb=1-7&_nc_sid=2d3e12&_nc_eui2=AeH7C3PaObQLeqOOxA3pTYw1U6XSiAPBS_lTpdKIA8FL-aWJ6pOqX-tCsYAmdUOHVzzxg-T9gjpVH_1PkEO0urYZ&_nc_ohc=_IGNUXrA7VIQ7kNvwGverts&_nc_oc=Adn4yGvlqEmBbcvJy9fpqzZS-lcsbho9b-UbpfXA5TVHNF-m2LsLZkoh5MgqG3kGpbY&_nc_zt=24&_nc_ht=scontent.fmnl13-4.fna&_nc_gid=tRLkyrhTTf7--ojWnn9Hfg&oh=00_AfaGNX7atT_-t5Le75P4n8BeLaWdzkJSkBB7ZgM9dQ9clQ&oe=68D7A4DB"
-                  alt="RL Clinic Logo" 
-                  className="logo-image"
-                  width={60}
-                  height={60}
-                  onError={handleLogoError}
-                />
-              ) : (
-                <div className="logo-fallback">🐾</div>
-              )}
-            </div>
-            <div className="clinic-info">
-              <h1>FursureCare</h1>
-              <p className="clinic-tagline">Professional Pet Care Dashboard</p>
+      {/* Top Navigation Bar */}
+      <nav className="top-navbar">
+        <div className="nav-container">
+          <div className="nav-left">
+            <button 
+              className="menu-toggle"
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+            >
+              <span className="menu-icon">☰</span>
+              <span className="menu-text">Menu</span>
+            </button>
+            <div className="nav-brand">
+              <div className="nav-logo">
+                {!logoError ? (
+                  <Image 
+                    src="https://scontent.fmnl13-4.fna.fbcdn.net/v/t39.30808-1/308051699_1043145306431767_6902051210877649285_n.jpg?stp=cp0_dst-jpg_s60x60_tt6&_nc_cat=108&ccb=1-7&_nc_sid=2d3e12&_nc_eui2=AeH7C3PaObQLeqOOxA3pTYw1U6XSiAPBS_lTpdKIA8FL-aWJ6pOqX-tCsYAmdUOHVzzxg-T9gjpVH_1PkEO0urYZ&_nc_ohc=_IGNUXrA7VIQ7kNvwGverts&_nc_oc=Adn4yGvlqEmBbcvJy9fpqzZS-lcsbho9b-UbpfXA5TVHNF-m2LsLZkoh5MgqG3kGpbY&_nc_zt=24&_nc_ht=scontent.fmnl13-4.fna&_nc_gid=tRLkyrhTTf7--ojWnn9Hfg&oh=00_AfaGNX7atT_-t5Le75P4n8BeLaWdzkJSkBB7ZgM9dQ9clQ&oe=68D7A4DB"
+                    alt="RL Clinic Logo" 
+                    className="logo-image"
+                    width={40}
+                    height={40}
+                    onError={handleLogoError}
+                  />
+                ) : (
+                  <div className="logo-fallback">🐾</div>
+                )}
+              </div>
+              <div className="brand-text">
+                <h1>FursureCare</h1>
+                <p>Veterinary Dashboard</p>
+              </div>
             </div>
           </div>
-          <div className="user-info">
-            <div className="user-details">
-              <span className="welcome-text">Welcome, Dr. {getDisplayName()}!</span>
-              <span className="user-role">{currentUser.role}</span>
+
+          <div className="nav-right">
+            <div className="user-welcome">
+              Welcome, Dr. {getDisplayName()}!
             </div>
-            <div className="user-avatar">
-              {currentUser?.name?.charAt(0)?.toUpperCase() || currentUser?.email?.charAt(0)?.toUpperCase() || 'U'}
+            <div className="user-actions">
+              <div className="user-avatar">
+                {currentUser?.name?.charAt(0)?.toUpperCase() || currentUser?.email?.charAt(0)?.toUpperCase() || 'U'}
+              </div>
+              <button onClick={handleSignOut} className="sign-out-btn">
+                Sign Out
+              </button>
             </div>
-            <button onClick={handleSignOut} className="sign-out-btn">
-              Sign Out
-            </button>
           </div>
         </div>
-      </header>
-    
-      <div className="dashboard-content">
-        <aside className="sidebar">
+      </nav>
+
+      {/* Sidebar Menu */}
+      <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
+        <div className="sidebar-header">
+          <h3>Dashboard Menu</h3>
+          <button 
+            className="close-sidebar"
+            onClick={() => setSidebarOpen(false)}
+          >
+            ✕
+          </button>
+        </div>
+        
+        <div className="sidebar-content">
           <div className="sidebar-section">
-            <h3>Navigation</h3>
+            <h4>Main Navigation</h4>
             <nav className="nav-menu">
               <button 
-                onClick={() => setActiveTab('appointments')}
+                onClick={() => {
+                  setActiveTab('appointments');
+                  setSidebarOpen(false);
+                }}
                 className={`nav-btn ${activeTab === 'appointments' ? 'active' : ''}`}
               >
                 <span className="nav-icon">📅</span>
@@ -433,7 +486,10 @@ const VetDashboard: React.FC = () => {
               </button>
               {currentUser.role === 'veterinarian' && (
                 <button 
-                  onClick={() => setActiveTab('unavailable')}
+                  onClick={() => {
+                    setActiveTab('unavailable');
+                    setSidebarOpen(false);
+                  }}
                   className={`nav-btn ${activeTab === 'unavailable' ? 'active' : ''}`}
                 >
                   <span className="nav-icon">📋</span>
@@ -441,6 +497,16 @@ const VetDashboard: React.FC = () => {
                   <span className="nav-badge">{unavailable.length}</span>
                 </button>
               )}
+              <button 
+                onClick={() => {
+                  setActiveTab('settings');
+                  setSidebarOpen(false);
+                }}
+                className={`nav-btn ${activeTab === 'settings' ? 'active' : ''}`}
+              >
+                <span className="nav-icon">⚙️</span>
+                <span className="nav-text">Settings</span>
+              </button>
             </nav>
           </div>
 
@@ -470,8 +536,47 @@ const VetDashboard: React.FC = () => {
               </div>
             </div>
           </div>
-        </aside>
 
+          <div className="sidebar-section">
+            <h4>Quick Actions</h4>
+            <div className="quick-actions">
+              {currentUser.role === 'veterinarian' && (
+                <button 
+                  onClick={() => {
+                    setShowUnavailableModal(true);
+                    setSidebarOpen(false);
+                  }}
+                  className="quick-action-btn"
+                >
+                  <span className="action-icon">📅</span>
+                  Mark Unavailable
+                </button>
+              )}
+              <button 
+                onClick={() => {
+                  setActiveTab('settings');
+                  setSidebarOpen(false);
+                }}
+                className="quick-action-btn"
+              >
+                <span className="action-icon">👤</span>
+                View Profile
+              </button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {/* Overlay when sidebar is open */}
+      {sidebarOpen && (
+        <div 
+          className="sidebar-overlay"
+          onClick={() => setSidebarOpen(false)}
+        ></div>
+      )}
+
+      {/* Main Content */}
+      <div className="main-content-wrapper">
         <main className="main-content">
           {activeTab === 'appointments' ? (
             <div className="content-section">
@@ -565,7 +670,7 @@ const VetDashboard: React.FC = () => {
                 </div>
               )}
             </div>
-          ) : (
+          ) : activeTab === 'unavailable' ? (
             <div className="content-section">
               <div className="section-header">
                 <div className="header-info">
@@ -627,6 +732,123 @@ const VetDashboard: React.FC = () => {
                   </div>
                 </div>
               )}
+            </div>
+          ) : (
+            <div className="content-section">
+              <div className="section-header">
+                <div className="header-info">
+                  <h2>Account Settings</h2>
+                  <p>Manage your account preferences and security settings</p>
+                </div>
+              </div>
+
+              <div className="settings-grid">
+                <div className="setting-card">
+                  <div className="setting-header">
+                    <div className="setting-icon">🔐</div>
+                    <div className="setting-info">
+                      <h3>Two-Factor Authentication</h3>
+                      <p>Add an extra layer of security to your account</p>
+                    </div>
+                  </div>
+                  <div className="setting-control">
+                    <div className={`toggle-switch ${currentUser.twoFactorEnabled ? 'enabled' : 'disabled'}`}>
+                      <input
+                        type="checkbox"
+                        checked={currentUser.twoFactorEnabled || false}
+                        onChange={handleToggle2FA}
+                        disabled={updating2FA}
+                        className="toggle-input"
+                        id="2fa-toggle"
+                      />
+                      <label className="toggle-slider" htmlFor="2fa-toggle">
+                        <span className="toggle-text">
+                          {currentUser.twoFactorEnabled ? 'ON' : 'OFF'}
+                        </span>
+                      </label>
+                    </div>
+                    <button
+                      onClick={handleToggle2FA}
+                      disabled={updating2FA}
+                      className={`toggle-btn ${currentUser.twoFactorEnabled ? 'disable' : 'enable'}`}
+                    >
+                      {updating2FA ? 'Updating...' : currentUser.twoFactorEnabled ? 'Disable 2FA' : 'Enable 2FA'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="setting-card">
+                  <div className="setting-header">
+                    <div className="setting-icon">👤</div>
+                    <div className="setting-info">
+                      <h3>Profile Information</h3>
+                      <p>Update your personal details and contact information</p>
+                    </div>
+                  </div>
+                  <div className="setting-control">
+                    <button className="secondary-button">
+                      Edit Profile
+                    </button>
+                  </div>
+                </div>
+
+                <div className="setting-card">
+                  <div className="setting-header">
+                    <div className="setting-icon">🔔</div>
+                    <div className="setting-info">
+                      <h3>Notifications</h3>
+                      <p>Manage your email and push notification preferences</p>
+                    </div>
+                  </div>
+                  <div className="setting-control">
+                    <button className="secondary-button">
+                      Configure
+                    </button>
+                  </div>
+                </div>
+
+                <div className="setting-card">
+                  <div className="setting-header">
+                    <div className="setting-icon">🛡️</div>
+                    <div className="setting-info">
+                      <h3>Security</h3>
+                      <p>Change password and manage security settings</p>
+                    </div>
+                  </div>
+                  <div className="setting-control">
+                    <button className="secondary-button">
+                      Change Password
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="security-info">
+                <h4>About Two-Factor Authentication</h4>
+                <div className="info-grid">
+                  <div className="info-item">
+                    <span className="info-icon">✅</span>
+                    <div className="info-content">
+                      <strong>Enhanced Security</strong>
+                      <p>Protect your account with an additional verification step</p>
+                    </div>
+                  </div>
+                  <div className="info-item">
+                    <span className="info-icon">📱</span>
+                    <div className="info-content">
+                      <strong>Mobile App</strong>
+                      <p>Use authenticator apps like Google Authenticator or Authy</p>
+                    </div>
+                  </div>
+                  <div className="info-item">
+                    <span className="info-icon">⚡</span>
+                    <div className="info-content">
+                      <strong>Quick Setup</strong>
+                      <p>Get set up in less than 2 minutes</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </main>
@@ -742,36 +964,72 @@ const VetDashboard: React.FC = () => {
           color: #334155;
         }
         
-        .dashboard-header {
+        /* Top Navigation Bar */
+        .top-navbar {
           background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
           color: white;
-          padding: 1.5rem 0;
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+          padding: 0;
+          box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
           position: sticky;
           top: 0;
           z-index: 100;
         }
         
-        .header-content {
-          max-width: 95%;
+        .nav-container {
+          max-width: 100%;
           margin: 0 auto;
-          padding: 0 2rem;
+          padding: 0 1rem;
           display: flex;
           justify-content: space-between;
           align-items: center;
+          height: 70px;
         }
         
-        .header-brand {
+        .nav-left {
           display: flex;
           align-items: center;
           gap: 1rem;
         }
         
-        .clinic-logo {
+        .menu-toggle {
+          background: rgba(255, 255, 255, 0.2);
+          color: white;
+          border: none;
+          padding: 0.5rem 1rem;
+          border-radius: 8px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          transition: all 0.3s;
+          backdrop-filter: blur(10px);
+        }
+        
+        .menu-toggle:hover {
+          background: rgba(255, 255, 255, 0.3);
+          transform: translateY(-1px);
+        }
+        
+        .menu-icon {
+          font-size: 1.2rem;
+          font-weight: bold;
+        }
+        
+        .menu-text {
+          font-weight: 500;
+        }
+        
+        .nav-brand {
+          display: flex;
+          align-items: center;
+          gap: 0.8rem;
+        }
+        
+        .nav-logo {
           position: relative;
-          width: 60px;
-          height: 60px;
-          border-radius: 12px;
+          width: 40px;
+          height: 40px;
+          border-radius: 8px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -780,60 +1038,54 @@ const VetDashboard: React.FC = () => {
         }
         
         .logo-image {
-          border-radius: 12px;
+          border-radius: 8px;
           object-fit: cover;
         }
         
         .logo-fallback {
           display: flex;
-          font-size: 2rem;
+          font-size: 1.5rem;
           width: 100%;
           height: 100%;
           align-items: center;
           justify-content: center;
-          border-radius: 12px;
+          border-radius: 8px;
           background: rgba(255, 255, 255, 0.2);
         }
         
-        .clinic-info h1 {
-          font-size: 1.8rem;
+        .brand-text h1 {
+          font-size: 1.3rem;
           font-weight: 700;
           margin: 0;
           letter-spacing: -0.5px;
         }
         
-        .clinic-tagline {
-          font-size: 0.9rem;
+        .brand-text p {
+          font-size: 0.8rem;
           opacity: 0.9;
-          margin: 0.2rem 0 0 0;
+          margin: 0;
         }
         
-        .user-info {
+        .nav-right {
+          display: flex;
+          align-items: center;
+          gap: 1.5rem;
+        }
+        
+        .user-welcome {
+          font-weight: 500;
+          font-size: 0.9rem;
+        }
+        
+        .user-actions {
           display: flex;
           align-items: center;
           gap: 1rem;
         }
         
-        .user-details {
-          display: flex;
-          flex-direction: column;
-          align-items: flex-end;
-        }
-        
-        .welcome-text {
-          font-size: 1rem;
-          font-weight: 600;
-        }
-        
-        .user-role {
-          font-size: 0.8rem;
-          opacity: 0.8;
-          text-transform: capitalize;
-        }
-        
         .user-avatar {
-          width: 45px;
-          height: 45px;
+          width: 40px;
+          height: 40px;
           border-radius: 50%;
           background: rgba(255, 255, 255, 0.2);
           display: flex;
@@ -841,7 +1093,7 @@ const VetDashboard: React.FC = () => {
           justify-content: center;
           color: white;
           font-weight: bold;
-          font-size: 1.1rem;
+          font-size: 1rem;
           backdrop-filter: blur(10px);
           border: 2px solid rgba(255, 255, 255, 0.3);
         }
@@ -850,12 +1102,13 @@ const VetDashboard: React.FC = () => {
           background: rgba(255, 255, 255, 0.2);
           color: white;
           border: 1px solid rgba(255, 255, 255, 0.3);
-          padding: 0.6rem 1.2rem;
-          border-radius: 8px;
+          padding: 0.5rem 1rem;
+          border-radius: 6px;
           cursor: pointer;
           font-weight: 500;
           transition: all 0.3s;
           backdrop-filter: blur(10px);
+          font-size: 0.9rem;
         }
 
         .sign-out-btn:hover {
@@ -863,26 +1116,66 @@ const VetDashboard: React.FC = () => {
           transform: translateY(-1px);
         }
         
-        .dashboard-content {
-          display: grid;
-          grid-template-columns: 280px 1fr;
-          max-width: 95%;
-          margin: 2rem auto;
-          padding: 0 1rem;
-          gap: 2rem;
-          min-height: calc(100vh - 120px);
+        /* Sidebar Menu */
+        .sidebar {
+          position: fixed;
+          top: 0;
+          left: -320px;
+          width: 320px;
+          height: 100vh;
+          background: white;
+          box-shadow: 2px 0 20px rgba(0, 0, 0, 0.1);
+          transition: left 0.3s ease;
+          z-index: 1000;
+          display: flex;
+          flex-direction: column;
+          overflow-y: auto;
         }
         
-        .sidebar {
-          background: white;
-          border-radius: 16px;
+        .sidebar.sidebar-open {
+          left: 0;
+        }
+        
+        .sidebar-header {
+          background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
+          color: white;
           padding: 1.5rem;
-          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
-          border: 1px solid rgba(255, 255, 255, 0.2);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        
+        .sidebar-header h3 {
+          margin: 0;
+          font-size: 1.2rem;
+          font-weight: 600;
+        }
+        
+        .close-sidebar {
+          background: rgba(255, 255, 255, 0.2);
+          color: white;
+          border: none;
+          width: 32px;
+          height: 32px;
+          border-radius: 6px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 1.1rem;
+          transition: all 0.3s;
           backdrop-filter: blur(10px);
-          height: fit-content;
-          position: sticky;
-          top: 100px;
+        }
+        
+        .close-sidebar:hover {
+          background: rgba(255, 255, 255, 0.3);
+          transform: rotate(90deg);
+        }
+        
+        .sidebar-content {
+          flex: 1;
+          padding: 1.5rem;
+          overflow-y: auto;
         }
         
         .sidebar-section {
@@ -893,32 +1186,22 @@ const VetDashboard: React.FC = () => {
           margin-bottom: 0;
         }
         
-        .sidebar h3 {
+        .sidebar-section h4 {
           color: #1e293b;
           margin-bottom: 1rem;
-          font-size: 1.1rem;
+          font-size: 1rem;
           font-weight: 600;
           display: flex;
           align-items: center;
           gap: 0.5rem;
         }
         
-        .sidebar h3::before {
+        .sidebar-section h4::before {
           content: '';
           width: 4px;
           height: 16px;
           background: linear-gradient(135deg, #34B89C, #6BC1E1);
           border-radius: 2px;
-        }
-
-        .sidebar h4 {
-          color: #1e293b;
-          margin-bottom: 1rem;
-          font-size: 1.1rem;
-          font-weight: 600;
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
         }
         
         .nav-menu {
@@ -1030,10 +1313,61 @@ const VetDashboard: React.FC = () => {
           color: #64748b;
           font-weight: 500;
         }
-
+        
+        .quick-actions {
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+        }
+        
+        .quick-action-btn {
+          width: 100%;
+          padding: 0.8rem 1rem;
+          background: #f8fafc;
+          color: #475569;
+          border: none;
+          border-radius: 10px;
+          cursor: pointer;
+          text-align: left;
+          display: flex;
+          align-items: center;
+          gap: 0.8rem;
+          transition: all 0.3s;
+          font-size: 0.9rem;
+          font-weight: 500;
+        }
+        
+        .quick-action-btn:hover {
+          background: #e2e8f0;
+          transform: translateX(5px);
+        }
+        
+        .action-icon {
+          font-size: 1.1rem;
+        }
+        
+        .sidebar-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background: rgba(0, 0, 0, 0.5);
+          z-index: 999;
+          backdrop-filter: blur(2px);
+        }
+        
+        /* Main Content */
+        .main-content-wrapper {
+          margin-left: 0;
+          transition: margin-left 0.3s ease;
+          min-height: calc(100vh - 70px);
+        }
+        
         .main-content {
           background: white;
           border-radius: 16px;
+          margin: 2rem;
           padding: 2rem;
           box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
           border: 1px solid rgba(255, 255, 255, 0.2);
@@ -1450,6 +1784,202 @@ const VetDashboard: React.FC = () => {
           cursor: not-allowed;
         }
 
+        /* Settings Styles */
+        .settings-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+          gap: 1.5rem;
+          margin-bottom: 2rem;
+        }
+
+        .setting-card {
+          background: #f8fafc;
+          border-radius: 16px;
+          padding: 1.5rem;
+          border-left: 4px solid #34B89C;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+          transition: all 0.3s;
+        }
+
+        .setting-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        .setting-header {
+          display: flex;
+          align-items: flex-start;
+          gap: 1rem;
+          margin-bottom: 1.5rem;
+        }
+
+        .setting-icon {
+          font-size: 2rem;
+          opacity: 0.8;
+        }
+
+        .setting-info h3 {
+          color: #1e293b;
+          margin: 0 0 0.5rem 0;
+          font-size: 1.2rem;
+          font-weight: 600;
+        }
+
+        .setting-info p {
+          color: #64748b;
+          margin: 0;
+          font-size: 0.9rem;
+        }
+
+        .setting-control {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 1rem;
+        }
+
+        /* Toggle Switch */
+        .toggle-switch {
+          position: relative;
+          display: inline-block;
+          width: 80px;
+          height: 34px;
+        }
+
+        .toggle-input {
+          opacity: 0;
+          width: 0;
+          height: 0;
+        }
+
+        .toggle-slider {
+          position: absolute;
+          cursor: pointer;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: #ccc;
+          transition: .4s;
+          border-radius: 34px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 0 10px;
+        }
+
+        .toggle-slider:before {
+          position: absolute;
+          content: "";
+          height: 26px;
+          width: 26px;
+          left: 4px;
+          bottom: 4px;
+          background-color: white;
+          transition: .4s;
+          border-radius: 50%;
+        }
+
+        .toggle-input:checked + .toggle-slider {
+          background-color: #10b981;
+        }
+
+        .toggle-input:checked + .toggle-slider:before {
+          transform: translateX(46px);
+        }
+
+        .toggle-switch.enabled .toggle-slider {
+          background-color: #10b981;
+        }
+
+        .toggle-switch.disabled .toggle-slider {
+          background-color: #ccc;
+        }
+
+        .toggle-text {
+          font-size: 0.7rem;
+          font-weight: 600;
+          color: white;
+          z-index: 1;
+        }
+
+        .toggle-btn {
+          padding: 0.6rem 1.2rem;
+          border: none;
+          border-radius: 8px;
+          cursor: pointer;
+          font-weight: 500;
+          font-size: 0.85rem;
+          transition: all 0.3s;
+          white-space: nowrap;
+        }
+
+        .toggle-btn.enable {
+          background: #10b981;
+          color: white;
+        }
+
+        .toggle-btn.disable {
+          background: #ef4444;
+          color: white;
+        }
+
+        .toggle-btn:hover:not(:disabled) {
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .toggle-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+
+        /* Security Info */
+        .security-info {
+          background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+          border-radius: 16px;
+          padding: 2rem;
+          border: 1px solid #e2e8f0;
+        }
+
+        .security-info h4 {
+          color: #1e293b;
+          margin-bottom: 1.5rem;
+          font-size: 1.3rem;
+          font-weight: 600;
+        }
+
+        .info-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+          gap: 1.5rem;
+        }
+
+        .info-item {
+          display: flex;
+          align-items: flex-start;
+          gap: 1rem;
+        }
+
+        .info-icon {
+          font-size: 1.5rem;
+          opacity: 0.8;
+        }
+
+        .info-content strong {
+          display: block;
+          color: #1e293b;
+          margin-bottom: 0.3rem;
+          font-size: 1rem;
+        }
+
+        .info-content p {
+          color: #64748b;
+          margin: 0;
+          font-size: 0.9rem;
+          line-height: 1.4;
+        }
+
         .modal-overlay {
           position: fixed;
           top: 0;
@@ -1572,35 +2102,30 @@ const VetDashboard: React.FC = () => {
           gap: 1rem;
         }
 
-        @media (max-width: 1024px) {
-          .dashboard-content {
-            grid-template-columns: 1fr;
-            gap: 1.5rem;
-          }
-          
-          .sidebar {
-            position: static;
-            order: 2;
-          }
-          
-          .maximized-grid {
-            grid-template-columns: 1fr;
-          }
-        }
-
         @media (max-width: 768px) {
-          .header-content {
-            flex-direction: column;
-            gap: 1rem;
-            text-align: center;
+          .nav-container {
+            padding: 0 0.5rem;
           }
           
-          .header-brand {
-            justify-content: center;
+          .menu-text {
+            display: none;
           }
           
-          .user-info {
-            justify-content: center;
+          .user-welcome {
+            display: none;
+          }
+          
+          .brand-text h1 {
+            font-size: 1.1rem;
+          }
+          
+          .brand-text p {
+            display: none;
+          }
+          
+          .main-content {
+            margin: 1rem;
+            padding: 1.5rem;
           }
           
           .section-header {
@@ -1618,6 +2143,16 @@ const VetDashboard: React.FC = () => {
             justify-content: space-between;
           }
           
+          .settings-grid {
+            grid-template-columns: 1fr;
+          }
+          
+          .setting-control {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 1rem;
+          }
+          
           .modal {
             padding: 1.5rem;
           }
@@ -1628,13 +2163,9 @@ const VetDashboard: React.FC = () => {
         }
 
         @media (max-width: 480px) {
-          .dashboard-content {
-            padding: 0 0.5rem;
-            margin: 1rem auto;
-          }
-          
           .main-content {
-            padding: 1.5rem;
+            margin: 0.5rem;
+            padding: 1rem;
           }
           
           .appointment-card {
@@ -1645,6 +2176,15 @@ const VetDashboard: React.FC = () => {
             flex-direction: column;
             align-items: flex-start;
             gap: 0.5rem;
+          }
+          
+          .maximized-grid {
+            grid-template-columns: 1fr;
+            gap: 1rem;
+          }
+          
+          .info-grid {
+            grid-template-columns: 1fr;
           }
         }
       `}</style>

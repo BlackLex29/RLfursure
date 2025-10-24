@@ -4,8 +4,9 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import styled, { createGlobalStyle, keyframes } from "styled-components";
 import { useRouter } from "next/navigation";
 import { db } from "../firebaseConfig";
-import { collection, getDocs,} from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import Image from "next/image";
 
 // Global Styles
 const GlobalStyle = createGlobalStyle`
@@ -42,7 +43,7 @@ interface AppointmentType {
   date: string;
   timeSlot: string;
   status?: string;
-  petId?: string; // Added to link with pets collection
+  petId?: string;
 }
 
 interface PetType {
@@ -93,7 +94,6 @@ const MonthlyStatistic: React.FC = () => {
     totalAppointments: 0 
   });
 
-  // Memoized arrays and objects to prevent unnecessary re-renders
   const months = useMemo(() => [
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"
@@ -124,7 +124,6 @@ const MonthlyStatistic: React.FC = () => {
     []
   );
 
-  // Fetch all pets data
   const fetchPetsData = useCallback(async (): Promise<PetType[]> => {
     try {
       const petsSnapshot = await getDocs(collection(db, "pets"));
@@ -147,20 +146,15 @@ const MonthlyStatistic: React.FC = () => {
     }
   }, []);
 
-  // Calculate statistics from appointments with proper pet type mapping
   const calculateStats = useCallback(async (appointmentsData: AppointmentType[]) => {
     const stats: { [key: string]: { dogs: number; cats: number } } = {};
     
-    // Initialize all services with 0
     services.forEach(service => {
       stats[service] = { dogs: 0, cats: 0 };
     });
 
     try {
-      // Fetch pets data to get accurate pet types
       const petsData = await fetchPetsData();
-      
-      // Create a map for quick pet type lookup
       const petTypeMap: { [key: string]: string } = {};
       petsData.forEach(pet => {
         if (pet.id && pet.petType) {
@@ -170,20 +164,16 @@ const MonthlyStatistic: React.FC = () => {
 
       console.log("🔍 Pet type mapping created:", Object.keys(petTypeMap).length, "pets mapped");
 
-      // Count appointments by service and pet type
       appointmentsData.forEach(appointment => {
         const service = appointment.serviceType?.toLowerCase() || "checkup";
         let petType = "";
         
-        // Method 1: Try to get pet type from appointment data
         if (appointment.petType) {
           petType = appointment.petType.toLowerCase();
         }
-        // Method 2: Try to find pet type from pets collection using petId
         else if (appointment.petId && petTypeMap[appointment.petId]) {
           petType = petTypeMap[appointment.petId];
         }
-        // Method 3: Try to match by pet name (fallback)
         else if (appointment.petName) {
           const matchedPet = petsData.find(pet => 
             pet.petName?.toLowerCase() === appointment.petName?.toLowerCase()
@@ -193,35 +183,25 @@ const MonthlyStatistic: React.FC = () => {
           }
         }
 
-        // Count based on pet type
         if (stats[service]) {
           if (petType === "dog") {
             stats[service].dogs++;
-            console.log(`✅ Counted as DOG - Service: ${service}, Pet: ${appointment.petName}`);
           } else if (petType === "cat") {
             stats[service].cats++;
-            console.log(`✅ Counted as CAT - Service: ${service}, Pet: ${appointment.petName}`);
           } else {
-            // If pet type is still unknown, use intelligent guessing
             if (appointment.petName) {
               const petNameLower = appointment.petName.toLowerCase();
               if (petNameLower.includes('dog') || petNameLower.includes('puppy') || 
                   appointment.petName.match(/^[A-Z][a-z]+$/)) {
                 stats[service].dogs++;
-                console.log(`🤔 Guessed as DOG - Service: ${service}, Pet: ${appointment.petName}`);
               } else if (petNameLower.includes('cat') || petNameLower.includes('kitten') || 
                          petNameLower.includes('pusa') || petNameLower.includes('ming')) {
                 stats[service].cats++;
-                console.log(`🤔 Guessed as CAT - Service: ${service}, Pet: ${appointment.petName}`);
               } else {
-                // Default to dogs if still unknown
                 stats[service].dogs++;
-                console.log(`❓ Defaulted to DOG - Service: ${service}, Pet: ${appointment.petName}`);
               }
             } else {
-              // Default to dogs if no pet name
               stats[service].dogs++;
-              console.log(`❓ Defaulted to DOG - Service: ${service}, No pet name`);
             }
           }
         }
@@ -229,7 +209,6 @@ const MonthlyStatistic: React.FC = () => {
 
     } catch (error) {
       console.error("❌ Error in calculateStats:", error);
-      // Fallback: just count appointments without pet type distinction
       appointmentsData.forEach(appointment => {
         const service = appointment.serviceType?.toLowerCase() || "checkup";
         if (stats[service]) {
@@ -238,7 +217,6 @@ const MonthlyStatistic: React.FC = () => {
       });
     }
 
-    // Convert to array format for charts with proper labels
     const serviceStatsArray: ServiceStats[] = services.map(service => {
       const serviceLabel = serviceLabels[service as keyof typeof serviceLabels] || service;
       return {
@@ -251,7 +229,6 @@ const MonthlyStatistic: React.FC = () => {
     console.log("📈 Final service stats:", serviceStatsArray);
     setServiceStats(serviceStatsArray);
 
-    // Calculate totals
     const totalDogs = serviceStatsArray.reduce((sum, item) => sum + item.dogs, 0);
     const totalCats = serviceStatsArray.reduce((sum, item) => sum + item.cats, 0);
     const totalAppointments = totalDogs + totalCats;
@@ -260,7 +237,6 @@ const MonthlyStatistic: React.FC = () => {
     console.log("🎯 Total stats:", { totalDogs, totalCats, totalAppointments });
   }, [serviceLabels, services, fetchPetsData]);
 
-  // Fetch appointments from Firebase
   const fetchAppointments = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -281,13 +257,12 @@ const MonthlyStatistic: React.FC = () => {
           date: docData.date || "",
           timeSlot: docData.timeSlot || "",
           status: docData.status || "Pending",
-          petId: docData.petId || "" // Get petId if available
+          petId: docData.petId || ""
         });
       });
 
       console.log("📋 Raw appointments data:", data.length, "appointments");
 
-      // Filter by selected month/year if needed
       let filteredData = data;
       if (selectedMonth || selectedYear) {
         filteredData = data.filter(appt => {
@@ -313,7 +288,6 @@ const MonthlyStatistic: React.FC = () => {
     fetchAppointments();
   }, [fetchAppointments]);
 
-  // Pie chart data
   const pieData = useMemo(() => [
     { name: 'Dogs', value: totalStats.totalDogs },
     { name: 'Cats', value: totalStats.totalCats }
@@ -321,7 +295,6 @@ const MonthlyStatistic: React.FC = () => {
 
   const COLORS = useMemo(() => ['#8884d8', '#82ca9d'], []);
 
-  // Custom tooltip for bar chart
   const CustomTooltip: React.FC<TooltipProps> = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
@@ -341,7 +314,6 @@ const MonthlyStatistic: React.FC = () => {
     return null;
   };
 
-  // Custom tooltip for pie chart
   const PieTooltip: React.FC<PieTooltipProps> = ({ active, payload }) => {
     if (active && payload && payload.length) {
       const data = payload[0];
@@ -381,7 +353,17 @@ const MonthlyStatistic: React.FC = () => {
             ← Back to Dashboard
           </BackButton>
           <HeaderContent>
-            <HeaderIcon>📊</HeaderIcon>
+            <HeaderIcon>
+              {/* Add your logo here - replace with your actual logo path */}
+              <Image 
+                src="/RL.jpg" 
+                alt="PetCare Statistics Logo" 
+                width={64} 
+                height={64}
+                style={{ objectFit: 'cover' }}
+                priority
+              />
+            </HeaderIcon>
             <HeaderText>
               <HeaderTitle>Pet Appointment Statistics</HeaderTitle>
               <HeaderSubtitle>Monthly overview of dog and cat appointments by service type</HeaderSubtitle>
@@ -661,10 +643,19 @@ const HeaderContent = styled.div`
 `;
 
 const HeaderIcon = styled.div`
-  font-size: 4rem;
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  padding: 8px;
+  backdrop-filter: blur(10px);
   
   @media (max-width: 768px) {
-    font-size: 3rem;
+    width: 48px;
+    height: 48px;
   }
 `;
 

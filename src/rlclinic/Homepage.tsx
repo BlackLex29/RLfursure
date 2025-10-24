@@ -30,7 +30,7 @@ const HomePage: React.FC = () => {
         <Header>
           <LogoContainer>
             <LogoImage 
-              src="https://scontent.fmnl13-4.fna.fbcdn.net/v/t39.30808-1/308051699_1043145306431767_6902051210877649285_n.jpg?stp=cp0_dst-jpg_s60x60_tt6&_nc_cat=108&ccb=1-7&_nc_sid=2d3e12&_nc_eui2=AeH7C3PaObQLeqOOxA3pTYw1U6XSiAPBS_lTpdKIA8FL-aWJ6pOqX-tCsYAmdUOHVzzxg-T9gjpVH_1PkEO0urYZ&_nc_ohc=nTsV96PobXsQ7kNvwHBEZL-&_nc_oc=AdnWZiPqFP9clHx6kNLkwYyp0JxyuzPrb3v-EX05G5gnodzRICvGDfyHbEPE2W2IUzM&_nc_zt=24&_nc_ht=scontent.fmnl13-4.fna&_nc_gid=_j-f9Iht5HcTdnEpGMdSnQ&oh=00_AfcMEndkp1TdnlfHGcjZgwxf6TaHanWuQLRNp_mu-woc4w&oe=68E6255B"
+              src="RL.jpg"
               alt="FurSureCare Logo"
             />
             <LogoText>FurSureCare</LogoText>
@@ -211,7 +211,7 @@ const HomePage: React.FC = () => {
             <FooterSection>
               <FooterLogoContainer>
                 <LogoImage 
-                  src="https://scontent.fmnl13-4.fna.fbcdn.net/v/t39.30808-1/308051699_1043145306431767_6902051210877649285_n.jpg?stp=cp0_dst-jpg_s60x60_tt6&_nc_cat=108&ccb=1-7&_nc_sid=2d3e12&_nc_eui2=AeH7C3PaObQLeqOOxA3pTYw1U6XSiAPBS_lTpdKIA8FL-aWJ6pOqX-tCsYAmdUOHVzzxg-T9gjpVH_1PkEO0urYZ&_nc_ohc=nTsV96PobXsQ7kNvwHBEZL-&_nc_oc=AdnWZiPqFP9clHx6kNLkwYyp0JxyuzPrb3v-EX05G5gnodzRICvGDfyHbEPE2W2IUzM&_nc_zt=24&_nc_ht=scontent.fmnl13-4.fna&_nc_gid=_j-f9Iht5HcTdnEpGMdSnQ&oh=00_AfcMEndkp1TdnlfHGcjZgwxf6TaHanWuQLRNp_mu-woc4w&oe=68E6255B"
+                  src="RL.jpg"
                   alt="FurSureCare Logo" 
                 />
                 <FooterLogoText>
@@ -303,8 +303,8 @@ const LogoContainer = styled.div`
 `;
 
 const LogoImage = styled.img`
-  width: 50px;
-  height: 50px;
+  width: 70px;
+  height: 70px;
   border-radius: 50%;
   object-fit: cover;
 
