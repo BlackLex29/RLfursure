@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import styled, { createGlobalStyle } from "styled-components";
 import { useRouter } from "next/navigation";
 import { db, auth } from "../firebaseConfig";
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy } from "firebase/firestore";
+import { collection, getDocs, addDoc, updateDoc, doc, query, where, orderBy, onSnapshot } from "firebase/firestore";
 import { onAuthStateChanged, User } from "firebase/auth";
 
 const GlobalStyle = createGlobalStyle`
@@ -66,6 +66,10 @@ interface Appointment {
   color?: string;
   allergies?: string;
   existingConditions?: string;
+  ownerEmail?: string;
+  petBreed?: string;
+  birthday?: string;
+  age?: string;
 }
 
 const DIAGNOSIS_OPTIONS = {
@@ -83,17 +87,26 @@ const PET_BREEDS = {
   cat: ["British Shorthair","Burmese","Abyssinian","Scottish Fold","Siamese","Sphynx","Ragdoll","American Shorthair","Maine Coon","Persian","Putot Cat (Pusang Putot)"]
 };
 
-const GENDER_OPTIONS = ["Male", "Female", "Neutered Male", "Spayed Female"];
+
 
 const APPOINTMENT_TYPE_MAPPINGS: Record<string, {diagnosis: string, treatment: string}> = {
-  "Vaccination": { diagnosis: "Vaccination", treatment: "Vaccination" },
-  "Check Up": { diagnosis: "General Consultation", treatment: "Physical Examination" },
-  "Anti Rabies": { diagnosis: "Rabies Vaccination", treatment: "Vaccination" },
-  "Ultrasound": { diagnosis: "Diagnostic Imaging", treatment: "Ultrasound Procedure" },
-  "Grooming": { diagnosis: "Grooming Service", treatment: "Professional Grooming" },
-  "Spay/Neuter": { diagnosis: "Sterilization", treatment: "Surgery" },
-  "Deworming": { diagnosis: "Parasitic Infection", treatment: "Deworming" },
-  "Initial Registration": { diagnosis: "General Consultation", treatment: "Physical Examination" }
+  "vaccination": { diagnosis: "Vaccination", treatment: "Vaccination" },
+  "checkup": { diagnosis: "General Consultation", treatment: "Physical Examination" },
+  "antiRabies": { diagnosis: "Rabies Vaccination", treatment: "Vaccination" },
+  "ultrasound": { diagnosis: "Diagnostic Imaging", treatment: "Ultrasound Procedure" },
+  "groom": { diagnosis: "Grooming Service", treatment: "Professional Grooming" },
+  "spayNeuter": { diagnosis: "Sterilization", treatment: "Surgery" },
+  "deworm": { diagnosis: "Parasitic Infection", treatment: "Deworming" }
+};
+
+const APPOINTMENT_TYPE_LABELS: Record<string, string> = {
+  "vaccination": "Vaccination",
+  "checkup": "Check Up", 
+  "antiRabies": "Anti Rabies",
+  "ultrasound": "Ultrasound",
+  "groom": "Grooming",
+  "spayNeuter": "Spay/Neuter (Kapon)",
+  "deworm": "Deworming (Purga)"
 };
 
 const sanitizeFirestoreData = (data: Record<string, unknown>) => {
@@ -102,6 +115,109 @@ const sanitizeFirestoreData = (data: Record<string, unknown>) => {
     if (sanitized[key] === undefined || sanitized[key] === null) delete sanitized[key];
   });
   return sanitized;
+};
+
+// Enhanced function to calculate age from birth date
+const calculateAgeFromBirthDate = (birthDate: string): string => {
+  if (!birthDate) return '';
+  
+  try {
+    const today = new Date();
+    const birth = new Date(birthDate);
+    
+    // Check if birth date is valid
+    if (isNaN(birth.getTime())) return '';
+    
+    let age = today.getFullYear() - birth.getFullYear();
+    const monthDiff = today.getMonth() - birth.getMonth();
+    
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+      age--;
+    }
+    
+    if (age <= 0) {
+      const months = Math.max(0, (today.getFullYear() - birth.getFullYear()) * 12 + 
+        (today.getMonth() - birth.getMonth()));
+      if (months === 0) {
+        const days = Math.floor((today.getTime() - birth.getTime()) / (1000 * 60 * 60 * 24));
+        return days <= 1 ? "1 day" : `${days} days`;
+      }
+      return months <= 1 ? "1 month" : `${months} months`;
+    }
+    if (age === 1) return "1 year";
+    return `${age} years`;
+  } catch {
+    return '';
+  }
+};
+
+// Helper function to format date
+const formatDateDisplay = (dateString: string): string => {
+  if (!dateString) return '';
+  try {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  } catch {
+    return dateString;
+  }
+};
+
+// Enhanced helper function to get display value
+const getDisplayValue = (value: unknown): string => {
+  if (value === undefined || value === null || value === '') {
+    return '';
+  }
+  return String(value);
+};
+
+// Function to extract breed from appointment data
+const getBreedFromAppointment = (appointment: Appointment): string => {
+  return appointment.breed || appointment.petBreed || '';
+};
+
+// Function to extract age from appointment data
+const getAgeFromAppointment = (appointment: Appointment): string => {
+  if (appointment.petAge) return appointment.petAge;
+  if (appointment.birthDate || appointment.birthday) {
+    const birthDate = appointment.birthDate || appointment.birthday;
+    return calculateAgeFromBirthDate(birthDate!);
+  }
+  if (appointment.age) return appointment.age;
+  return '';
+};
+
+// Function to extract birth date from appointment data
+const getBirthDateFromAppointment = (appointment: Appointment): string => {
+  return appointment.birthDate || appointment.birthday || '';
+};
+
+// Function to extract pet type from appointment data with validation
+const getPetTypeFromAppointment = (appointment: Appointment): string => {
+  const petType = appointment.petType?.toLowerCase() || '';
+  
+  // Validate and normalize pet type
+  if (petType === 'dog' || petType === 'cat') {
+    return petType;
+  }
+  
+  // Additional validation: check breed to determine pet type
+  const breed = getBreedFromAppointment(appointment).toLowerCase();
+  const dogBreeds = PET_BREEDS.dog.map(b => b.toLowerCase());
+  const catBreeds = PET_BREEDS.cat.map(b => b.toLowerCase());
+  
+  if (dogBreeds.some(dogBreed => breed.includes(dogBreed))) {
+    return 'dog';
+  }
+  if (catBreeds.some(catBreed => breed.includes(catBreed))) {
+    return 'cat';
+  }
+  
+  // Default to dog if cannot determine
+  console.warn(`Cannot determine pet type for appointment ${appointment.id}, defaulting to dog`);
+  return 'dog';
 };
 
 const MedicalRecord: React.FC = () => {
@@ -117,6 +233,7 @@ const MedicalRecord: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState("all");
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     petName: "",
@@ -138,16 +255,22 @@ const MedicalRecord: React.FC = () => {
     veterinarian: "",
     appointmentId: "",
     appointmentType: "",
-    status: "completed"
+    status: "pending_completion"
   });
 
   const [isFromAppointment, setIsFromAppointment] = useState(false);
-  const [isFromRegistration, setIsFromRegistration] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setCurrentUser(user);
+        // Check user claims for debugging
+        try {
+          const token = await user.getIdTokenResult();
+          console.log('User Claims:', token.claims);
+        } catch (error) {
+          console.error('Error getting user claims:', error);
+        }
       } else {
         setCurrentUser(null);
         setRecords([]);
@@ -158,6 +281,7 @@ const MedicalRecord: React.FC = () => {
     return () => unsubscribe();
   }, [router]);
 
+  // Enhanced appointment fetching with complete data extraction and pet type validation
   const fetchAppointments = useCallback(async () => {
     try {
       const q = query(collection(db, "appointments"), where("status", "==", "Done"));
@@ -166,24 +290,40 @@ const MedicalRecord: React.FC = () => {
       
       querySnapshot.forEach(docSnap => {
         const data = docSnap.data();
-        appointmentsData.push({ 
-          id: docSnap.id, 
-          petName: data.petName || "",
-          date: data.date || "",
+        
+        // ENHANCED: Extract ALL possible data fields from appointment with pet type validation
+        const rawPetType = data.petType || "dog";
+        const validatedPetType = getPetTypeFromAppointment({
+          id: docSnap.id,
+          petType: rawPetType,
+          breed: data.petBreed || data.breed || "",
+          // ... other fields
+        } as Appointment);
+        
+        const appointment: Appointment = {
+          id: docSnap.id,
+          petName: data.petName || data.name || "Unknown Pet",
+          date: data.date || new Date().toISOString().split('T')[0],
           timeSlot: data.timeSlot || "",
           status: data.status || "",
-          clientName: data.clientName || "",
+          clientName: data.clientName || data.ownerName || "Unknown Owner",
           appointmentType: data.appointmentType || "",
-          petType: data.petType || "dog",
-          breed: data.breed || "",
-          petAge: data.petAge || "",
-          birthDate: data.birthDate || "",
+          petType: validatedPetType, // Use validated pet type
+          breed: data.petBreed || data.breed || "",
+          petAge: data.petAge || data.age || "",
+          birthDate: data.birthDate || data.birthday || "",
           weight: data.weight || "",
           gender: data.gender || "",
           color: data.color || "",
           allergies: data.allergies || "",
-          existingConditions: data.existingConditions || ""
-        } as Appointment);
+          existingConditions: data.existingConditions || "",
+          ownerEmail: data.ownerEmail || data.clientEmail || "",
+          petBreed: data.petBreed || data.breed || "",
+          birthday: data.birthday || data.birthDate || "",
+          age: data.age || data.petAge || ""
+        };
+        
+        appointmentsData.push(appointment);
       });
       
       appointmentsData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -193,14 +333,13 @@ const MedicalRecord: React.FC = () => {
     }
   }, []);
 
-  const fetchMedicalRecords = useCallback(async () => {
-    try {
-      setLoading(true);
-      const q = query(collection(db, "medicalRecords"), orderBy("createdAt", "desc"));
-      const querySnapshot = await getDocs(q);
+  const setupMedicalRecordsListener = useCallback(() => {
+    const q = query(collection(db, "medicalRecords"), orderBy("createdAt", "desc"));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
       const recordsData: MedicalRecord[] = [];
       
-      querySnapshot.forEach(docSnap => {
+      snapshot.forEach(docSnap => {
         const data = docSnap.data();
         recordsData.push({ 
           id: docSnap.id, 
@@ -224,35 +363,55 @@ const MedicalRecord: React.FC = () => {
           appointmentId: data.appointmentId || "",
           appointmentStatus: data.appointmentStatus || "",
           appointmentType: data.appointmentType || "",
-          status: data.status || "completed",
+          status: data.status || "pending_completion",
           petId: data.petId || "",
           createdAt: data.createdAt || null
         } as MedicalRecord);
       });
       
       setRecords(recordsData);
-    } catch (error) {
-      console.error("Error fetching medical records:", error);
-    } finally {
       setLoading(false);
-    }
+    }, (error) => {
+      console.error("Error listening to medical records:", error);
+      setErrorMessage("Error loading medical records. Please refresh the page.");
+      setLoading(false);
+    });
+
+    return unsubscribe;
   }, []);
 
   useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+
     if (currentUser) {
-      fetchMedicalRecords();
       fetchAppointments();
+      unsubscribe = setupMedicalRecordsListener();
     }
-  }, [currentUser, fetchMedicalRecords, fetchAppointments]);
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [currentUser, fetchAppointments, setupMedicalRecordsListener]);
+
+  // NEW: Function to filter out appointments that already have medical records
+  const getAvailableAppointments = useCallback(() => {
+    // Get all appointment IDs that already have medical records
+    const usedAppointmentIds = new Set(
+      records
+        .filter(record => record.appointmentId)
+        .map(record => record.appointmentId)
+    );
+    
+    // Filter out appointments that are already used
+    return appointments.filter(appointment => 
+      !usedAppointmentIds.has(appointment.id)
+    );
+  }, [appointments, records]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    
-    // I-disable lang ang pag-edit ng petName at date kapag galing sa appointment
-    if ((isFromAppointment || isFromRegistration) && 
-        (name === "petName" || name === "date")) {
-      return;
-    }
     
     if (name === "petType") {
       const currentBreed = formData.breed;
@@ -275,34 +434,55 @@ const MedicalRecord: React.FC = () => {
     }
   };
 
+  // ENHANCED: Handle creating from appointment with COMPLETE auto-fill and PET TYPE VALIDATION
   const handleCreateFromAppointment = (appointment: Appointment) => {
-    const appointmentMapping = APPOINTMENT_TYPE_MAPPINGS[appointment.appointmentType] || {};
+    const appointmentTypeKey = Object.keys(APPOINTMENT_TYPE_LABELS).find(
+      key => APPOINTMENT_TYPE_LABELS[key] === appointment.appointmentType
+    ) || appointment.appointmentType;
     
-    setFormData({
-      petName: appointment.petName,
-      date: appointment.date,
-      petType: appointment.petType || "dog",
-      breed: appointment.breed || "",
-      appointmentType: appointment.appointmentType || "",
+    const appointmentMapping = APPOINTMENT_TYPE_MAPPINGS[appointmentTypeKey] || APPOINTMENT_TYPE_MAPPINGS.checkup;
+    
+    // ENHANCED: Use helper functions to get breed and age with PET TYPE VALIDATION
+    const breed = getBreedFromAppointment(appointment);
+    const age = getAgeFromAppointment(appointment);
+    const birthDate = getBirthDateFromAppointment(appointment);
+    
+    // FIXED: Use validated pet type from appointment
+    const validatedPetType = getPetTypeFromAppointment(appointment);
+
+    // COMPLETE AUTO-FILL: Map ALL data from appointment to form
+    const autoFilledFormData = {
+      petName: getDisplayValue(appointment.petName),
+      date: appointment.date || new Date().toISOString().split('T')[0],
+      petType: validatedPetType, // Use validated pet type
+      breed: breed,
+      appointmentType: getDisplayValue(appointment.appointmentType),
       appointmentId: appointment.id,
-      petAge: appointment.petAge || "",
-      birthDate: appointment.birthDate || "",
-      weight: appointment.weight || "",
-      gender: appointment.gender || "",
-      color: appointment.color || "",
-      allergies: appointment.allergies || "",
-      existingConditions: appointment.existingConditions || "",
-      diagnosis: appointmentMapping.diagnosis || "",
-      treatment: appointmentMapping.treatment || "",
-      ownerName: appointment.clientName || "",
-      ownerEmail: "",
-      notes: "",
-      veterinarian: "",
-      status: "completed"
+      petAge: age,
+      birthDate: birthDate,
+      weight: getDisplayValue(appointment.weight),
+      gender: getDisplayValue(appointment.gender),
+      color: getDisplayValue(appointment.color),
+      allergies: getDisplayValue(appointment.allergies),
+      existingConditions: getDisplayValue(appointment.existingConditions),
+      diagnosis: appointmentMapping.diagnosis || "General Consultation",
+      treatment: appointmentMapping.treatment || "Physical Examination",
+      ownerName: getDisplayValue(appointment.clientName),
+      ownerEmail: getDisplayValue(appointment.ownerEmail),
+      notes: `Appointment: ${appointment.appointmentType} on ${formatDateDisplay(appointment.date)} at ${appointment.timeSlot}`,
+      veterinarian: currentUser?.email?.split('@')[0] || "Dr. Veterinarian",
+      status: "pending_completion"
+    };
+    
+    console.log('Auto-filled form data:', {
+      originalPetType: appointment.petType,
+      validatedPetType: validatedPetType,
+      breed: breed,
+      formData: autoFilledFormData
     });
     
+    setFormData(autoFilledFormData);
     setIsFromAppointment(true);
-    setIsFromRegistration(false);
     setShowAppointmentModal(false);
     setShowForm(true);
   };
@@ -314,26 +494,35 @@ const MedicalRecord: React.FC = () => {
       return;
     }
 
+    const finalStatus = formData.diagnosis && formData.treatment && formData.veterinarian 
+      ? "completed" 
+      : "pending_completion";
+
     const sanitizedData = sanitizeFirestoreData({
       ...formData,
-      status: "completed",
+      status: finalStatus,
       updatedAt: new Date()
     });
 
     try {
       if (editingRecord) {
         await updateDoc(doc(db, "medicalRecords", editingRecord.id), sanitizedData);
-        setSuccessMessage("Medical record completed successfully!");
+        setSuccessMessage("Medical record updated successfully!");
       } else {
-        await addDoc(collection(db, "medicalRecords"), {
+        const docRef = await addDoc(collection(db, "medicalRecords"), {
           ...sanitizedData,
           createdAt: new Date()
         });
-        setSuccessMessage("Medical record added successfully!");
+        console.log("Medical record created with ID:", docRef.id);
+        setSuccessMessage("Medical record created successfully!");
+        
+        // NEW: Refresh appointments list to remove the used one
+        if (formData.appointmentId) {
+          await fetchAppointments();
+        }
       }
 
       resetForm();
-      fetchMedicalRecords();
       
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (error) {
@@ -342,7 +531,12 @@ const MedicalRecord: React.FC = () => {
     }
   };
 
-  const handleEdit = (record: MedicalRecord) => {
+  const handleEdit = (record: MedicalRecord, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    
     setFormData({
       petName: record.petName,
       petAge: record.petAge,
@@ -363,34 +557,25 @@ const MedicalRecord: React.FC = () => {
       veterinarian: record.veterinarian || "",
       appointmentId: record.appointmentId || "",
       appointmentType: record.appointmentType || "",
-      status: record.status || "completed"
+      status: record.status || "pending_completion"
     });
     setIsFromAppointment(!!record.appointmentId);
-    setIsFromRegistration(record.status === "pending_completion");
     setEditingRecord(record);
     setShowForm(true);
     window.scrollTo(0, 0);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this record?")) return;
-    
-    try {
-      await deleteDoc(doc(db, "medicalRecords", id));
-      setSuccessMessage("Record deleted successfully!");
-      fetchMedicalRecords();
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (error) {
-      console.error("Error deleting record:", error);
-      alert("Failed to delete record. Please try again.");
-    }
-  };
-
-  const formatDate = (dateString: string) => {
-    try {
-      return new Date(dateString).toLocaleDateString('en-US', {year:'numeric', month:'short', day:'numeric'});
-    } catch {
-      return "Invalid date";
+  // NEW: Function to refresh user token
+  const refreshUserToken = async () => {
+    if (currentUser) {
+      try {
+        await currentUser.getIdToken(true);
+        console.log('User token refreshed');
+        setSuccessMessage("User token refreshed successfully!");
+        setTimeout(() => setSuccessMessage(null), 2000);
+      } catch (error) {
+        console.error('Error refreshing token:', error);
+      }
     }
   };
 
@@ -415,14 +600,14 @@ const MedicalRecord: React.FC = () => {
       veterinarian: "",
       appointmentId: "",
       appointmentType: "",
-      status: "completed"
+      status: "pending_completion"
     });
     setIsFromAppointment(false);
-    setIsFromRegistration(false);
     setEditingRecord(null);
     setShowForm(false);
   };
 
+  // FIXED: Enhanced filtering logic
   const filteredRecords = records.filter(record => {
     const matchesSearch = record.petName.toLowerCase().includes(searchTerm.toLowerCase()) || 
                         record.ownerName.toLowerCase().includes(searchTerm.toLowerCase());
@@ -434,7 +619,27 @@ const MedicalRecord: React.FC = () => {
   });
 
   const pendingRecords = records.filter(r => r.status === "pending_completion");
-  const completedRecords = records.filter(r => r.status === "completed" || !r.status);
+  const completedRecords = records.filter(r => r.status === "completed");
+
+  // NEW: Get available appointments (not used yet)
+  const availableAppointments = getAvailableAppointments();
+
+  const FormStatusInfo = () => {
+    const isComplete = formData.diagnosis && formData.treatment && formData.veterinarian;
+    
+    if (!isComplete) {
+      return (
+        <StatusInfo $status="pending">
+          ⚠️ Draft Mode - This record will be saved as pending until diagnosis, treatment, and veterinarian are filled
+        </StatusInfo>
+      );
+    }
+    return (
+      <StatusInfo $status="completed">
+        ✅ Complete Mode - This record will be visible to the user
+      </StatusInfo>
+    );
+  };
 
   if (loading) return <><GlobalStyle /><LoadingContainer>Loading medical records...</LoadingContainer></>;
 
@@ -444,19 +649,29 @@ const MedicalRecord: React.FC = () => {
       <PageContainer>
         <HeaderBar>
           <BrandSection>
-            <ClinicLogo>🐾</ClinicLogo>
+            <ClinicLogo>
+              <LogoImage src="/RL.jpg" alt="RL Clinic Logo" />
+            </ClinicLogo>
             <div>
               <ClinicName>RL Clinic</ClinicName>
               <Tagline>Fursure Care - Medical Records (Admin)</Tagline>
+              {currentUser && (
+                <UserInfo>
+                  Logged in as: {currentUser.email} 
+                  <RefreshTokenButton onClick={refreshUserToken}>
+                    🔄 Refresh Token
+                  </RefreshTokenButton>
+                </UserInfo>
+              )}
             </div>
           </BrandSection>
           <ButtonGroup>
             <BackButton onClick={() => router.push("/admindashboard")}>
-              ← Back
+              ⮜ Back
             </BackButton>
-            {appointments.length > 0 && (
+            {availableAppointments.length > 0 && (
               <CreateButton onClick={() => setShowAppointmentModal(true)}>
-                📅 From Appointment
+                📅 From Appointment ({availableAppointments.length})
               </CreateButton>
             )}
             <AddButton onClick={resetForm}>
@@ -465,236 +680,229 @@ const MedicalRecord: React.FC = () => {
           </ButtonGroup>
         </HeaderBar>
 
-        {successMessage && <SuccessMessage>✓ {successMessage}</SuccessMessage>}
+        {successMessage && (
+          <SuccessMessage>
+            ✓ {successMessage}
+            <br />
+            <small>List will update automatically...</small>
+          </SuccessMessage>
+        )}
+
+        {errorMessage && (
+          <ErrorMessage>
+            ⚠️ {errorMessage}
+            <br />
+            <small>Please check your permissions or try refreshing the page.</small>
+          </ErrorMessage>
+        )}
 
         <Content>
           {showForm ? (
             <FormCard>
               <Title>
-                {editingRecord ? "Edit Medical Record" : "Add New Medical Record"}
-                <FormHelpText>Please fill in all required fields marked with *</FormHelpText>
-                {isFromRegistration && (
-                  <RegistrationInfo>
-                    📋 Completing record from pet registration - Pet details are pre-filled
-                  </RegistrationInfo>
+                {editingRecord ? "Edit Medical Record" : "Create New Medical Record"}
+                {isFromAppointment && (
+                  <AutoFillBadge>
+                    🎯 AUTO-FILLED FROM APPOINTMENT
+                  </AutoFillBadge>
                 )}
-                {isFromAppointment && !isFromRegistration && (
-                  <AppointmentInfo>
-                    📋 Creating record from completed appointment - Pet details are auto-filled
-                  </AppointmentInfo>
-                )}
+                <FormHelpText>All pet information is auto-filled from appointment data</FormHelpText>
+                <FormStatusInfo />
               </Title>
               
               <Form onSubmit={handleSubmit}>
-                <FormRow>
-                  <FormGroup>
-                    <Label>Pet Name *</Label>
-                    <Input 
-                      name="petName" 
-                      value={formData.petName} 
-                      onChange={handleChange} 
-                      required 
-                      placeholder="Enter pet name"
-                      disabled={isFromAppointment || isFromRegistration}
-                    />
-                  </FormGroup>
-                  <FormGroup>
-                    <Label>Owner Name *</Label>
-                    <Input 
-                      name="ownerName" 
-                      value={formData.ownerName} 
-                      onChange={handleChange} 
-                      required 
-                      placeholder="Enter owner name"
-                    />
-                  </FormGroup>
-                </FormRow>
+                {/* Pet Information Section - AUTO-FILLED but EDITABLE for specific fields */}
+                <FormSection>
+                  <SectionTitle>
+                    Pet Information 
+                    {isFromAppointment && <AutoFillIndicator>✅ Auto-filled</AutoFillIndicator>}
+                  </SectionTitle>
+                  
+                  <EditableSection>
+                    <EditableGrid>
+                      {/* Read-only fields */}
+                      <ReadOnlyField>
+                        <ReadOnlyLabel>Pet Name</ReadOnlyLabel>
+                        <ReadOnlyValue>{formData.petName || 'Not specified'}</ReadOnlyValue>
+                      </ReadOnlyField>
+                      <ReadOnlyField>
+                        <ReadOnlyLabel>Owner Name</ReadOnlyLabel>
+                        <ReadOnlyValue>{formData.ownerName || 'Not specified'}</ReadOnlyValue>
+                      </ReadOnlyField>
+                      <ReadOnlyField>
+                        <ReadOnlyLabel>Owner Email</ReadOnlyLabel>
+                        <ReadOnlyValue>{formData.ownerEmail || 'Not specified'}</ReadOnlyValue>
+                      </ReadOnlyField>
+                      <ReadOnlyField>
+                        <ReadOnlyLabel>Pet Type</ReadOnlyLabel>
+                        <ReadOnlyValue>
+                          {formData.petType === 'dog' ? '🐶 Dog' : formData.petType === 'cat' ? '🐱 Cat' : formData.petType || 'Not specified'}
+                        </ReadOnlyValue>
+                      </ReadOnlyField>
+                      <ReadOnlyField>
+                        <ReadOnlyLabel>Breed</ReadOnlyLabel>
+                        <ReadOnlyValue>{formData.breed || 'Not specified'}</ReadOnlyValue>
+                      </ReadOnlyField>
+                      <ReadOnlyField>
+                        <ReadOnlyLabel>Age</ReadOnlyLabel>
+                        <ReadOnlyValue>{formData.petAge || 'Not specified'}</ReadOnlyValue>
+                      </ReadOnlyField>
+                      <ReadOnlyField>
+                        <ReadOnlyLabel>Birth Date</ReadOnlyLabel>
+                        <ReadOnlyValue>{formatDateDisplay(formData.birthDate) || 'Not specified'}</ReadOnlyValue>
+                      </ReadOnlyField>
+                      <ReadOnlyField>
+                        <ReadOnlyLabel>Gender</ReadOnlyLabel>
+                        <ReadOnlyValue>{formData.gender || 'Not specified'}</ReadOnlyValue>
+                      </ReadOnlyField>
+                      <ReadOnlyField>
+                        <ReadOnlyLabel>Color</ReadOnlyLabel>
+                        <ReadOnlyValue>{formData.color || 'Not specified'}</ReadOnlyValue>
+                      </ReadOnlyField>
+                      
+                      {/* Editable fields - Admin can modify these */}
+                      <FormGroup>
+                        <Label>Weight <OptionalText>(optional)</OptionalText></Label>
+                        <Input 
+                          type="text" 
+                          name="weight" 
+                          value={formData.weight} 
+                          onChange={handleChange} 
+                          placeholder="e.g., 5 kg, 12 lbs"
+                        />
+                        <FieldHelp>Enter weight with unit (kg/lbs)</FieldHelp>
+                      </FormGroup>
+                      
+                      <FormGroup>
+                        <Label>Allergies <OptionalText>(optional)</OptionalText></Label>
+                        <TextArea 
+                          name="allergies" 
+                          value={formData.allergies} 
+                          onChange={handleChange} 
+                          placeholder="List any known allergies"
+                          rows={2}
+                        />
+                        <FieldHelp>Separate multiple allergies with commas</FieldHelp>
+                      </FormGroup>
+                      
+                      <FormGroup>
+                        <Label>Existing Conditions <OptionalText>(optional)</OptionalText></Label>
+                        <TextArea 
+                          name="existingConditions" 
+                          value={formData.existingConditions} 
+                          onChange={handleChange} 
+                          placeholder="List any pre-existing medical conditions"
+                          rows={2}
+                        />
+                        <FieldHelp>Chronic conditions or previous health issues</FieldHelp>
+                      </FormGroup>
+                    </EditableGrid>
+                  </EditableSection>
+                </FormSection>
 
-                <FormGroup>
-                  <Label>Owner Email *</Label>
-                  <Input 
-                    name="ownerEmail" 
-                    value={formData.ownerEmail} 
-                    onChange={handleChange} 
-                    required 
-                    placeholder="Enter owner email"
-                    type="email"
-                  />
-                </FormGroup>
-                
-                <FormRow>
+                {/* Medical Information Section - REQUIRED and EDITABLE */}
+                <FormSection>
+                  <SectionTitle>Medical Information *</SectionTitle>
+                  <FormRow>
+                    <FormGroup>
+                      <Label>Diagnosis *</Label>
+                      <Select 
+                        name="diagnosis" 
+                        value={formData.diagnosis} 
+                        onChange={handleChange} 
+                        required
+                      >
+                        <option value="">Select Diagnosis</option>
+                        {(DIAGNOSIS_OPTIONS[formData.petType as keyof typeof DIAGNOSIS_OPTIONS] || []).map(opt => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                        <option value="Other">Other (Specify in notes)</option>
+                      </Select>
+                      <FieldHelp>Based on appointment: {formData.appointmentType}</FieldHelp>
+                    </FormGroup>
+                    <FormGroup>
+                      <Label>Treatment *</Label>
+                      <Select 
+                        name="treatment" 
+                        value={formData.treatment} 
+                        onChange={handleChange} 
+                        required
+                      >
+                        <option value="">Select Treatment</option>
+                        {(TREATMENT_OPTIONS[formData.petType as keyof typeof TREATMENT_OPTIONS] || []).map(opt => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                        <option value="Other">Other (Specify in notes)</option>
+                      </Select>
+                      <FieldHelp>Based on appointment: {formData.appointmentType}</FieldHelp>
+                    </FormGroup>
+                  </FormRow>
+                  
+                  <FormRow>
+                    <FormGroup>
+                      <Label>Date of Visit *</Label>
+                      <Input 
+                        type="date" 
+                        name="date" 
+                        value={formData.date} 
+                        onChange={handleChange} 
+                        required
+                        readOnly={isFromAppointment}
+                      />
+                      <FieldHelp>Auto-filled from appointment</FieldHelp>
+                    </FormGroup>
+                    <FormGroup>
+                      <Label>Veterinarian *</Label>
+                      <Input 
+                        name="veterinarian" 
+                        value={formData.veterinarian} 
+                        onChange={handleChange} 
+                        placeholder="Name of attending veterinarian"
+                        required
+                      />
+                    </FormGroup>
+                  </FormRow>
+                  
                   <FormGroup>
-                    <Label>Pet Age</Label>
-                    <Input 
-                      name="petAge" 
-                      value={formData.petAge} 
+                    <Label>Notes <OptionalText>(optional)</OptionalText></Label>
+                    <TextArea 
+                      name="notes" 
+                      value={formData.notes} 
                       onChange={handleChange} 
-                      placeholder="e.g., 3 years"
+                      placeholder="Additional notes about the treatment, condition, or any special instructions" 
+                      rows={4}
                     />
+                    <FieldHelp>Auto-filled with appointment details. Add any additional information here.</FieldHelp>
                   </FormGroup>
-                  <FormGroup>
-                    <Label>Birth Date</Label>
-                    <Input 
-                      type="date" 
-                      name="birthDate" 
-                      value={formData.birthDate} 
-                      onChange={handleChange}
-                    />
-                  </FormGroup>
-                  <FormGroup>
-                    <Label>Weight</Label>
-                    <Input 
-                      name="weight" 
-                      value={formData.weight} 
-                      onChange={handleChange} 
-                      placeholder="e.g., 5 kg"
-                    />
-                  </FormGroup>
-                </FormRow>
-                
-                <FormRow>
-                  <FormGroup>
-                    <Label>Gender</Label>
-                    <Select 
-                      name="gender" 
-                      value={formData.gender} 
-                      onChange={handleChange}
-                    >
-                      <option value="">Select Gender</option>
-                      {GENDER_OPTIONS.map(opt => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </Select>
-                  </FormGroup>
-                  <FormGroup>
-                    <Label>Color/Markings</Label>
-                    <Input 
-                      name="color" 
-                      value={formData.color} 
-                      onChange={handleChange} 
-                      placeholder="e.g., Brown with white patches"
-                    />
-                  </FormGroup>
-                </FormRow>
-                
-                <FormRow>
-                  <FormGroup>
-                    <Label>Pet Type *</Label>
-                    <Select 
-                      name="petType" 
-                      value={formData.petType} 
-                      onChange={handleChange}
-                    >
-                      <option value="dog">Dog</option>
-                      <option value="cat">Cat</option>
-                    </Select>
-                  </FormGroup>
-                  <FormGroup>
-                    <Label>Breed *</Label>
-                    <Select 
-                      name="breed" 
-                      value={formData.breed} 
-                      onChange={handleChange} 
-                      required
-                    >
-                      <option value="">Select Breed</option>
-                      {(PET_BREEDS[formData.petType as keyof typeof PET_BREEDS] || []).map(breed => (
-                        <option key={breed} value={breed}>{breed}</option>
-                      ))}
-                    </Select>
-                  </FormGroup>
-                </FormRow>
 
-                <FormRow>
-                  <FormGroup>
-                    <Label>Allergies</Label>
-                    <Input 
-                      name="allergies" 
-                      value={formData.allergies} 
-                      onChange={handleChange} 
-                      placeholder="List any known allergies"
-                    />
-                  </FormGroup>
-                  <FormGroup>
-                    <Label>Existing Conditions</Label>
-                    <Input 
-                      name="existingConditions" 
-                      value={formData.existingConditions} 
-                      onChange={handleChange} 
-                      placeholder="Any pre-existing health conditions"
-                    />
-                  </FormGroup>
-                </FormRow>
-                
-                <FormRow>
-                  <FormGroup>
-                    <Label>Diagnosis *</Label>
-                    <Select 
-                      name="diagnosis" 
-                      value={formData.diagnosis} 
-                      onChange={handleChange} 
-                      required
-                    >
-                      <option value="">Select Diagnosis</option>
-                      {(DIAGNOSIS_OPTIONS[formData.petType as keyof typeof DIAGNOSIS_OPTIONS] || []).map(opt => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </Select>
-                  </FormGroup>
-                  <FormGroup>
-                    <Label>Treatment *</Label>
-                    <Select 
-                      name="treatment" 
-                      value={formData.treatment} 
-                      onChange={handleChange} 
-                      required
-                    >
-                      <option value="">Select Treatment</option>
-                      {(TREATMENT_OPTIONS[formData.petType as keyof typeof TREATMENT_OPTIONS] || []).map(opt => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </Select>
-                  </FormGroup>
-                </FormRow>
-                
-                <FormRow>
-                  <FormGroup>
-                    <Label>Date of Visit *</Label>
-                    <Input 
-                      type="date" 
-                      name="date" 
-                      value={formData.date} 
-                      onChange={handleChange} 
-                      required
-                      disabled={isFromAppointment || isFromRegistration}
-                    />
-                  </FormGroup>
-                  <FormGroup>
-                    <Label>Veterinarian *</Label>
-                    <Input 
-                      name="veterinarian" 
-                      value={formData.veterinarian} 
-                      onChange={handleChange} 
-                      placeholder="Name of attending veterinarian"
-                      required
-                    />
-                  </FormGroup>
-                </FormRow>
-                
-                <FormGroup>
-                  <Label>Notes</Label>
-                  <TextArea 
-                    name="notes" 
-                    value={formData.notes} 
-                    onChange={handleChange} 
-                    placeholder="Additional notes about the treatment or condition" 
-                    rows={4}
-                  />
-                </FormGroup>
+                  {isFromAppointment && (
+                    <FormGroup>
+                      <Label>Appointment Information</Label>
+                      <AppointmentInfoBox>
+                        <InfoRow>
+                          <InfoLabel>Appointment Type:</InfoLabel>
+                          <InfoValue>{formData.appointmentType}</InfoValue>
+                        </InfoRow>
+                        <InfoRow>
+                          <InfoLabel>Appointment ID:</InfoLabel>
+                          <InfoValue>{formData.appointmentId}</InfoValue>
+                        </InfoRow>
+                        <InfoRow>
+                          <InfoLabel>Pet Type:</InfoLabel>
+                          <InfoValue>{formData.petType === 'dog' ? '🐶 Dog' : '🐱 Cat'}</InfoValue>
+                        </InfoRow>
+                        <InfoRow>
+                          <InfoLabel>Status:</InfoLabel>
+                          <InfoValue>Completed Appointment</InfoValue>
+                        </InfoRow>
+                      </AppointmentInfoBox>
+                    </FormGroup>
+                  )}
+                </FormSection>
                 
                 <ButtonGroupForm>
                   <SaveButton type="submit">
-                    {editingRecord ? "Update Record" : "Complete & Save Record"}
+                    {editingRecord ? "Update Record" : "💾 Save Medical Record"}
                   </SaveButton>
                   <CancelButton type="button" onClick={resetForm}>
                     Cancel
@@ -705,7 +913,7 @@ const MedicalRecord: React.FC = () => {
           ) : (
             <>
               <SectionHeader>
-                <SectionTitle>Medical Records Management</SectionTitle>
+                <SectionTitleMain>Medical Records Management</SectionTitleMain>
                 <FilterSection>
                   <SearchInput 
                     type="text" 
@@ -723,7 +931,7 @@ const MedicalRecord: React.FC = () => {
                     <option value="pending">Pending</option>
                     <option value="completed">Completed</option>
                   </FilterSelect>
-                  <RefreshButton onClick={fetchMedicalRecords}>
+                  <RefreshButton onClick={() => window.location.reload()}>
                     ↻ Refresh
                   </RefreshButton>
                 </FilterSection>
@@ -743,8 +951,8 @@ const MedicalRecord: React.FC = () => {
                   <StatLabel>Completed</StatLabel>
                 </StatCard>
                 <StatCard>
-                  <StatNumber>{appointments.length}</StatNumber>
-                  <StatLabel>Done Appointments</StatLabel>
+                  <StatNumber>{availableAppointments.length}</StatNumber>
+                  <StatLabel>Available Appointments</StatLabel>
                 </StatCard>
               </RecordsStats>
 
@@ -770,7 +978,9 @@ const MedicalRecord: React.FC = () => {
                           <div>
                             <PetName>{record.petName}</PetName>
                             <OwnerName>{record.ownerName || record.ownerEmail}</OwnerName>
-                            <RegistrationBadge>From Pet Registration</RegistrationBadge>
+                            {record.appointmentId && (
+                              <AppointmentBadge>From Appointment</AppointmentBadge>
+                            )}
                           </div>
                           <PetTypeBadge $petType={record.petType}>
                             {record.petType === 'dog' ? '🐶 Dog' : '🐱 Cat'}
@@ -795,22 +1005,26 @@ const MedicalRecord: React.FC = () => {
                             <DetailValue>{record.weight || 'Not specified'}</DetailValue>
                           </DetailItem>
                           <DetailItem>
-                            <DetailLabel>Registration Date:</DetailLabel>
-                            <DetailValue>{formatDate(record.date)}</DetailValue>
+                            <DetailLabel>Visit Date:</DetailLabel>
+                            <DetailValue>{formatDateDisplay(record.date)}</DetailValue>
                           </DetailItem>
                           
                           <MissingInfo>
-                            ⚠️ Missing: Diagnosis, Treatment, Veterinarian
+                            ⚠️ Missing: {!record.diagnosis && "Diagnosis, "}{!record.treatment && "Treatment, "}{!record.veterinarian && "Veterinarian"}
                           </MissingInfo>
                         </CardContent>
                         
                         <CardActions>
-                          <CompleteButton onClick={() => handleEdit(record)}>
+                          <CompleteButton 
+                            onClick={(e) => handleEdit(record, e)}
+                          >
                             ✓ Complete Record
                           </CompleteButton>
-                          <DeleteButton onClick={() => handleDelete(record.id)}>
-                            Delete
-                          </DeleteButton>
+                          <EditButton 
+                            onClick={(e) => handleEdit(record, e)}
+                          >
+                            ✏️ Edit
+                          </EditButton>
                         </CardActions>
                       </RecordCard>
                     ))}
@@ -827,17 +1041,17 @@ const MedicalRecord: React.FC = () => {
                   </CompletedSection>
                   
                   <RecordsGrid>
-                    {filteredRecords.filter(r => r.status === "completed" || !r.status).length === 0 ? (
+                    {filteredRecords.filter(r => r.status === "completed").length === 0 ? (
                       <EmptyState>
                         <EmptyText>No completed records found</EmptyText>
                         <EmptySubtext>
-                          {searchTerm || filterPetType !== "all" 
+                          {searchTerm || filterPetType !== "all" || filterStatus !== "all"
                             ? "Try adjusting your search or filter" 
                             : "Complete pending records or add new ones"}
                         </EmptySubtext>
                       </EmptyState>
                     ) : (
-                      filteredRecords.filter(r => r.status === "completed" || !r.status).map(record => (
+                      filteredRecords.filter(r => r.status === "completed").map(record => (
                         <RecordCard key={record.id}>
                           <CardHeader>
                             <div>
@@ -847,7 +1061,9 @@ const MedicalRecord: React.FC = () => {
                                 <AppointmentBadge>From Appointment</AppointmentBadge>
                               )}
                               {record.appointmentType && (
-                                <AppointmentTypeBadge>{record.appointmentType}</AppointmentTypeBadge>
+                                <AppointmentTypeBadge>
+                                  {APPOINTMENT_TYPE_LABELS[record.appointmentType] || record.appointmentType}
+                                </AppointmentTypeBadge>
                               )}
                             </div>
                             <PetTypeBadge $petType={record.petType}>
@@ -862,7 +1078,19 @@ const MedicalRecord: React.FC = () => {
                             </DetailItem>
                             <DetailItem>
                               <DetailLabel>Date:</DetailLabel>
-                              <DetailValue>{formatDate(record.date)}</DetailValue>
+                              <DetailValue>{formatDateDisplay(record.date)}</DetailValue>
+                            </DetailItem>
+                            <DetailItem>
+                              <DetailLabel>Weight:</DetailLabel>
+                              <DetailValue>{record.weight || 'Not specified'}</DetailValue>
+                            </DetailItem>
+                            <DetailItem>
+                              <DetailLabel>Allergies:</DetailLabel>
+                              <DetailValue>{record.allergies || 'Not specified'}</DetailValue>
+                            </DetailItem>
+                            <DetailItem>
+                              <DetailLabel>Conditions:</DetailLabel>
+                              <DetailValue>{record.existingConditions || 'Not specified'}</DetailValue>
                             </DetailItem>
                             <DetailItem>
                               <DetailLabel>Diagnosis:</DetailLabel>
@@ -887,12 +1115,11 @@ const MedicalRecord: React.FC = () => {
                           </CardContent>
                           
                           <CardActions>
-                            <ActionButton onClick={() => handleEdit(record)}>
-                              Edit
-                            </ActionButton>
-                            <DeleteButton onClick={() => handleDelete(record.id)}>
-                              Delete
-                            </DeleteButton>
+                            <EditButton 
+                              onClick={(e) => handleEdit(record, e)}
+                            >
+                              ✏️ Edit
+                            </EditButton>
                           </CardActions>
                         </RecordCard>
                       ))
@@ -908,18 +1135,18 @@ const MedicalRecord: React.FC = () => {
           <ModalOverlay onClick={() => setShowAppointmentModal(false)}>
             <ModalContainer onClick={(e) => e.stopPropagation()}>
               <ModalHeader>
-                <ModalTitle>Select Completed Appointment</ModalTitle>
+                <ModalTitle>Select Completed Appointment ({availableAppointments.length} available)</ModalTitle>
                 <CloseButton onClick={() => setShowAppointmentModal(false)}>×</CloseButton>
               </ModalHeader>
               
               <ModalContent>
-                {appointments.length === 0 ? (
+                {availableAppointments.length === 0 ? (
                   <NoAppointmentsMessage>
-                    No completed appointments available
+                    No available appointments found. All completed appointments have been processed.
                   </NoAppointmentsMessage>
                 ) : (
                   <AppointmentsList>
-                    {appointments.map(appointment => (
+                    {availableAppointments.map(appointment => (
                       <AppointmentCard 
                         key={appointment.id}
                         onClick={() => handleCreateFromAppointment(appointment)}
@@ -927,13 +1154,73 @@ const MedicalRecord: React.FC = () => {
                         <AppointmentInfoSection>
                           <AppointmentPetName>{appointment.petName}</AppointmentPetName>
                           <AppointmentDetails>
-                            <div><strong>Date:</strong> {formatDate(appointment.date)}</div>
-                            <div><strong>Service:</strong> {appointment.appointmentType}</div>
-                            <div><strong>Pet Type:</strong> {appointment.petType || 'Not specified'}</div>
-                            <div><strong>Breed:</strong> {appointment.breed || 'Not specified'}</div>
+                            <InfoRow>
+                              <InfoLabel>Date:</InfoLabel>
+                              <InfoValue>{formatDateDisplay(appointment.date)}</InfoValue>
+                            </InfoRow>
+                            <InfoRow>
+                              <InfoLabel>Service:</InfoLabel>
+                              <InfoValue>{APPOINTMENT_TYPE_LABELS[appointment.appointmentType] || appointment.appointmentType}</InfoValue>
+                            </InfoRow>
+                            <InfoRow>
+                              <InfoLabel>Owner:</InfoLabel>
+                              <InfoValue>{appointment.clientName}</InfoValue>
+                            </InfoRow>
+                            <InfoRow>
+                              <InfoLabel>Pet Type:</InfoLabel>
+                              <InfoValue>
+                                {getPetTypeFromAppointment(appointment) === 'dog' ? '🐶 Dog' : '🐱 Cat'}
+                                {appointment.petType !== getPetTypeFromAppointment(appointment) && 
+                                  ` (Validated from: ${appointment.petType})`}
+                              </InfoValue>
+                            </InfoRow>
+                            <InfoRow>
+                              <InfoLabel>Breed:</InfoLabel>
+                              <InfoValue>{getBreedFromAppointment(appointment) || 'Not specified'}</InfoValue>
+                            </InfoRow>
+                            <InfoRow>
+                              <InfoLabel>Age:</InfoLabel>
+                              <InfoValue>{getAgeFromAppointment(appointment) || 'Not specified'}</InfoValue>
+                            </InfoRow>
+                            {appointment.birthDate && (
+                              <InfoRow>
+                                <InfoLabel>Birth Date:</InfoLabel>
+                                <InfoValue>{formatDateDisplay(appointment.birthDate)}</InfoValue>
+                              </InfoRow>
+                            )}
+                            {appointment.weight && (
+                              <InfoRow>
+                                <InfoLabel>Weight:</InfoLabel>
+                                <InfoValue>{appointment.weight}</InfoValue>
+                              </InfoRow>
+                            )}
+                            {appointment.gender && (
+                              <InfoRow>
+                                <InfoLabel>Gender:</InfoLabel>
+                                <InfoValue>{appointment.gender}</InfoValue>
+                              </InfoRow>
+                            )}
+                            {appointment.color && (
+                              <InfoRow>
+                                <InfoLabel>Color:</InfoLabel>
+                                <InfoValue>{appointment.color}</InfoValue>
+                              </InfoRow>
+                            )}
+                            {appointment.allergies && (
+                              <InfoRow>
+                                <InfoLabel>Allergies:</InfoLabel>
+                                <InfoValue>{appointment.allergies}</InfoValue>
+                              </InfoRow>
+                            )}
+                            {appointment.existingConditions && (
+                              <InfoRow>
+                                <InfoLabel>Conditions:</InfoLabel>
+                                <InfoValue>{appointment.existingConditions}</InfoValue>
+                              </InfoRow>
+                            )}
                           </AppointmentDetails>
                         </AppointmentInfoSection>
-                        <SelectButton>Select</SelectButton>
+                        <SelectButton>🎯 Use This Appointment</SelectButton>
                       </AppointmentCard>
                     ))}
                   </AppointmentsList>
@@ -985,6 +1272,13 @@ const ClinicLogo = styled.div`
   font-size: 2.5rem;
 `;
 
+const LogoImage = styled.img`
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  object-fit: cover;
+`;
+
 const ClinicName = styled.h1`
   margin: 0;
   font-size: 1.8rem;
@@ -995,6 +1289,29 @@ const Tagline = styled.p`
   margin: 0.25rem 0 0 0;
   opacity: 0.9;
   font-size: 0.9rem;
+`;
+
+const UserInfo = styled.div`
+  font-size: 0.8rem;
+  opacity: 0.8;
+  margin-top: 0.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+`;
+
+const RefreshTokenButton = styled.button`
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.7rem;
+  
+  &:hover {
+    background: rgba(255, 255, 255, 0.3);
+  }
 `;
 
 const ButtonGroup = styled.div`
@@ -1072,38 +1389,102 @@ const Title = styled.h2`
   gap: 0.5rem;
 `;
 
+const AutoFillBadge = styled.span`
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-left: 1rem;
+`;
+
 const FormHelpText = styled.span`
   font-size: 0.9rem;
   color: #64748b;
   font-weight: 400;
 `;
 
-const RegistrationInfo = styled.div`
-  background: #fef3c7;
-  color: #92400e;
+const StatusInfo = styled.div<{ $status: string }>`
+  background: ${props => props.$status === "pending" ? "#fef3c7" : "#f0fdf4"};
+  color: ${props => props.$status === "pending" ? "#92400e" : "#065f46"};
   padding: 0.75rem;
   border-radius: 8px;
   font-size: 0.9rem;
   font-weight: 500;
   margin-top: 0.5rem;
-  border-left: 4px solid #f59e0b;
-`;
-
-const AppointmentInfo = styled.div`
-  background: #e0e7ff;
-  color: #3730a3;
-  padding: 0.75rem;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  font-weight: 500;
-  margin-top: 0.5rem;
-  border-left: 4px solid #4f46e5;
+  border-left: 4px solid ${props => props.$status === "pending" ? "#f59e0b" : "#10b981"};
 `;
 
 const Form = styled.form`
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+`;
+
+const FormSection = styled.div`
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  border: 1px solid #e2e8f0;
+`;
+
+const SectionTitle = styled.h4`
+  margin: 0 0 1rem 0;
+  color: #1e293b;
+  font-size: 1.1rem;
+  font-weight: 600;
+  border-bottom: 2px solid #34B89C;
+  padding-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+`;
+
+const AutoFillIndicator = styled.span`
+  background: #10b981;
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-left: 1rem;
+`;
+
+const EditableSection = styled.div`
+  background: #f8fafc;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+`;
+
+const EditableGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+`;
+
+const ReadOnlyField = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+`;
+
+const ReadOnlyLabel = styled.span`
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #64748b;
+`;
+
+const ReadOnlyValue = styled.span`
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1e293b;
+  padding: 0.5rem;
+  background: white;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
 `;
 
 const FormRow = styled.div`
@@ -1124,6 +1505,12 @@ const Label = styled.label`
   font-size: 0.9rem;
 `;
 
+const OptionalText = styled.span`
+  color: #6b7280;
+  font-weight: 400;
+  font-size: 0.8rem;
+`;
+
 const Input = styled.input`
   padding: 0.75rem;
   border: 1px solid #d1d5db;
@@ -1135,12 +1522,6 @@ const Input = styled.input`
     outline: none;
     border-color: #34B89C;
     box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.15);
-  }
-
-  &:disabled {
-    background-color: #f3f4f6;
-    color: #6b7280;
-    cursor: not-allowed;
   }
 `;
 
@@ -1155,12 +1536,6 @@ const Select = styled.select`
     outline: none;
     border-color: #34B89C;
     box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.15);
-  }
-
-  &:disabled {
-    background-color: #f3f4f6;
-    color: #6b7280;
-    cursor: not-allowed;
   }
 `;
 
@@ -1178,6 +1553,42 @@ const TextArea = styled.textarea`
     border-color: #34B89C;
     box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.15);
   }
+`;
+
+const FieldHelp = styled.small`
+  color: #64748b;
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
+  display: block;
+`;
+
+const AppointmentInfoBox = styled.div`
+  background: #e0e7ff;
+  color: #3730a3;
+  padding: 1rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  border-left: 4px solid #4f46e5;
+`;
+
+const InfoRow = styled.div`
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  
+  &:last-child {
+    margin-bottom: 0;
+  }
+`;
+
+const InfoLabel = styled.span`
+  font-weight: 600;
+  color: #374151;
+`;
+
+const InfoValue = styled.span`
+  color: #1e293b;
+  text-align: right;
 `;
 
 const ButtonGroupForm = styled.div`
@@ -1226,7 +1637,7 @@ const SectionHeader = styled.div`
   gap: 1rem;
 `;
 
-const SectionTitle = styled.h3`
+const SectionTitleMain = styled.h3`
   margin: 0;
   color: #1e293b;
   font-size: 1.5rem;
@@ -1318,6 +1729,15 @@ const SuccessMessage = styled.div`
   border: 1px solid #bbf7d0;
 `;
 
+const ErrorMessage = styled.div`
+  background: #fef2f2;
+  color: #dc2626;
+  padding: 1rem;
+  border-radius: 8px;
+  margin: 1rem 2rem;
+  border: 1px solid #fecaca;
+`;
+
 const PendingSection = styled.div`
   margin: 2rem 0 1rem 0;
 `;
@@ -1364,6 +1784,7 @@ const RecordCard = styled.div<{$isPending?: boolean}>`
   transition: transform 0.2s, box-shadow 0.2s;
   border-top: 4px solid ${props => props.$isPending ? '#f59e0b' : '#6BC1E1'};
   position: relative;
+  overflow: hidden;
 
   &:hover {
     transform: translateY(-4px);
@@ -1401,17 +1822,6 @@ const OwnerName = styled.p`
   margin: 0.25rem 0 0 0;
   color: #64748b;
   font-size: 0.9rem;
-`;
-
-const RegistrationBadge = styled.span`
-  background: #fef3c7;
-  color: #92400e;
-  padding: 0.25rem 0.5rem;
-  border-radius: 6px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  margin-top: 0.25rem;
-  display: inline-block;
 `;
 
 const AppointmentBadge = styled.span`
@@ -1497,9 +1907,12 @@ const CardActions = styled.div`
   justify-content: flex-end;
   gap: 0.75rem;
   margin-top: 1rem;
+  position: relative;
+  z-index: 20;
+  pointer-events: auto;
 `;
 
-const ActionButton = styled.button`
+const EditButton = styled.button`
   background: #6BC1E1;
   border: none;
   color: white;
@@ -1508,9 +1921,17 @@ const ActionButton = styled.button`
   cursor: pointer;
   font-size: 0.9rem;
   transition: all 0.2s;
+  min-width: 80px;
+  position: relative;
+  z-index: 10;
 
   &:hover {
     background: #59a7c5;
+    transform: translateY(-1px);
+  }
+
+  &:active {
+    transform: translateY(0);
   }
 `;
 
@@ -1524,24 +1945,17 @@ const CompleteButton = styled.button`
   font-size: 0.9rem;
   font-weight: 600;
   transition: all 0.2s;
+  min-width: 140px;
+  position: relative;
+  z-index: 10;
 
   &:hover {
     background: #d97706;
+    transform: translateY(-1px);
   }
-`;
 
-const DeleteButton = styled.button`
-  background: #ef4444;
-  border: none;
-  color: white;
-  padding: 0.5rem 1rem;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: all 0.2s;
-
-  &:hover {
-    background: #dc2626;
+  &:active {
+    transform: translateY(0);
   }
 `;
 
@@ -1586,7 +2000,7 @@ const ModalContainer = styled.div`
   background: white;
   border-radius: 12px;
   width: 90%;
-  max-width: 600px;
+  max-width: 800px;
   max-height: 80vh;
   overflow-y: auto;
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
@@ -1649,12 +2063,12 @@ const AppointmentCard = styled.div`
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  padding: 1rem;
+  padding: 1.5rem;
   cursor: pointer;
   transition: all 0.2s;
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
 
   &:hover {
     border-color: #8b5cf6;
@@ -1669,8 +2083,8 @@ const AppointmentInfoSection = styled.div`
 const AppointmentPetName = styled.div`
   font-weight: 600;
   color: #1e293b;
-  font-size: 1rem;
-  margin-bottom: 0.5rem;
+  font-size: 1.1rem;
+  margin-bottom: 0.75rem;
 `;
 
 const AppointmentDetails = styled.div`
@@ -1685,11 +2099,12 @@ const SelectButton = styled.button`
   background: #8b5cf6;
   border: none;
   color: white;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 0.875rem;
   font-weight: 500;
+  margin-left: 1rem;
 
   &:hover {
     background: #7c3aed;

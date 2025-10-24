@@ -22,6 +22,12 @@ import { onAuthStateChanged, User } from "firebase/auth";
 interface Pet {
   id: string;
   name: string;
+  petType: string;
+  breed: string;
+  gender: string;
+  color: string;
+  birthday?: string;
+  age?: string;
 }
 
 interface Appointment {
@@ -31,6 +37,12 @@ interface Appointment {
   status: string;
   petId: string;
   petName?: string;
+  petType?: string;
+  breed?: string;
+  gender?: string;
+  color?: string;
+  birthday?: string;
+  age?: string;
   clientName: string;
   appointmentType: string;
   price?: number;
@@ -139,8 +151,17 @@ const paymentMethods = [
   { value: "GCash", label: "GCash", description: "Pay online using GCash" }
 ];
 
-// 🔹 FIXED: Custom Hook for Appointment Data
-// 🔹 FIXED: Custom Hook for Appointment Data
+// 🔹 Utility function to format date
+const formatBirthday = (birthday: string) => {
+  if (!birthday) return "Not specified";
+  return new Date(birthday).toLocaleDateString('en-PH', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+};
+
+// 🔹 FIXED: Custom Hook for Appointment Data with Enhanced Pet Info
 const useAppointmentData = () => {
   const [pets, setPets] = useState<Pet[]>([]);
   const [bookedSlots, setBookedSlots] = useState<Appointment[]>([]);
@@ -162,28 +183,34 @@ const useAppointmentData = () => {
             return;
           }
 
-        // ✅ FIXED: Query pets collection
-        const petsQuery = query(
-          collection(db, "pets"), 
-          where("ownerId", "==", user.uid)
-        );
-        
-        const petsSnapshot = await getDocs(petsQuery);
-        
-        const userPets: Pet[] = [];
-        petsSnapshot.forEach((doc) => {
-          const petData = doc.data();
-          const petName = petData.petName || petData.name || "Unnamed Pet";
+          // ✅ FIXED: Query pets collection with enhanced data
+          const petsQuery = query(
+            collection(db, "pets"), 
+            where("ownerId", "==", user.uid)
+          );
           
-          if (petData.ownerId === user.uid) {
-            userPets.push({ 
-              id: doc.id, 
-              name: petName
-            });
-          }
-        });
-        
-        setPets(userPets);
+          const petsSnapshot = await getDocs(petsQuery);
+          
+          const userPets: Pet[] = [];
+          petsSnapshot.forEach((doc) => {
+            const petData = doc.data();
+            const petName = petData.petName || petData.name || "Unnamed Pet";
+            
+            if (petData.ownerId === user.uid) {
+              userPets.push({ 
+                id: doc.id, 
+                name: petName,
+                petType: petData.petType || "Unknown",
+                breed: petData.petBreed || petData.breed || "Mixed Breed",
+                gender: petData.gender || "Unknown",
+                color: petData.color || "Unknown",
+                birthday: petData.birthday,
+                age: petData.age
+              });
+            }
+          });
+          
+          setPets(userPets);
 
           // Fetch doctors
           const doctorsSnapshot = await getDocs(query(collection(db, "users"), where("role", "==", "veterinarian")));
@@ -210,10 +237,10 @@ const useAppointmentData = () => {
         
         // Set up real-time listeners with correct query
         try {
-          // ✅ FIXED: Real-time pets listener with correct field
+          // ✅ FIXED: Real-time pets listener with enhanced data
           const petsQuery = query(
             collection(db, "pets"), 
-            where("ownerEmail", "==", user.email)
+            where("ownerId", "==", user.uid)
           );
           
           unsubscribePets = onSnapshot(petsQuery, 
@@ -225,7 +252,13 @@ const useAppointmentData = () => {
                 const petName = petData.petName || petData.name || "Unnamed Pet";
                 userPets.push({ 
                   id: doc.id, 
-                  name: petName 
+                  name: petName,
+                  petType: petData.petType || "Unknown",
+                  breed: petData.petBreed || petData.breed || "Mixed Breed",
+                  gender: petData.gender || "Unknown",
+                  color: petData.color || "Unknown",
+                  birthday: petData.birthday,
+                  age: petData.age
                 });
               });
               console.log("✅ Updated pets:", userPets);
@@ -236,7 +269,7 @@ const useAppointmentData = () => {
             }
           );
 
-          // Keep other listeners the same...
+          // Appointments listener
           unsubscribeAppointments = onSnapshot(collection(db, "appointments"), 
             (snapshot) => {
               const appointmentsData: Appointment[] = [];
@@ -260,6 +293,7 @@ const useAppointmentData = () => {
             }
           );
 
+          // Unavailable slots listener
           unsubscribeUnavailable = onSnapshot(collection(db, "unavailableSlots"), 
             (snapshot) => {
               const unavailableData: Unavailable[] = [];
@@ -311,6 +345,7 @@ const useAppointmentData = () => {
 
   return { pets, bookedSlots, unavailableSlots, doctors, isLoading };
 };
+
 // 🔹 Custom Hook for Availability Logic
 const useAvailability = (unavailableSlots: Unavailable[]) => {
   const isDateUnavailable = useCallback((date: string) => {
@@ -333,15 +368,13 @@ const useAvailability = (unavailableSlots: Unavailable[]) => {
   return { isDateUnavailable, getUnavailableDates };
 };
 
-// 🔹 Pet Selector Component
-// 🔹 Fixed Pet Selector Component - Shows only pet names
+// 🔹 Enhanced Pet Selector Component with Complete Pet Details
 const PetSelector: React.FC<{
   pets: Pet[];
   selectedPet: string | null;
   onPetChange: (petId: string) => void;
 }> = ({ pets, selectedPet, onPetChange }) => {
-  console.log("🔍 PetSelector received pets:", pets);
-  console.log("🔍 Selected pet:", selectedPet);
+  const selectedPetData = pets.find(pet => pet.id === selectedPet);
 
   return (
     <FormSection>
@@ -369,24 +402,55 @@ const PetSelector: React.FC<{
         ) : (
           pets.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.name} {/* ✅ Fixed: Only shows pet name now */}
+              {p.name} - {p.breed} ({p.petType})
             </option>
           ))
         )}
       </PetSelect>
       
+      {/* Pet Details Display */}
+      {selectedPetData && (
+        <PetDetailsCard>
+          <PetDetailTitle>Pet Information</PetDetailTitle>
+          <PetDetailsGrid>
+            <PetDetailItem>
+              <PetDetailLabel>Name:</PetDetailLabel>
+              <PetDetailValue>{selectedPetData.name}</PetDetailValue>
+            </PetDetailItem>
+            <PetDetailItem>
+              <PetDetailLabel>Type:</PetDetailLabel>
+              <PetDetailValue>{selectedPetData.petType}</PetDetailValue>
+            </PetDetailItem>
+            <PetDetailItem>
+              <PetDetailLabel>Breed:</PetDetailLabel>
+              <PetDetailValue>{selectedPetData.breed}</PetDetailValue>
+            </PetDetailItem>
+            <PetDetailItem>
+              <PetDetailLabel>Gender:</PetDetailLabel>
+              <PetDetailValue>{selectedPetData.gender}</PetDetailValue>
+            </PetDetailItem>
+            <PetDetailItem>
+              <PetDetailLabel>Color:</PetDetailLabel>
+              <PetDetailValue>{selectedPetData.color}</PetDetailValue>
+            </PetDetailItem>
+            <PetDetailItem>
+              <PetDetailLabel>Birthday:</PetDetailLabel>
+              <PetDetailValue>{selectedPetData.birthday ? formatBirthday(selectedPetData.birthday) : "Not specified"}</PetDetailValue>
+            </PetDetailItem>
+            {selectedPetData.age && (
+              <PetDetailItem>
+                <PetDetailLabel>Age:</PetDetailLabel>
+                <PetDetailValue>{selectedPetData.age}</PetDetailValue>
+              </PetDetailItem>
+            )}
+          </PetDetailsGrid>
+        </PetDetailsCard>
+      )}
+      
       {pets.length === 0 && (
         <NoPetsWarning>
           ⚠️ No pets found. Please register your pet first before booking an appointment.
-          
         </NoPetsWarning>
-      )}
-      
-      {/* Debug info */}
-      {pets.length > 0 && (
-        <DebugInfo>
-          Found {pets.length} pets. First pet: {pets[0]?.name}
-        </DebugInfo>
       )}
     </FormSection>
   );
@@ -546,7 +610,7 @@ const PaymentMethodSelector: React.FC<{
   </FormSection>
 );
 
-// 🔹 UPDATED: Clean Printable Receipt Component
+// 🔹 UPDATED: Clean Printable Receipt Component with Logo and Complete Pet Details
 const PrintableReceipt: React.FC<{
   appointment: Appointment;
   onClose: () => void;
@@ -604,11 +668,31 @@ const PrintableReceipt: React.FC<{
               padding-bottom: 16px;
               border-bottom: 2px solid #e0e0e0;
             }
+            .logo-container {
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              margin-bottom: 16px;
+            }
+            .clinic-logo {
+              width: 80px;
+              height: 80px;
+              border-radius: 50%;
+              background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              color: white;
+              font-weight: bold;
+              font-size: 14px;
+              text-align: center;
+              margin: 0 auto;
+            }
             .clinic-name {
               font-size: 24px;
               font-weight: bold;
               color: #34B89C;
-              margin: 0 0 8px 0;
+              margin: 8px 0;
             }
             .receipt-title {
               font-size: 18px;
@@ -680,17 +764,48 @@ const PrintableReceipt: React.FC<{
         <body>
           <div class="receipt-container">
             <div class="receipt-header">
-              <div class="clinic-name">PetCare Veterinary Clinic</div>
+              <div class="logo-container">
+                <div class="clinic-logo">FURSURECARE VETERINARY CLINIC</div>
+              </div>
+              <div class="clinic-name">FursureCare Veterinary Clinic</div>
               <div class="receipt-title">APPOINTMENT RECEIPT</div>
               <div class="receipt-subtitle">Payment Successful</div>
             </div>
 
             <div class="receipt-section">
-              <div class="section-title">Appointment Details</div>
+              <div class="section-title">Pet Information</div>
               <div class="receipt-item">
                 <span class="item-label">Pet Name:</span>
                 <span class="item-value">${appointment.petName}</span>
               </div>
+              <div class="receipt-item">
+                <span class="item-label">Pet Type:</span>
+                <span class="item-value">${appointment.petType}</span>
+              </div>
+              <div class="receipt-item">
+                <span class="item-label">Breed:</span>
+                <span class="item-value">${appointment.breed}</span>
+              </div>
+              <div class="receipt-item">
+                <span class="item-label">Gender:</span>
+                <span class="item-value">${appointment.gender}</span>
+              </div>
+              <div class="receipt-item">
+                <span class="item-label">Color:</span>
+                <span class="item-value">${appointment.color}</span>
+              </div>
+              <div class="receipt-item">
+                <span class="item-label">Birthday:</span>
+                <span class="item-value">${appointment.birthday ? formatBirthday(appointment.birthday) : "Not specified"}</span>
+              </div>
+              ${appointment.age ? `<div class="receipt-item">
+                <span class="item-label">Age:</span>
+                <span class="item-value">${appointment.age}</span>
+              </div>` : ''}
+            </div>
+
+            <div class="receipt-section">
+              <div class="section-title">Appointment Details</div>
               <div class="receipt-item">
                 <span class="item-label">Service:</span>
                 <span class="item-value">${getAppointmentTypeLabel(appointment.appointmentType)}</span>
@@ -724,10 +839,10 @@ const PrintableReceipt: React.FC<{
             <div class="thank-you">Thank you for your appointment!</div>
 
             <div class="clinic-info">
-              <div><strong>PetCare Veterinary Clinic</strong></div>
-              <div>123 Pet Street, Animal City</div>
-              <div>Phone: (02) 1234-5678</div>
-              <div>Email: info@petcareclinic.com</div>
+              <div><strong>FursureCare Veterinary Clinic</strong></div>
+              <div>168 Unit A Bus Stop JP Laurel Hiway cor. V Dimayuga st. Brgy. 4, Tanauan, Philippines</div>
+              <div>Phone: 0906-484-1234 / 0916-621-5953</div>
+              <div>Email: madulcedecahvez@gmail.com</div>
               <div style="margin-top: 8px; font-style: italic;">
                 Please arrive 10 minutes before your scheduled appointment time.
               </div>
@@ -751,17 +866,50 @@ const PrintableReceipt: React.FC<{
     <PrintOverlay>
       <PrintContainer ref={receiptRef}>
         <PrintHeader>
-          <ClinicNamePrint>PetCare Veterinary Clinic</ClinicNamePrint>
+          <LogoContainer>
+            <ClinicLogo>FURSURECARE VETERINARY CLINIC</ClinicLogo>
+          </LogoContainer>
+          <ClinicNamePrint>FursureCare Veterinary Clinic</ClinicNamePrint>
           <ReceiptTitlePrint>APPOINTMENT RECEIPT</ReceiptTitlePrint>
           <ReceiptSubtitlePrint>Payment Successful</ReceiptSubtitlePrint>
         </PrintHeader>
 
         <PrintSection>
-          <SectionTitlePrint>Appointment Details</SectionTitlePrint>
+          <SectionTitlePrint>Pet Information</SectionTitlePrint>
           <PrintItem>
             <ItemLabel>Pet Name:</ItemLabel>
             <ItemValue>{appointment.petName}</ItemValue>
           </PrintItem>
+          <PrintItem>
+            <ItemLabel>Pet Type:</ItemLabel>
+            <ItemValue>{appointment.petType}</ItemValue>
+          </PrintItem>
+          <PrintItem>
+            <ItemLabel>Breed:</ItemLabel>
+            <ItemValue>{appointment.breed}</ItemValue>
+          </PrintItem>
+          <PrintItem>
+            <ItemLabel>Gender:</ItemLabel>
+            <ItemValue>{appointment.gender}</ItemValue>
+          </PrintItem>
+          <PrintItem>
+            <ItemLabel>Color:</ItemLabel>
+            <ItemValue>{appointment.color}</ItemValue>
+          </PrintItem>
+          <PrintItem>
+            <ItemLabel>Birthday:</ItemLabel>
+            <ItemValue>{appointment.birthday ? formatBirthday(appointment.birthday) : "Not specified"}</ItemValue>
+          </PrintItem>
+          {appointment.age && (
+            <PrintItem>
+              <ItemLabel>Age:</ItemLabel>
+              <ItemValue>{appointment.age}</ItemValue>
+            </PrintItem>
+          )}
+        </PrintSection>
+
+        <PrintSection>
+          <SectionTitlePrint>Appointment Details</SectionTitlePrint>
           <PrintItem>
             <ItemLabel>Service:</ItemLabel>
             <ItemValue>{getAppointmentTypeLabel(appointment.appointmentType)}</ItemValue>
@@ -795,9 +943,10 @@ const PrintableReceipt: React.FC<{
         <ThankYouPrint>Thank you for your appointment!</ThankYouPrint>
 
         <ClinicInfoPrint>
-          <ClinicNameSmall>PetCare Veterinary Clinic</ClinicNameSmall>
-          <ClinicAddress>123 Pet Street, Animal City</ClinicAddress>
-          <ClinicContact>Phone: (02) 1234-5678 | Email: info@petcareclinic.com</ClinicContact>
+          <ClinicNameSmall>FursureCare Veterinary Clinic</ClinicNameSmall>
+          <ClinicAddress>168 Unit A Bus Stop JP Laurel Hiway cor. V Dimayuga st. Brgy. 4, Tanauan, Philippines</ClinicAddress>
+          <ClinicContact>Phone: 0906-484-1234 / 0916-621-5953</ClinicContact>
+          <ClinicEmail>Email: madulcedecahvez@gmail.com</ClinicEmail>
           <ClinicNote>Please arrive 10 minutes before your scheduled appointment time.</ClinicNote>
         </ClinicInfoPrint>
 
@@ -815,7 +964,7 @@ const PrintableReceipt: React.FC<{
   );
 };
 
-// 🔹 UPDATED: Clean Receipt Screen Component
+// 🔹 UPDATED: Clean Receipt Screen Component with Logo and Complete Pet Details
 const ReceiptScreen: React.FC<{
   appointment: Appointment;
   onViewReceipt: () => void;
@@ -836,6 +985,9 @@ const ReceiptScreen: React.FC<{
   return (
     <ReceiptContainer>
       <ReceiptHeader>
+        <LogoContainer>
+          <ClinicLogo>FURSURECARE VETERINARY CLINIC</ClinicLogo>
+        </LogoContainer>
         <SuccessIcon>✅</SuccessIcon>
         <ReceiptTitleMain>Appointment Confirmed</ReceiptTitleMain>
         <ReceiptSubtitleMain>Your booking has been successfully processed</ReceiptSubtitleMain>
@@ -853,6 +1005,32 @@ const ReceiptScreen: React.FC<{
               <DetailLabel>Pet Name</DetailLabel>
               <DetailValue>{appointment.petName}</DetailValue>
             </DetailItem>
+            <DetailItem>
+              <DetailLabel>Pet Type</DetailLabel>
+              <DetailValue>{appointment.petType}</DetailValue>
+            </DetailItem>
+            <DetailItem>
+              <DetailLabel>Breed</DetailLabel>
+              <DetailValue>{appointment.breed}</DetailValue>
+            </DetailItem>
+            <DetailItem>
+              <DetailLabel>Gender</DetailLabel>
+              <DetailValue>{appointment.gender}</DetailValue>
+            </DetailItem>
+            <DetailItem>
+              <DetailLabel>Color</DetailLabel>
+              <DetailValue>{appointment.color}</DetailValue>
+            </DetailItem>
+            <DetailItem>
+              <DetailLabel>Birthday</DetailLabel>
+              <DetailValue>{appointment.birthday ? formatBirthday(appointment.birthday) : "Not specified"}</DetailValue>
+            </DetailItem>
+            {appointment.age && (
+              <DetailItem>
+                <DetailLabel>Age</DetailLabel>
+                <DetailValue>{appointment.age}</DetailValue>
+              </DetailItem>
+            )}
             <DetailItem>
               <DetailLabel>Service</DetailLabel>
               <DetailValue>{getAppointmentTypeLabel(appointment.appointmentType)}</DetailValue>
@@ -903,7 +1081,7 @@ const ReceiptScreen: React.FC<{
   );
 };
 
-// 🔹 Payment Processing Function - FIXED
+// 🔹 Payment Processing Function
 const processPayment = async (
   appointmentId: string, 
   amount: number, 
@@ -977,7 +1155,7 @@ const processPayment = async (
   }
 };  
 
-// 🔹 Main Appointment Page Component - FIXED handlePaymentSelection
+// 🔹 Main Appointment Page Component
 const AppointmentPage: React.FC = () => {
   const router = useRouter();
   const { pets, bookedSlots, unavailableSlots, doctors, isLoading } = useAppointmentData();
@@ -1001,6 +1179,144 @@ const AppointmentPage: React.FC = () => {
   const [showReceipt, setShowReceipt] = useState(false);
   const [showPrintableReceipt, setShowPrintableReceipt] = useState(false);
   const [completedAppointment, setCompletedAppointment] = useState<Appointment | null>(null);
+
+  // 🔹 FIXED: handlePaymentSelection function with proper state access
+  const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
+    setIsProcessing(true);
+    setShowPaymentMethods(false);
+    
+    const { selectedPet, selectedSlot, selectedAppointmentType, selectedDate, selectedPrice } = bookingState;
+
+    // Check if required fields are present
+    if (!selectedPet || !selectedSlot || !selectedAppointmentType) {
+      alert("Please complete all required fields");
+      setIsProcessing(false);
+      return;
+    }
+
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error("No authenticated user");
+      }
+
+      const selectedPetData = pets.find((p) => p.id === selectedPet);
+      
+      // ✅ FIXED: Ensure all fields have default values to avoid undefined
+      const appointmentData = {
+        userId: currentUser.uid,
+        clientName: currentUser.email || "Unknown Client",
+        clientId: currentUser.uid,
+        petId: selectedPet,
+        petName: selectedPetData?.name || "Unknown Pet",
+        petType: selectedPetData?.petType || "Unknown",
+        breed: selectedPetData?.breed || "Unknown",
+        gender: selectedPetData?.gender || "Unknown",
+        color: selectedPetData?.color || "Unknown",
+        birthday: selectedPetData?.birthday || "",
+        age: selectedPetData?.age || "", // ✅ FIXED: Set default empty string instead of undefined
+        date: selectedDate,
+        timeSlot: selectedSlot,
+        appointmentType: selectedAppointmentType,
+        price: selectedPrice || 0,
+        status: paymentMethod === "Cash" ? "Confirmed" : "Pending Payment",
+        paymentMethod: paymentMethod,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+
+      console.log("💾 Creating appointment:", appointmentData);
+
+      const newDoc = await addDoc(collection(db, "appointments"), appointmentData);
+
+      await updateDoc(doc(db, "appointments", newDoc.id), {
+        id: newDoc.id
+      });
+
+      console.log("✅ Appointment created with ID:", newDoc.id);
+
+      try {
+        const doctorNotifications = doctors.map(async (doctor) => {
+          return addDoc(collection(db, "notifications"), {
+            recipientId: doctor.id,
+            recipientEmail: doctor.email,
+            type: "new_appointment",
+            title: "New Appointment Booked",
+            message: `New appointment booked by ${currentUser.email} for ${selectedPetData?.name} (${selectedPetData?.breed}, ${selectedPetData?.age}) on ${selectedDate} at ${selectedSlot} - ₱${selectedPrice}`,
+            appointmentId: newDoc.id,
+            isRead: false,
+            createdAt: serverTimestamp()
+          });
+        });
+
+        await Promise.all(doctorNotifications);
+        console.log("✅ Notifications sent to doctors");
+      } catch (notifError) {
+        console.error("❌ Notification error:", notifError);
+      }
+
+      if (paymentMethod === "Cash") {
+        const fullAppointment: Appointment = {
+          id: newDoc.id,
+          date: selectedDate,
+          timeSlot: selectedSlot,
+          status: "Confirmed",
+          petId: selectedPet,
+          petName: selectedPetData?.name || "Unknown Pet",
+          petType: selectedPetData?.petType || "Unknown",
+          breed: selectedPetData?.breed || "Unknown",
+          gender: selectedPetData?.gender || "Unknown",
+          color: selectedPetData?.color || "Unknown",
+          birthday: selectedPetData?.birthday || "",
+          age: selectedPetData?.age || "", // ✅ FIXED: Set default empty string
+          clientName: currentUser.email || "Unknown Client",
+          appointmentType: selectedAppointmentType,
+          price: selectedPrice,
+          paymentMethod: "Cash",
+          createdAt: new Date()
+        };
+        
+        setCompletedAppointment(fullAppointment);
+        setShowReceipt(true);
+      } else {
+        try {
+          const isRedirecting = await processPayment(
+            newDoc.id, 
+            selectedPrice, 
+            selectedAppointmentType, 
+            selectedPetData?.name || "Pet",
+            paymentMethod
+          );
+
+          if (!isRedirecting) {
+            alert("Appointment booked successfully!");
+            router.push("/userdashboard");
+          }
+        } catch (paymentError) {
+          console.error("❌ Payment error:", paymentError);
+          
+          const errorMessage = paymentError instanceof Error ? paymentError.message : 'Payment processing failed';
+          
+          await updateDoc(doc(db, "appointments", newDoc.id), {
+            status: "Payment Failed",
+            paymentError: errorMessage
+          });
+          
+          alert(`Appointment created but payment failed: ${errorMessage}. Please try again or pay with cash.`);
+          router.push("/userdashboard");
+        }
+      }
+      
+    } catch (err) {
+      console.error("❌ Appointment creation error:", err);
+      
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      alert("Failed to book appointment: " + errorMessage);
+      
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [bookingState, pets, doctors, router]);
 
   useEffect(() => {
     setIsClient(true);
@@ -1030,8 +1346,22 @@ const AppointmentPage: React.FC = () => {
 
             const petDoc = await getDoc(doc(db, "pets", appointmentData.petId));
             let petName = "Unknown Pet";
+            let petType = "Unknown";
+            let breed = "Unknown";
+            let gender = "Unknown";
+            let color = "Unknown";
+            let birthday = "";
+            let age = "";
+            
             if (petDoc.exists()) {
-              petName = petDoc.data().petName || petDoc.data().name || "Unknown Pet";
+              const petData = petDoc.data();
+              petName = petData.petName || petData.name || "Unknown Pet";
+              petType = petData.petType || "Unknown";
+              breed = petData.petBreed || petData.breed || "Unknown";
+              gender = petData.gender || "Unknown";
+              color = petData.color || "Unknown";
+              birthday = petData.birthday || "";
+              age = petData.age || "";
             }
 
             const fullAppointment: Appointment = {
@@ -1041,6 +1371,12 @@ const AppointmentPage: React.FC = () => {
               status: "Confirmed",
               petId: appointmentData.petId,
               petName: petName,
+              petType: petType,
+              breed: breed,
+              gender: gender,
+              color: color,
+              birthday: birthday,
+              age: age,
               clientName: appointmentData.clientName,
               appointmentType: appointmentData.appointmentType,
               price: appointmentData.price,
@@ -1095,132 +1431,6 @@ const AppointmentPage: React.FC = () => {
 
     setShowPaymentMethods(true);
   }, [bookingState, bookedSlots, isDateUnavailable]);
-
-  // 🔹 FIXED: handlePaymentSelection function - properly handle null selectedSlot
-  const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
-    setIsProcessing(true);
-    setShowPaymentMethods(false);
-    
-    const { selectedPet, selectedSlot, selectedAppointmentType, selectedDate, selectedPrice } = bookingState;
-
-    // Check if required fields are present
-    if (!selectedPet || !selectedSlot || !selectedAppointmentType) {
-      alert("Please complete all required fields");
-      setIsProcessing(false);
-      return;
-    }
-
-    try {
-      const currentUser = auth.currentUser;
-      if (!currentUser) {
-        throw new Error("No authenticated user");
-      }
-
-      const selectedPetData = pets.find((p) => p.id === selectedPet);
-      
-      // ✅ FIXED: Ensure selectedSlot is not null
-      const appointmentData = {
-        userId: currentUser.uid,
-        clientName: currentUser.email,
-        clientId: currentUser.uid,
-        petId: selectedPet,
-        petName: selectedPetData?.name,
-        date: selectedDate,
-        timeSlot: selectedSlot, // This is now guaranteed to be string
-        appointmentType: selectedAppointmentType,
-        price: selectedPrice,
-        status: paymentMethod === "Cash" ? "Confirmed" : "Pending Payment",
-        paymentMethod: paymentMethod,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      };
-
-      console.log("💾 Creating appointment:", appointmentData);
-
-      const newDoc = await addDoc(collection(db, "appointments"), appointmentData);
-
-      await updateDoc(doc(db, "appointments", newDoc.id), {
-        id: newDoc.id
-      });
-
-      console.log("✅ Appointment created with ID:", newDoc.id);
-
-      try {
-        const doctorNotifications = doctors.map(async (doctor) => {
-          return addDoc(collection(db, "notifications"), {
-            recipientId: doctor.id,
-            recipientEmail: doctor.email,
-            type: "new_appointment",
-            title: "New Appointment Booked",
-            message: `New appointment booked by ${currentUser.email} for ${selectedPetData?.name} on ${selectedDate} at ${selectedSlot} - ₱${selectedPrice}`,
-            appointmentId: newDoc.id,
-            isRead: false,
-            createdAt: serverTimestamp()
-          });
-        });
-
-        await Promise.all(doctorNotifications);
-        console.log("✅ Notifications sent to doctors");
-      } catch (notifError) {
-        console.error("❌ Notification error:", notifError);
-      }
-
-      if (paymentMethod === "Cash") {
-        const fullAppointment: Appointment = {
-          id: newDoc.id,
-          date: selectedDate,
-          timeSlot: selectedSlot, // This is now guaranteed to be string
-          status: "Confirmed",
-          petId: selectedPet,
-          petName: selectedPetData?.name,
-          clientName: currentUser.email || "",
-          appointmentType: selectedAppointmentType,
-          price: selectedPrice,
-          paymentMethod: "Cash",
-          createdAt: new Date()
-        };
-        
-        setCompletedAppointment(fullAppointment);
-        setShowReceipt(true);
-      } else {
-        try {
-          const isRedirecting = await processPayment(
-            newDoc.id, 
-            selectedPrice, 
-            selectedAppointmentType, 
-            selectedPetData?.name || "Pet",
-            paymentMethod
-          );
-
-          if (!isRedirecting) {
-            alert("Appointment booked successfully!");
-            router.push("/userdashboard");
-          }
-        } catch (paymentError) {
-          console.error("❌ Payment error:", paymentError);
-          
-          const errorMessage = paymentError instanceof Error ? paymentError.message : 'Payment processing failed';
-          
-          await updateDoc(doc(db, "appointments", newDoc.id), {
-            status: "Payment Failed",
-            paymentError: errorMessage
-          });
-          
-          alert(`Appointment created but payment failed: ${errorMessage}. Please try again or pay with cash.`);
-          router.push("/userdashboard");
-        }
-      }
-      
-    } catch (err) {
-      console.error("❌ Appointment creation error:", err);
-      
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
-      alert("Failed to book appointment: " + errorMessage);
-      
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [bookingState, pets, doctors, router]);
 
   const unavailableDates = useMemo(() => getUnavailableDates(), [getUnavailableDates]);
 
@@ -1381,7 +1591,7 @@ const AppointmentPage: React.FC = () => {
 
 export default AppointmentPage;
 
-// 🔹 Styled Components (same as before - no changes needed)
+// 🔹 Styled Components with Logo Styles
 const GlobalStyle = createGlobalStyle`
   body {
     margin: 0;
@@ -1525,6 +1735,7 @@ const SectionIcon = styled.span`
   justify-content: center;
   color: #34B89C;
 `;
+
 const PetsCount = styled.span`
   margin-left: auto;
   font-size: 14px;
@@ -1532,15 +1743,71 @@ const PetsCount = styled.span`
   font-weight: normal;
 `;
 
-const DebugInfo = styled.div`
-  background: #f8f9fa;
-  border: 1px solid #e9ecef;
-  border-radius: 6px;
-  padding: 8px 12px;
-  margin-top: 8px;
-  font-size: 12px;
-  color: #6c757d;
+// 🔹 NEW: Logo Container and Clinic Logo Styles
+const LogoContainer = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
 `;
+
+const ClinicLogo = styled.div`
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: bold;
+  font-size: 12px;
+  text-align: center;
+  line-height: 1.2;
+  padding: 8px;
+  margin: 0 auto;
+`;
+
+// 🔹 NEW: Pet Details Card Styles
+const PetDetailsCard = styled.div`
+  background: #f8f9fa;
+  border-radius: 12px;
+  padding: 20px;
+  border-left: 4px solid #34B89C;
+  margin-top: 8px;
+`;
+
+const PetDetailTitle = styled.h4`
+  font-size: 16px;
+  font-weight: 600;
+  color: #2c3e50;
+  margin: 0 0 12px 0;
+`;
+
+const PetDetailsGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+`;
+
+const PetDetailItem = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+`;
+
+const PetDetailLabel = styled.span`
+  font-size: 12px;
+  color: #666;
+  font-weight: 500;
+`;
+
+const PetDetailValue = styled.span`
+  font-size: 14px;
+  color: #2c3e50;
+  font-weight: 600;
+`;
+
 const PetSelect = styled.select`
   padding: 14px 16px;
   border: 2px solid #e0e0e0;
@@ -1804,7 +2071,7 @@ const LoadingSpinner = styled.div`
   font-weight: 600;
 `;
 
-// 🔹 UPDATED: Receipt Screen Styled Components - Clean Design
+// 🔹 UPDATED: Receipt Screen Styled Components - Clean Design with Logo
 const ReceiptContainer = styled.div`
   display: flex;
   flex-direction: column;
@@ -2011,7 +2278,7 @@ const PrintIcon = styled.span`
   font-size: 16px;
 `;
 
-// 🔹 UPDATED: Printable Receipt Styled Components
+// 🔹 UPDATED: Printable Receipt Styled Components with Logo
 const PrintOverlay = styled.div`
   position: fixed;
   top: 0;
@@ -2049,7 +2316,7 @@ const ClinicNamePrint = styled.h1`
   font-size: 24px;
   font-weight: bold;
   color: #34B89C;
-  margin: 0 0 8px 0;
+  margin: 8px 0;
 `;
 
 const ReceiptTitlePrint = styled.h2`
@@ -2141,6 +2408,10 @@ const ClinicAddress = styled.div`
 `;
 
 const ClinicContact = styled.div`
+  margin-bottom: 4px;
+`;
+
+const ClinicEmail = styled.div`
   margin-bottom: 8px;
 `;
 

@@ -17,7 +17,6 @@ import {
   createUserWithEmailAndPassword,
   signInWithPopup, 
   GoogleAuthProvider, 
-  signOut,
   AuthError,
   updateProfile
 } from "firebase/auth";
@@ -573,8 +572,7 @@ export const Createaccount = () => {
   const [showPasswordRules, setShowPasswordRules] = useState<boolean>(false);
   
   // Refs for OTP storage
-  const otpRef = useRef<string>("");
-  const otpEmailRef = useRef<string>("");
+ 
   const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Form Data
@@ -626,9 +624,6 @@ export const Createaccount = () => {
   }, [resendCooldown]);
 
   // Utility Functions
-  const generateOTP = (): string => {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-  };
 
 
   const sanitizeInput = (input: string): string => {
@@ -640,74 +635,59 @@ export const Createaccount = () => {
   };
 
   // Send Email OTP Function via API Route
-// Add this state at the top with other states
-const [otpData, setOtpData] = useState<{hash: string; expiresAt: number} | null>(null);
-
-// Update sendEmailOTP function
-const sendEmailOTP = async (email: string, name: string): Promise<{ success: boolean }> => {
-  try {
-    const response = await fetch('/api/send-email-otp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        email: email.toLowerCase(),
-        name: sanitizeInput(name)
-      })
-    });
-
-    const responseData = await response.json();
-    
-    if (!response.ok) {
-      throw new Error(responseData.error || `Server error: ${response.status}`);
-    }
-
-    if (responseData?.success) {
-      // Store the hash and expiry
-      setOtpData({
-        hash: responseData.otpHash,
-        expiresAt: responseData.expiresAt
+  const sendEmailOTP = async (email: string, name: string): Promise<{ success: boolean }> => {
+    try {
+      const response = await fetch('/api/send-email-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          email: email.toLowerCase(),
+          name: sanitizeInput(name)
+        })
       });
-      setInfo(`Verification OTP sent to ${email}. Please check your inbox and spam folder.`);
-      return { success: true };
+
+      const responseData = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(responseData.error || `Server error: ${response.status}`);
+      }
+
+      if (responseData?.success) {
+        setInfo(`Verification OTP sent to ${email}. Please check your inbox and spam folder.`);
+        return { success: true };
+      }
+      
+      throw new Error(responseData.error || 'Failed to send OTP');
+    } catch (err: unknown) {
+      console.error('Error sending OTP:', err);
+      throw err instanceof Error ? err : new Error('Failed to send OTP');
     }
-    
-    throw new Error(responseData.error || 'Failed to send OTP');
-  } catch (err: unknown) {
-    console.error('Error sending OTP:', err);
-    throw err instanceof Error ? err : new Error('Failed to send OTP');
-  }
-};
+  };
 
-// Update verifyEmailOTP function
-const verifyEmailOTP = async (email: string, otp: string): Promise<{ success: boolean }> => {
-  try {
-    if (!otpData) {
-      throw new Error('OTP data not found. Please request a new code.');
+  const verifyEmailOTP = async (email: string, otp: string): Promise<{ success: boolean }> => {
+    try {
+      const response = await fetch('/api/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          email: email.toLowerCase(),
+          otp
+        })
+      });
+
+      const responseData = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(responseData.error || 'Verification failed');
+      }
+
+      return { success: responseData.success };
+    } catch (err: unknown) {
+      console.error('Error verifying OTP:', err);
+      throw err instanceof Error ? err : new Error('Failed to verify OTP');
     }
+  };
 
-    const response = await fetch('/api/verify-otp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        email: email.toLowerCase(),
-        otp,
-        otpHash: otpData.hash,
-        expiresAt: otpData.expiresAt
-      })
-    });
-
-    const responseData = await response.json();
-    
-    if (!response.ok) {
-      throw new Error(responseData.error || 'Verification failed');
-    }
-
-    return { success: responseData.success };
-  } catch (err: unknown) {
-    console.error('Error verifying OTP:', err);
-    throw err instanceof Error ? err : new Error('Failed to verify OTP');
-  }
-};
   // Database Functions
   const checkPhoneNumberExists = async (phone: string): Promise<boolean> => {
     try {
@@ -845,11 +825,6 @@ const verifyEmailOTP = async (email: string, otp: string): Promise<{ success: bo
         return;
       }
 
-      const otpCode = generateOTP();
-      
-      otpRef.current = otpCode;
-      otpEmailRef.current = formData.email.toLowerCase();
-      
       await sendEmailOTP(
         formData.email, 
         `${formData.firstname} ${formData.lastname}`
@@ -879,10 +854,6 @@ const verifyEmailOTP = async (email: string, otp: string): Promise<{ success: bo
     setInfo("");
     
     try {
-      const otpCode = generateOTP();
-      
-      otpRef.current = otpCode;
-      
       await sendEmailOTP(
         formData.email, 
         `${formData.firstname} ${formData.lastname}`
@@ -902,86 +873,228 @@ const verifyEmailOTP = async (email: string, otp: string): Promise<{ success: bo
     }
   };
 
-const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
-  e.preventDefault();
-  setError("");
-  setInfo("");
-  setOtpLoading(true);
-  
-  try {
-    console.log('🔍 OTP Data:', otpData);
-    console.log('🔍 Email:', formData.email);
-    console.log('🔍 OTP entered:', otp);
+  const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault();
+    setError("");
+    setInfo("");
+    setOtpLoading(true);
     
-    // Verify OTP using API
-    const verificationResult = await verifyEmailOTP(formData.email, otp);
-    
-    if (!verificationResult.success) {
-      setError("Invalid OTP. Please check and try again.");
-      return;
-    }
-    
-    console.log('✅ OTP verified, creating user...');
-    
-    const userCredential = await createUserWithEmailAndPassword(
-      auth, 
-      formData.email.toLowerCase(), 
-      formData.password
-    );
-    
-    const user = userCredential.user;
-    console.log('User created:', user.uid);
-    
-    await updateProfile(user, {
-      displayName: `${sanitizeInput(formData.firstname)} ${sanitizeInput(formData.lastname)}`
-    });
-    
-    await completeAccountCreation({
-      uid: user.uid,
-      email: formData.email.toLowerCase(),
-      firstname: formData.firstname,
-      lastname: formData.lastname,
-      phone: formData.phone
-    });
-    
-  } catch (err: unknown) {
-    console.error("OTP verification error:", err);
-    
-    if (isAuthError(err)) {
-      switch (err.code) {
-        case 'auth/email-already-in-use':
-          setError("This email is already registered. Please sign in instead.");
-          break;
-        case 'auth/invalid-email':
-          setError("Invalid email address format.");
-          break;
-        case 'auth/weak-password':
-          setError("Password is too weak. Please choose a stronger password.");
-          break;
-        case 'auth/network-request-failed':
-          setError("Network error. Please check your internet connection.");
-          break;
-        default:
-          setError(err.message || "Failed to create account. Please try again.");
+    try {
+      // Verify OTP using API
+      const verificationResult = await verifyEmailOTP(formData.email, otp);
+      
+      if (!verificationResult.success) {
+        setError("Invalid OTP. Please check and try again.");
+        return;
       }
-    } else if (err instanceof Error) {
-      setError(err.message || "Failed to create account. Please try again.");
-    } else {
-      setError("An unexpected error occurred. Please try again.");
+      
+      console.log('✅ OTP verified, creating user...');
+      
+      const userCredential = await createUserWithEmailAndPassword(
+        auth, 
+        formData.email.toLowerCase(), 
+        formData.password
+      );
+      
+      const user = userCredential.user;
+      console.log('User created:', user.uid);
+      
+      await updateProfile(user, {
+        displayName: `${sanitizeInput(formData.firstname)} ${sanitizeInput(formData.lastname)}`
+      });
+      
+      await completeAccountCreation({
+        uid: user.uid,
+        email: formData.email.toLowerCase(),
+        firstname: formData.firstname,
+        lastname: formData.lastname,
+        phone: formData.phone
+      });
+      
+    } catch (err: unknown) {
+      console.error("OTP verification error:", err);
+      
+      if (isAuthError(err)) {
+        switch (err.code) {
+          case 'auth/email-already-in-use':
+            setError("This email is already registered. Please sign in instead.");
+            break;
+          case 'auth/invalid-email':
+            setError("Invalid email address format.");
+            break;
+          case 'auth/weak-password':
+            setError("Password is too weak. Please choose a stronger password.");
+            break;
+          case 'auth/network-request-failed':
+            setError("Network error. Please check your internet connection.");
+            break;
+          default:
+            setError(err.message || "Failed to create account. Please try again.");
+        }
+      } else if (err instanceof Error) {
+        setError(err.message || "Failed to create account. Please try again.");
+      } else {
+        setError("An unexpected error occurred. Please try again.");
+      }
+    } finally {
+      setOtpLoading(false);
     }
-  } finally {
-    setOtpLoading(false);
-  }
-};  
+  };  
 
   const handleCancelOTP = (): void => {
     setOtpSent(false);
     setOtp("");
     setError("");
     setInfo("");
-    otpRef.current = "";
-    otpEmailRef.current = "";
     cleanup();
+  };
+
+  // Google Sign Up with OTP Handler
+  const handleGoogleSignUp = async (): Promise<void> => {
+    setError("");
+    setSuccess("");
+    setInfo("");
+    setLoading(true);
+
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.addScope('profile');
+      provider.addScope('email');
+      provider.setCustomParameters({
+        prompt: 'select_account'
+      });
+      
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+      
+      console.log('Google sign up successful:', user.uid);
+      
+      // Check if user already exists
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+      
+      if (userDoc.exists()) {
+        setSuccess("✅ Account already exists. Redirecting to login...");
+        setTimeout(() => {
+          router.push("/login");
+        }, 2000);
+        return;
+      }
+
+      // Send OTP for Google sign-up
+      const displayName = user.displayName || "";
+      const nameParts = displayName.split(" ");
+      const firstname = nameParts[0] || "";
+      const lastname = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "";
+
+      await sendEmailOTP(user.email || "", displayName);
+      
+      // Store Google user data temporarily for OTP verification
+      localStorage.setItem('googleUserData', JSON.stringify({
+        uid: user.uid,
+        email: user.email,
+        firstname,
+        lastname,
+        displayName
+      }));
+
+      setOtpSent(true);
+      setInfo(`📧 Verification OTP sent to ${user.email}. Please check your inbox and spam folder.`);
+      setResendCooldown(60);
+      
+    } catch (err: unknown) {
+      console.error("Google sign up error:", err);
+      
+      if (isAuthError(err)) {
+        switch (err.code) {
+          case 'auth/popup-closed-by-user':
+            setError("Google sign up was cancelled");
+            break;
+          case 'auth/account-exists-with-different-credential':
+            setError("An account already exists with this email. Please sign in with your existing method.");
+            break;
+          case 'auth/popup-blocked':
+            setError("Popup was blocked. Please allow popups for this site.");
+            break;
+          case 'auth/network-request-failed':
+            setError("Network error. Please check your internet connection.");
+            break;
+          default:
+            setError(err.message || "Failed to sign up with Google");
+        }
+      } else if (err instanceof Error) {
+        setError(err.message || "Failed to sign up with Google");
+      } else {
+        setError("An unexpected error occurred during Google sign up");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle Google OTP Verification
+  const handleGoogleOTPVerification = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault();
+    setError("");
+    setInfo("");
+    setOtpLoading(true);
+    
+    try {
+      const googleUserDataStr = localStorage.getItem('googleUserData');
+      if (!googleUserDataStr) {
+        setError("Google sign-up session expired. Please try again.");
+        return;
+      }
+
+      const googleUserData = JSON.parse(googleUserDataStr);
+      
+      // Verify OTP using API
+      const verificationResult = await verifyEmailOTP(googleUserData.email, otp);
+      
+      if (!verificationResult.success) {
+        setError("Invalid OTP. Please check and try again.");
+        return;
+      }
+      
+      console.log('✅ OTP verified, creating Google user...');
+      
+      // Create user document in Firestore
+      await setDoc(doc(db, "users", googleUserData.uid), {
+        firstname: sanitizeInput(googleUserData.firstname),
+        lastname: sanitizeInput(googleUserData.lastname),
+        name: sanitizeInput(googleUserData.displayName),
+        email: googleUserData.email.toLowerCase(),
+        phone: "",
+        role: "user",
+        createdAt: new Date().toISOString(),
+        provider: "google",
+        lastLogin: new Date().toISOString(),
+        emailVerified: true,
+      });
+      
+      console.log('Google account creation completed successfully');
+      
+      // Clean up
+      localStorage.removeItem('googleUserData');
+      
+      setSuccess("✅ Account created successfully with Google! Redirecting to login...");
+      setError("");
+      setInfo("");
+      setOtpSent(false);
+      
+      setTimeout(() => {
+        router.push("/login");
+      }, 2000);
+      
+    } catch (err: unknown) {
+      console.error("Google OTP verification error:", err);
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Failed to verify OTP. Please try again.");
+      }
+    } finally {
+      setOtpLoading(false);
+    }
   };
 
   // Input Handler Functions
@@ -1109,95 +1222,12 @@ const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
     await handleSendOTP();
   };
 
-  // Google Sign Up Handler
-  const handleGoogleSignUp = async (): Promise<void> => {
-    setError("");
-    setSuccess("");
-    setInfo("");
-    setLoading(true);
-
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.addScope('profile');
-      provider.addScope('email');
-      provider.setCustomParameters({
-        prompt: 'select_account'
-      });
-      
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
-      
-      console.log('Google sign up successful:', user.uid);
-      
-      const userDoc = await getDoc(doc(db, "users", user.uid));
-      
-      if (!userDoc.exists()) {
-        const displayName = user.displayName || "";
-        const nameParts = displayName.split(" ");
-        const firstname = nameParts[0] || "";
-        const lastname = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "";
-        
-        await setDoc(doc(db, "users", user.uid), {
-          firstname: sanitizeInput(firstname),
-          lastname: sanitizeInput(lastname),
-          name: sanitizeInput(displayName),
-          email: user.email?.toLowerCase() || "",
-          phone: "",
-          role: "user",
-          createdAt: new Date().toISOString(),
-          provider: "google",
-          lastLogin: new Date().toISOString(),
-          emailVerified: user.emailVerified || false,
-        });
-        
-        setSuccess("✅ Account created successfully with Google! Redirecting to login...");
-      } else {
-        setSuccess("✅ Account already exists. Redirecting to login...");
-      }
-      
-      setTimeout(async () => {
-        try {
-          await signOut(auth);
-          router.push("/login");
-        } catch (signOutError) {
-          console.error("Error signing out:", signOutError);
-          router.push("/login");
-        }
-      }, 2000);
-
-    } catch (err: unknown) {
-      console.error("Google sign up error:", err);
-      
-      if (isAuthError(err)) {
-        switch (err.code) {
-          case 'auth/popup-closed-by-user':
-            setError("Google sign up was cancelled");
-            break;
-          case 'auth/account-exists-with-different-credential':
-            setError("An account already exists with this email. Please sign in with your existing method.");
-            break;
-          case 'auth/popup-blocked':
-            setError("Popup was blocked. Please allow popups for this site.");
-            break;
-          case 'auth/network-request-failed':
-            setError("Network error. Please check your internet connection.");
-            break;
-          default:
-            setError(err.message || "Failed to sign up with Google");
-        }
-      } else if (err instanceof Error) {
-        setError(err.message || "Failed to sign up with Google");
-      } else {
-        setError("An unexpected error occurred during Google sign up");
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleLoginRedirect = (): void => {
     router.push("/login");
   };
+
+  // Check if we're in a Google OTP flow
+  const isGoogleOTPFlow = otpSent && localStorage.getItem('googleUserData');
 
   // Don't render until client-side
   if (!isClient) {
@@ -1217,7 +1247,7 @@ const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
           <Link href="/" passHref>
             <LogoContainer>
              <LogoImage 
-              src="https://scontent.fmnl13-4.fna.fbcdn.net/v/t39.30808-6/308051699_1043145306431767_6902051210877649285_n.jpg?_nc_cat=108&ccb=1-7&_nc_sid=6ee11a&_nc_eui2=AeH7C3PaObQLeqOOxA3pTYw1U6XSiAPBS_lTpdKIA8FL-aWJ6pOqX-tCsYAmdUOHVzzxg-T9gjpVH_1PkEO0urYZ&_nc_ohc=c0pRYSw4KrsQ7kNvwHE5hTL&_nc_oc=AdnvMYaefSnLD_BwDZly3HzWrlUVGkQ679uNFhrON8Jd2UeyPFELDF-ZgFiqTml5QFA&_nc_zt=23&_nc_ht=scontent.fmnl13-4.fna&_nc_gid=GOsLrMoCfHtNYu3UarKtXQ&oh=00_AfYkkXSbQmUWBw5G7PQZzCYGBVqYBsWLo3ZYe87ifPKIyA&oe=68D30859" 
+              src="/RL.jpg" 
               alt="FurSureCare Logo" 
   onError={(e) => {
     // Fallback if image fails to load
@@ -1395,17 +1425,19 @@ const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
               </Form>
             ) : (
               <OTPVerificationCard>
-                <VerificationTitle>Verify Your Email</VerificationTitle>
+                <VerificationTitle>
+                  {isGoogleOTPFlow ? "Verify Your Google Account" : "Verify Your Email"}
+                </VerificationTitle>
                 <VerificationText>
                   We&apos;ve sent a 6-digit verification code to your email address.
                   Please enter it below to complete your registration.
                 </VerificationText>
                 
                 <VerificationEmail>
-                  📧 {formData.email}
+                  📧 {isGoogleOTPFlow ? JSON.parse(localStorage.getItem('googleUserData') || '{}').email : formData.email}
                 </VerificationEmail>
                 
-                <Form onSubmit={handleVerifyOTP}>
+                <Form onSubmit={isGoogleOTPFlow ? handleGoogleOTPVerification : handleVerifyOTP}>
                   <InputGroup>
                     <Label htmlFor="otp">Verification Code</Label>
                     <Input

@@ -15,7 +15,7 @@ const GlobalStyle = createGlobalStyle`
     padding: 0;
     box-sizing: border-box;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    background: #fafafa;
+    background: #f8fafc;
     scroll-behavior: smooth;
   }
   
@@ -105,7 +105,6 @@ const UserDashboard: React.FC = () => {
   const [editSlot, setEditSlot] = useState("")
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
-  const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isClient, setIsClient] = useState(false)
 
   const [isSidebarVisible, setIsSidebarVisible] = useState(true)
@@ -585,24 +584,6 @@ const UserDashboard: React.FC = () => {
                   </PetsList>
                 </ExistingPetsSection>
               )}
-
-              <PetBenefitsGrid>
-                <BenefitCard>
-                  <BenefitIcon>📋</BenefitIcon>
-                  <BenefitTitle>Quick Appointments</BenefitTitle>
-                  <BenefitText>Schedule vet visits faster with pre-registered pet information</BenefitText>
-                </BenefitCard>
-                <BenefitCard>
-                  <BenefitIcon>🏥</BenefitIcon>
-                  <BenefitTitle>Medical History</BenefitTitle>
-                  <BenefitText>Keep track of vaccinations, treatments, and health records</BenefitText>
-                </BenefitCard>
-                <BenefitCard>
-                  <BenefitIcon>🔔</BenefitIcon>
-                  <BenefitTitle>Reminders</BenefitTitle>
-                  <BenefitText>Get notifications for upcoming vaccinations and checkups</BenefitText>
-                </BenefitCard>
-              </PetBenefitsGrid>
             </PetRegistrationSection>
           </MainContent>
         )
@@ -694,24 +675,6 @@ const UserDashboard: React.FC = () => {
                   </MedicalRecordsButton>
                 </MedicalRecordsContent>
               </MedicalRecordsCard>
-
-              <MedicalFeaturesGrid>
-                <FeatureCard>
-                  <FeatureIcon>💉</FeatureIcon>
-                  <FeatureTitle>Vaccination History</FeatureTitle>
-                  <FeatureText>Track all vaccinations and due dates</FeatureText>
-                </FeatureCard>
-                <FeatureCard>
-                  <FeatureIcon>🩺</FeatureIcon>
-                  <FeatureTitle>Diagnostic Reports</FeatureTitle>
-                  <FeatureText>View lab results and diagnostic tests</FeatureText>
-                </FeatureCard>
-                <FeatureCard>
-                  <FeatureIcon>💊</FeatureIcon>
-                  <FeatureTitle>Medication History</FeatureTitle>
-                  <FeatureText>Record of prescribed medications</FeatureText>
-                </FeatureCard>
-              </MedicalFeaturesGrid>
             </MedicalRecordsDashboard>
           </MainContent>
         )
@@ -720,7 +683,7 @@ const UserDashboard: React.FC = () => {
         return (
           <MainContent>
             <ContentHeader>
-              <ContentTitle>Profile & Security</ContentTitle>
+              <ContentTitle>Settings</ContentTitle>
               <ContentSubtitle>Manage your account settings and security preferences</ContentSubtitle>
             </ContentHeader>
             <ProfileDashboard>
@@ -900,7 +863,7 @@ const UserDashboard: React.FC = () => {
           <HeaderBar>
             <HeaderLeft>
               <Logo>
-                <LogoIcon>🏥</LogoIcon>
+                <LogoImage src="/RL.jpg" alt="RL Clinic Logo" />
                 <LogoText>
                   <ClinicName>RL Clinic</ClinicName>
                   <LogoSubtext>Fursure Care - User Dashboard</LogoSubtext>
@@ -926,31 +889,26 @@ const UserDashboard: React.FC = () => {
         )}
 
         <HeaderBar>
-          <HeaderLeft>
-            <MobileMenuButton onClick={() => setIsMenuOpen(!isMenuOpen)}>
-              <HamburgerIcon className={isMenuOpen ? "open" : ""}>
-                <span></span>
-                <span></span>
-                <span></span>
-              </HamburgerIcon>
-            </MobileMenuButton>
-
-            {!isSidebarVisible && (
-              <ShowSidebarButton onClick={() => setIsSidebarVisible(true)} title="Show sidebar">
-                ☰
-              </ShowSidebarButton>
-            )}
+          <BrandSection>
+            <MenuToggle 
+              onClick={() => setIsSidebarVisible(!isSidebarVisible)} 
+              $isOpen={isSidebarVisible}
+            >
+              <span></span>
+              <span></span>
+              <span></span>
+            </MenuToggle>
 
             <Logo>
-              <LogoIcon>🏥</LogoIcon>
+              <LogoImage src="/RL.jpg" alt="RL Clinic Logo" />
               <LogoText>
                 <ClinicName>RL Clinic</ClinicName>
                 <LogoSubtext>Fursure Care - User Dashboard</LogoSubtext>
               </LogoText>
             </Logo>
-          </HeaderLeft>
+          </BrandSection>
 
-          <HeaderRight className={isMenuOpen ? "open" : ""}>
+          <UserSection>
             <UserInfo>
               {loading ? "Loading..." : `${userProfile?.firstName || "User"} ${userProfile?.lastName || ""}`.trim()}
             </UserInfo>
@@ -968,69 +926,73 @@ const UserDashboard: React.FC = () => {
             </ProfileContainer>
 
             <LogoutButton onClick={handleLogout}>Logout</LogoutButton>
-          </HeaderRight>
+          </UserSection>
         </HeaderBar>
 
         <DashboardLayout>
           {/* LEFT SIDEBAR MENU */}
-          {isSidebarVisible && (
-            <Sidebar>
-              <SidebarHeader>
-                <SidebarTitleRow>
-                  <SidebarTitle>Main Menu</SidebarTitle>
-                  <SidebarToggleButton onClick={() => setIsSidebarVisible(false)} title="Hide sidebar">
-                    ×
-                  </SidebarToggleButton>
-                </SidebarTitleRow>
-              </SidebarHeader>
+          <Sidebar $isOpen={isSidebarVisible}>
+            <SidebarHeader>
+              <SidebarTitleRow>
+                <SidebarTitle>Main Menu</SidebarTitle>
+              </SidebarTitleRow>
+            </SidebarHeader>
 
-              <MenuList>
-                <MenuItem $active={activeMenuItem === "dashboard"} onClick={() => setActiveMenuItem("dashboard")}>
-                  <MenuIcon>📊</MenuIcon>
-                  <MenuText>Dashboard</MenuText>
-                </MenuItem>
+            <MenuList>
+              <MenuItem $active={activeMenuItem === "dashboard"} onClick={() => setActiveMenuItem("dashboard")}>
+                <MenuIcon>📊</MenuIcon>
+                <MenuText>Dashboard</MenuText>
+              </MenuItem>
 
-                <MenuItem
-                  $active={activeMenuItem === "pet-registration"}
-                  onClick={() => setActiveMenuItem("pet-registration")}
-                >
-                  <MenuIcon>🐾</MenuIcon>
-                  <MenuText>Pet Registration</MenuText>
-                  <MenuBadge $primary={true}>Primary</MenuBadge>
-                </MenuItem>
+              <MenuItem
+                $active={activeMenuItem === "pet-registration"}
+                onClick={() => setActiveMenuItem("pet-registration")}
+              >
+                <MenuIcon>🐾</MenuIcon>
+                <MenuText>Pet Registration</MenuText>
+                <MenuBadge $primary={true}>Primary</MenuBadge>
+              </MenuItem>
 
-                <MenuItem $active={activeMenuItem === "appointments"} onClick={() => setActiveMenuItem("appointments")}>
-                  <MenuIcon>📅</MenuIcon>
-                  <MenuText>Appointments</MenuText>
-                  {appointments.length > 0 && <MenuCount>{appointments.length}</MenuCount>}
-                </MenuItem>
+              <MenuItem $active={activeMenuItem === "appointments"} onClick={() => setActiveMenuItem("appointments")}>
+                <MenuIcon>📅</MenuIcon>
+                <MenuText>Appointments</MenuText>
+                {appointments.length > 0 && <MenuCount>{appointments.length}</MenuCount>}
+              </MenuItem>
 
-                <MenuItem
-                  $active={activeMenuItem === "medical-records"}
-                  onClick={() => setActiveMenuItem("medical-records")}
-                >
-                  <MenuIcon>📋</MenuIcon>
-                  <MenuText>Medical Records</MenuText>
-                </MenuItem>
+              <MenuItem
+                $active={activeMenuItem === "medical-records"}
+                onClick={() => setActiveMenuItem("medical-records")}
+              >
+                <MenuIcon>📋</MenuIcon>
+                <MenuText>Medical Records</MenuText>
+              </MenuItem>
 
-                <MenuItem $active={activeMenuItem === "profile"} onClick={() => setActiveMenuItem("profile")}>
-                  <MenuIcon>👤</MenuIcon>
-                  <MenuText>Profile & Security</MenuText>
-                </MenuItem>
-              </MenuList>
+              <MenuItem $active={activeMenuItem === "profile"} onClick={() => setActiveMenuItem("profile")}>
+                <MenuIcon>👤</MenuIcon>
+                <MenuText>Profile & Security</MenuText>
+              </MenuItem>
+            </MenuList>
 
-              <SidebarFooter>
-                <SupportSection>
-                  <SupportTitle>Need Help?</SupportTitle>
-                  <SupportText>Contact our support team for assistance</SupportText>
-                  <SupportButton onClick={() => router.push("/support")}>Get Support</SupportButton>
-                </SupportSection>
-              </SidebarFooter>
-            </Sidebar>
+            <SidebarFooter>
+              <SupportSection>
+                <SupportTitle>Need Help?</SupportTitle>
+                <SupportText>Contact our support team for assistance</SupportText>
+                <SupportButton onClick={() => router.push("/support")}>Get Support</SupportButton>
+              </SupportSection>
+            </SidebarFooter>
+          </Sidebar>
+
+          {/* Floating Menu Button for Mobile */}
+          {!isSidebarVisible && (
+            <FloatingMenuButton onClick={() => setIsSidebarVisible(true)}>
+              ☰
+            </FloatingMenuButton>
           )}
 
           {/* MAIN CONTENT AREA */}
-          <ContentArea>{renderContent()}</ContentArea>
+          <ContentArea $sidebarOpen={isSidebarVisible}>
+            {renderContent()}
+          </ContentArea>
         </DashboardLayout>
 
         {/* HISTORY SIDEBAR TOGGLE */}
@@ -1260,7 +1222,7 @@ const UserDashboard: React.FC = () => {
           </ModalOverlay>
         )}
 
-        {/* OTHER MODALS REMAIN THE SAME */}
+        {/* OTHER MODALS */}
         {showRescheduleModal && selectedAppointment && (
           <ModalOverlay onClick={() => setShowRescheduleModal(false)}>
             <ModalContainer onClick={(e) => e.stopPropagation()}>
@@ -1444,234 +1406,199 @@ const UserDashboard: React.FC = () => {
 
 export default UserDashboard
 
+// STYLED COMPONENTS - UPDATED WITH SIDEBAR TOGGLE FUNCTIONALITY
 
-const ActionButtons = styled.div`
+const PageContainer = styled.div`
+  min-height: 100vh;
+  background: #f8fafc;
+`
+
+const HeaderBar = styled.header`
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center;
+  padding: 1rem 2rem; 
+  background: #4ECDC4;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  border-bottom: 1px solid #e9ecef;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+
+  @media (max-width: 768px) {
+    padding: 1rem;
+  }
+`
+
+const HeaderLeft = styled.div`
   display: flex;
+  align-items: center;
+`
+
+const BrandSection = styled.div`
+  display: flex;
+  align-items: center;
   gap: 1rem;
-  margin-top: 1.5rem;
-  
-  @media (max-width: 480px) {
-    flex-direction: column;
-  }
 `
 
-const SecurityButton = styled.button`
-  background: #6c757d;
-  color: white;
-  border: none;
-  padding: 0.8rem 1.5rem;
-  border-radius: 10px;
-  font-size: 0.95rem;
-  font-weight: 600;
+const MenuToggle = styled.div<{ $isOpen?: boolean }>`
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 28px;
+  height: 22px;
   cursor: pointer;
-  transition: all 0.2s ease;
-  width: 100%;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-  
-  &:hover {
-    background: #5a6268;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+  position: relative;
+
+  span {
+    height: 3px;
+    width: 100%;
+    background-color: #2c3e50;
+    border-radius: 3px;
+    transition: all 0.3s ease;
+    transform-origin: center;
+    
+    &:nth-child(1) {
+      transform: ${(props) => (props.$isOpen ? "translateY(9.5px) rotate(45deg)" : "translateY(0) rotate(0)")};
+    }
+    
+    &:nth-child(2) {
+      opacity: ${(props) => (props.$isOpen ? "0" : "1")};
+      transform: ${(props) => (props.$isOpen ? "translateX(-20px)" : "translateX(0)")};
+    }
+    
+    &:nth-child(3) {
+      transform: ${(props) => (props.$isOpen ? "translateY(-9.5px) rotate(-45deg)" : "translateY(0) rotate(0)")};
+    }
+  }
+
+  &:hover span {
+    background-color: #34B89C;
   }
 `
 
-const SecurityActionButton = styled.button`
-  background: #34B89C;
-  color: white;
-  border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  
-  &:hover {
-    background: #2a9d7f;
-  }
+const Logo = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 `
 
-const Enable2FAButton = styled.button`
-  background: #34B89C;
-  color: white;
-  border: none;
-  padding: 0.8rem 1.5rem;
+const LogoImage = styled.img`
+  width: 40px;
+  height: 40px;
   border-radius: 8px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  
-  &:hover {
-    background: #2a9d7f;
-  }
+  object-fit: cover;
 `
 
-const Disable2FAButton = styled.button`
-  background: #dc3545;
-  color: white;
-  border: none;
-  padding: 0.8rem 1.5rem;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  
-  &:hover {
-    background: #c82333;
-  }
+const LogoText = styled.div`
+  display: flex;
+  flex-direction: column;
 `
 
-const OTPSetupSection = styled.div`
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 1.5rem;
-  background: #f8f9fa;
-  margin-top: 1rem;
-`
-
-const OTPSetupTitle = styled.h4`
-  margin: 0 0 1rem 0;
-  font-size: 1.1rem;
+const ClinicName = styled.div`
+  font-weight: 800;
+  font-size: 1.8rem;
   color: #2c3e50;
-  font-weight: 600;
+  letter-spacing: -0.5px;
+
+  @media (max-width: 768px) {
+    font-size: 1.5rem;
+  }
 `
 
-const OTPEmailSection = styled.div`
-  display: flex;
-  flex-direction: column;
+const LogoSubtext = styled.div`
+  font-size: 0.75rem;
+  color: #6c757d;
+  font-weight: 500;
+
+  @media (max-width: 768px) {
+    display: none;
+  }
+`
+
+const UserSection = styled.div`
+  display: flex; 
+  align-items: center; 
   gap: 1rem;
-`
 
-const EmailInput = styled.input`
-  padding: 0.8rem;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  font-size: 1rem;
-  width: 100%;
-
-  &:focus {
-    outline: none;
-    border-color: #34B89C;
-    box-shadow: 0 0 0 2px rgba(52, 184, 156, 0.1);
-  }
-
-  &:disabled {
-    background-color: #f5f5f5;
+  @media (max-width: 480px) {
+    gap: 0.7rem;
   }
 `
 
-const SendOTPButton = styled.button`
-  padding: 0.8rem 1.5rem;
-  border: none;
-  border-radius: 8px;
-  background: #34B89C;
-  color: white;
+const UserInfo = styled.div`
   font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s;
-  align-self: flex-start;
-
-  &:hover:not(:disabled) {
-    background: #2a9d7f;
-  }
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
+  color: #2c3e50;
+  
+  @media (max-width: 768px) {
+    display: none;
   }
 `
 
-const OTPVerificationSection = styled.div`
+const ProfileContainer = styled.div`
   display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
+  align-items: center;
 `
 
-const OTPInstructions = styled.p`
-  margin: 0;
-  color: #666;
-  line-height: 1.5;
-  font-size: 0.9rem;
-`
-
-const OTPInputGroup = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-`
-
-const OTPInput = styled.input`
-  padding: 0.8rem;
-  border: 2px solid #ddd;
-  border-radius: 8px;
-  font-size: 1.2rem;
-  text-align: center;
-  letter-spacing: 0.5rem;
-  font-weight: 600;
-  font-family: monospace;
-  width: 100%;
-
-  &:focus {
-    outline: none;
-    border-color: #34B89C;
-    box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.1);
-  }
-`
-
-const ResendOTPText = styled.p`
-  margin: 0.5rem 0 0 0;
-  font-size: 0.9rem;
-  color: #666;
-  text-align: center;
-`
-
-const ResendLink = styled.button`
+const ProfileIconButton = styled.button`
   background: none;
   border: none;
-  color: #34B89C;
-  text-decoration: underline;
   cursor: pointer;
-  font-size: 0.9rem;
-
-  &:hover:not(:disabled) {
-    color: #2a9d7f;
-  }
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-`
-
-const OTPButtonGroup = styled.div`
-  display: flex;
-  gap: 1rem;
-  justify-content: flex-end;
+  padding: 0.25rem;
+  border-radius: 50%;
+  transition: background 0.3s ease;
   
-  @media (max-width: 480px) {
-    flex-direction: column;
+  &:hover {
+    background: #f8f9fa;
   }
 `
 
-const SubmitButton = styled.button`
-  padding: 0.8rem 1.5rem;
-  border: none;
-  border-radius: 8px;
-  background: #34B89C;
+const ProfileAvatar = styled.div`
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f0f9f7;
+`
+
+const ProfileImage = styled.img`
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+`
+
+const DefaultAvatar = styled.div`
+  font-size: 1.2rem;
+  color: #6c757d;
+`
+
+const DefaultAvatarLarge = styled(DefaultAvatar)`
+  font-size: 3rem;
+`
+
+const LogoutButton = styled.button`
+  background: #e74c3c;
   color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s;
-
-  &:hover:not(:disabled) {
-    background: #2a9d7f;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    background: #c0392b;
+    transform: translateY(-1px);
   }
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
+  
+  @media (max-width: 768px) {
+    padding: 0.5rem 1rem;
+    font-size: 0.8rem;
   }
 `
 
@@ -1684,18 +1611,28 @@ const DashboardLayout = styled.div`
   }
 `
 
-const Sidebar = styled.div`
+const Sidebar = styled.aside<{ $isOpen: boolean }>`
   width: 280px;
-  background:     #ffffff ;
+  background: white;
   border-right: 1px solid #e9ecef;
   display: flex;  
   flex-direction: column;
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.05);
-  
-  @media (max-width: 768px) {
-    width: 100%;
-    border-right: none;
-    border-bottom: 1px solid #e9ecef;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 90;
+
+  @media (max-width: 1024px) {
+    position: fixed;
+    left: 0;
+    top: 80px;
+    height: calc(100vh - 80px);
+    transform: translateX(${(props) => (props.$isOpen ? "0" : "-100%")});
+    box-shadow: ${(props) => (props.$isOpen ? "4px 0 20px rgba(0,0,0,0.15)" : "none")};
+  }
+
+  @media (min-width: 1025px) {
+    transform: translateX(${(props) => (props.$isOpen ? "0" : "-280px")});
+    position: ${(props) => (props.$isOpen ? "static" : "fixed")};
   }
 `
 
@@ -1713,34 +1650,6 @@ const SidebarTitleRow = styled.div`
   justify-content: space-between;
   align-items: center;
   width: 100%;
-`
-
-const SidebarToggleButton = styled.button`
-  background: #6BC1E1;
-  border: none;
-  font-size: 1.5rem;
-  color: #000000;
-  cursor: pointer;
-  padding: 0.5rem 0.75rem;
-  border-radius: 8px;
-  transition: all 0.2s ease;
-  font-weight: 700;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 40px;
-  height: 40px;
-  
-  &:hover {
-    background: #2a9d7f;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-    transform: translateY(-1px);
-  }
-  
-  &:active {
-    transform: translateY(0);
-  }
 `
 
 const SidebarTitle = styled.h3`
@@ -1763,8 +1672,8 @@ const MenuItem = styled.div<{ $active: boolean }>`
   padding: 1rem 1.5rem;
   cursor: pointer;
   transition: all 0.2s ease;
-  border-left: 3px solid ${(props) => (props.$active ? "#3483b8" : "transparent")};
-  background: ${(props) => (props.$active ? "#34B89C" : "transparent")};
+  border-left: 3px solid ${(props) => (props.$active ? "#34B89C" : "transparent")};
+  background: ${(props) => (props.$active ? "#f8f9fa" : "transparent")};
   
   &:hover {
     background: #f8f9fa;
@@ -1774,7 +1683,7 @@ const MenuItem = styled.div<{ $active: boolean }>`
 
 const MenuIcon = styled.div`
   font-size: 1.3rem;
-  color: white;
+  color: #2c3e50;
 `
 
 const MenuText = styled.span`
@@ -1849,31 +1758,78 @@ const SupportButton = styled.button`
   }
 `
 
-const ContentArea = styled.div`
-  flex: 1;
-  background: #ffffff;
-  overflow-y: auto;
+const FloatingMenuButton = styled.button`
+  position: fixed;
+  top: 90px;
+  left: 15px;
+  z-index: 80;
+  background: #34B89C;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 50px;
+  height: 50px;
+  font-size: 1.5rem;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover {
+    background: #2a9d7f;
+    transform: scale(1.1);
+  }
+
+  @media (min-width: 1025px) {
+    display: none;
+  }
 `
 
-const MainContent = styled.div`
+const ContentArea = styled.main<{ $sidebarOpen: boolean }>`
+  flex: 1;
+  background: #f8fafc;
+  overflow-y: auto;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  min-width: 0;
   padding: 2rem;
-  max-width: 1200px;
-  margin: 0 auto;
   
+  @media (min-width: 1025px) {
+    margin-left: ${(props) => (props.$sidebarOpen ? "280px" : "0")};
+    width: ${(props) => (props.$sidebarOpen ? "calc(100% - 280px)" : "100%")};
+  }
+
+  @media (max-width: 1024px) {
+    margin-left: 0;
+    width: 100%;
+  }
+
   @media (max-width: 768px) {
     padding: 1.5rem;
   }
+
+  @media (max-width: 480px) {
+    padding: 1rem;
+  }
+`
+
+const MainContent = styled.div`
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
 `
 
 const ContentHeader = styled.div`
   margin-bottom: 2rem;
+  padding: 0;
 `
 
 const ContentTitle = styled.h1`
+  margin: 0 0 0.5rem 0;
   font-size: 2.2rem;
   font-weight: 800;
   color: #2c3e50;
-  margin: 0 0 0.5rem 0;
   letter-spacing: -0.8px;
   
   @media (max-width: 768px) {
@@ -1882,9 +1838,9 @@ const ContentTitle = styled.h1`
 `
 
 const ContentSubtitle = styled.p`
+  margin: 0;
   font-size: 1.1rem;
   color: #6c757d;
-  margin: 0;
   font-weight: 500;
   
   @media (max-width: 768px) {
@@ -1904,7 +1860,7 @@ const StatCard = styled.div`
   border-radius: 12px;
   padding: 1.5rem;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  border: 1px solid #000000;
+  border: 1px solid #e9ecef;
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -2004,6 +1960,26 @@ const RecentActivitySection = styled.div`
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   border: 1px solid #e9ecef;
   margin-bottom: 2rem;
+`
+
+const SectionHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: stretch;
+  }
+`
+
+const SectionTitle = styled.h2`
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #2c3e50;
+  margin: 0;
 `
 
 const NoActivity = styled.div`
@@ -2237,46 +2213,7 @@ const ViewRecordsButton = styled.button`
   }
 `
 
-const PetBenefitsGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 1.5rem;
-`
 
-const BenefitCard = styled.div`
-  background: #ffffff;
-  padding: 1.5rem;
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e9ecef;
-  text-align: center;
-  transition: all 0.2s ease;
-  
-  &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  }
-`
-
-const BenefitIcon = styled.div`
-  font-size: 2.5rem;
-  margin-bottom: 1rem;
-  color: #34B89C;
-`
-
-const BenefitTitle = styled.h3`
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #2c3e50;
-  margin: 0 0 0.5rem 0;
-`
-
-const BenefitText = styled.p`
-  font-size: 0.9rem;
-  color: #6c757d;
-  margin: 0;
-  line-height: 1.4;
-`
 
 // PETS GRID COMPONENTS
 const PetsGrid = styled.div`
@@ -2366,15 +2303,7 @@ const MedicalRecordsText = styled(PetRegistrationText)``
 
 const MedicalRecordsButton = styled(PetRegistrationButton)``
 
-const MedicalFeaturesGrid = styled(PetBenefitsGrid)``
 
-const FeatureCard = styled(BenefitCard)``
-
-const FeatureIcon = styled(BenefitIcon)``
-
-const FeatureTitle = styled(BenefitTitle)``
-
-const FeatureText = styled(BenefitText)``
 
 // PROFILE SECTION
 const ProfileDashboard = styled.div`
@@ -2431,6 +2360,42 @@ const ProfileDetails = styled.div`
   margin-bottom: 2rem;
 `
 
+const DetailItem = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e9ecef;
+  
+  &:last-child {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+`
+
+const DetailLabel = styled.span`
+  font-weight: 600;
+  color: #6c757d;
+  font-size: 0.9rem;
+`
+
+const DetailValue = styled.span`
+  color: #2c3e50;
+  font-weight: 500;
+`
+
+const ActionButtons = styled.div`
+  display: flex;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  
+  @media (max-width: 480px) {
+    flex-direction: column;
+  }
+`
+
 const EditProfileButton = styled.button`
   background: #34B89C;
   color: white;
@@ -2451,6 +2416,26 @@ const EditProfileButton = styled.button`
   }
 `
 
+const SecurityButton = styled.button`
+  background: #6c757d;
+  color: white;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  
+  &:hover {
+    background: #5a6268;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+  }
+`
+
 const SecurityCard = styled.div`
   background: #ffffff;
   border-radius: 16px;
@@ -2460,14 +2445,14 @@ const SecurityCard = styled.div`
 `
 
 const SecurityTitle = styled.h3`
-    font-size: 1.3rem;
-    font-weight: 700;
-    color: #2c3e50;
-    margin: 0 0 1.5rem 0;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  `
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #2c3e50;
+  margin: 0 0 1.5rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+`
 
 const SecurityFeatures = styled.div`
   display: flex;
@@ -2506,12 +2491,51 @@ const SecurityFeatureStatus = styled.div`
   font-weight: 500;
 `
 
+const SecurityActionButton = styled.button`
+  background: #34B89C;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background: #2a9d7f;
+  }
+`
+
 const SecurityStatus = styled.span<{ $enabled: boolean }>`
   color: ${(props) => (props.$enabled ? "#28a745" : "#dc3545")};
   font-weight: 600;
 `
 
 // APPOINTMENTS SECTION
+const AppointmentsSection = styled.div`
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e9ecef;
+`
+
+const SectionTitleGroup = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+`
+
+const AppointmentCount = styled.span`
+  background: #34B89C;
+  color: white;
+  padding: 0.4rem 0.8rem;
+  border-radius: 16px;
+  font-size: 0.8rem;
+  font-weight: 700;
+`
+
 const NewAppointmentButton = styled.button`
   background: #34B89C;
   color: white;
@@ -2529,49 +2553,6 @@ const NewAppointmentButton = styled.button`
     transform: translateY(-1px);
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
   }
-`
-
-const AppointmentsSection = styled.div`
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 1.5rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e9ecef;
-`
-
-const SectionHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-  
-  @media (max-width: 768px) {
-    flex-direction: column;
-    gap: 1rem;
-    align-items: stretch;
-  }
-`
-
-const SectionTitleGroup = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-`
-
-const SectionTitle = styled.h2`
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #2c3e50;
-  margin: 0;
-`
-
-const AppointmentCount = styled.span`
-  background: #34B89C;
-  color: white;
-  padding: 0.4rem 0.8rem;
-  border-radius: 16px;
-  font-size: 0.8rem;
-  font-weight: 700;
 `
 
 const NoAppointments = styled.div`
@@ -2761,196 +2742,6 @@ const DeleteButton = styled.button`
   }
 `
 
-// EXISTING STYLED COMPONENTS (for reference and completion)
-const PageContainer = styled.div`
-  min-height: 100vh;
-  background: #7a0c4c;
-`
-
-const HeaderBar = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 2rem;
-  background: #4ECDC4;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  border-bottom: 1px solid #e9ecef;
-  
-  @media (max-width: 768px) {
-    padding: 1rem;
-  }
-`
-
-const HeaderLeft = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-`
-
-const MobileMenuButton = styled.button`
-  display: none;
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0.5rem;
-  
-  @media (max-width: 768px) {
-    display: block;
-  }
-`
-
-const HamburgerIcon = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 24px;
-  
-  span {
-    height: 3px;
-    background: #2c3e50;
-    border-radius: 2px;
-    transition: all 0.3s ease;
-  }
-  
-  &.open span:nth-child(1) {
-    transform: rotate(45deg) translate(6px, 6px);
-  }
-  
-  &.open span:nth-child(2) {
-    opacity: 0;
-  }
-  
-  &.open span:nth-child(3) {
-    transform: rotate(-45deg) translate(6px, -6px);
-  }
-`
-
-const Logo = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-`
-
-const LogoIcon = styled.div`
-  font-size: 2rem;
-  color: #34B89C;
-`
-
-const LogoText = styled.div`
-  display: flex;
-  flex-direction: column;
-`
-
-const ClinicName = styled.div`
-  font-weight: 800;
-  font-size: 1.2rem;
-  color: #2c3e50;
-  letter-spacing: -0.5px;
-`
-
-const LogoSubtext = styled.div`
-  font-size: 0.75rem;
-  color: #6c757d;
-  font-weight: 500;
-`
-
-const HeaderRight = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  
-  @media (max-width: 768px) {
-    display: ${(props) => (props.className?.includes("open") ? "flex" : "none")};
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-      background: white;
-      padding: 1rem;
-      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-      flex-direction: column;
-      align-items: stretch;
-      z-index: 1000;
-    }
-  `
-
-const UserInfo = styled.div`
-    font-weight: 600;
-    color: #2c3e50;
-    
-    @media (max-width: 768px) {
-      text-align: center;
-      padding: 0.5rem 0;
-    }
-  `
-
-const ProfileContainer = styled.div`
-    display: flex;
-    align-items: center;
-  `
-
-const ProfileIconButton = styled.button`
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 0.25rem;
-    border-radius: 50%;
-    transition: background 0.3s ease;
-    
-    &:hover {
-      background: #f8f9fa;
-    }
-  `
-
-const ProfileAvatar = styled.div`
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  overflow: hidden;
-  border: 2px solid #ffffff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #f0f9f7;
-`
-
-const ProfileImage = styled.img`
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  `
-
-const DefaultAvatar = styled.div`
-    font-size: 1.2rem;
-    color: #6c757d;
-  `
-
-const DefaultAvatarLarge = styled(DefaultAvatar)`
-    font-size: 3rem;
-  `
-
-const LogoutButton = styled.button`
-    background: #e74c3c;
-    color: white;
-    border: none;
-    padding: 0.6rem 1.2rem;
-    border-radius: 8px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    
-    &:hover {
-      background: #c0392b;
-      transform: translateY(-1px);
-    }
-    
-    @media (max-width: 768px) {
-      width: 100%;
-      padding: 0.8rem;
-    }
-  `
-
 // HISTORY SIDEBAR COMPONENTS
 const HistorySidebarToggle = styled.button`
   position: fixed;
@@ -2981,99 +2772,99 @@ const HistorySidebarToggle = styled.button`
 `
 
 const HistoryIcon = styled.div`
-    font-size: 1.2rem;
-  `
+  font-size: 1.2rem;
+`
 
 const HistoryText = styled.span`
-    font-size: 0.7rem;
-    font-weight: 600;
-  `
+  font-size: 0.7rem;
+  font-weight: 600;
+`
 
 const HistoryBadgeSmall = styled.span`
-    position: absolute;
-    top: -5px;
-    right: -5px;
-    background: #e74c3c;
-    color: white;
-    border-radius: 50%;
-    width: 20px;
-    height: 20px;
-    font-size: 0.7rem;
-    font-weight: 700;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  `
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  background: #e74c3c;
+  color: white;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+`
 
 const SidebarOverlay = styled.div`
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0,0,0,0.5);
-    z-index: 1998;
-  `
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 1998;
+`
 
 const HistorySidebar = styled.div`
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: 400px;
-    background: white;
-    box-shadow: -4px 0 16px rgba(0,0,0,0.1);
-    z-index: 1999;
-    display: flex;
-    flex-direction: column;
-    
-    @media (max-width: 480px) {
-      width: 100%;
-    }
-  `
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 400px;
+  background: white;
+  box-shadow: -4px 0 16px rgba(0,0,0,0.1);
+  z-index: 1999;
+  display: flex;
+  flex-direction: column;
+  
+  @media (max-width: 480px) {
+    width: 100%;
+  }
+`
 
 const SidebarCloseButton = styled.button`
-    background: none;
-    border: none;
-    font-size: 1.5rem;
-    cursor: pointer;
-    color: #6c757d;
-    padding: 0.25rem;
-    
-    &:hover {
-      color: #2c3e50;
-    }
-  `
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #6c757d;
+  padding: 0.25rem;
+  
+  &:hover {
+    color: #2c3e50;
+  }
+`
 
 const SidebarContent = styled.div`
-    flex: 1;
-    overflow-y: auto;
-    padding: 1rem;
-  `
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+`
 
 const NoHistoryMessage = styled.div`
-    text-align: center;
-    padding: 3rem 2rem;
-    color: #6c757d;
-  `
+  text-align: center;
+  padding: 3rem 2rem;
+  color: #6c757d;
+`
 
 const NoHistoryIcon = styled.div`
-    font-size: 3rem;
-    margin-bottom: 1rem;
-    opacity: 0.5;
-  `
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  opacity: 0.5;
+`
 
 const NoHistoryText = styled.p`
-    margin: 0;
-    font-size: 1rem;
-    font-weight: 500;
-  `
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 500;
+`
 
 const SidebarHistoryList = styled.div`
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  `
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+`
 
 const SidebarHistoryCard = styled.div`
   background: #ffffff;
@@ -3091,232 +2882,232 @@ const SidebarHistoryCard = styled.div`
 `
 
 const SidebarCardHeader = styled.div`
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.5rem;
-  `
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+`
 
 const ServiceInfo = styled.div`
-    color: #6c757d;
-    font-weight: 500;
-    margin-bottom: 0.25rem;
-    font-size: 0.9rem;
-  `
+  color: #6c757d;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+  font-size: 0.9rem;
+`
 
 const DateInfo = styled.div`
-    color: #6c757d;
-    font-size: 0.85rem;
-    margin-bottom: 0.5rem;
-  `
+  color: #6c757d;
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+`
 
 const ClickHint = styled.div`
-    color: #34B89C;
-    font-size: 0.75rem;
-    font-weight: 600;
-    text-align: right;
-  `
+  color: #34B89C;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: right;
+`
 
 // MODAL COMPONENTS
 const SuccessNotification = styled.div`
-    position: fixed;
-    top: 1rem;
-    right: 1rem;
-    background: #d4edda;
-    color: #155724;
-    padding: 1rem 1.5rem;
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    z-index: 2000;
-    border: 1px solid #c3e6cb;
-    animation: slideInRight 0.3s ease;
-    
-    @keyframes slideInRight {
-      from {
-        transform: translateX(100%);
-        opacity: 0;
-      }
-      to {
-        transform: translateX(0);
-        opacity: 1;
-      }
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  background: #d4edda;
+  color: #155724;
+  padding: 1rem 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  z-index: 2000;
+  border: 1px solid #c3e6cb;
+  animation: slideInRight 0.3s ease;
+  
+  @keyframes slideInRight {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
     }
-  `
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+`
 
 const SuccessIcon = styled.div`
-    font-size: 1.2rem;
-    font-weight: bold;
-  `
+  font-size: 1.2rem;
+  font-weight: bold;
+`
 
 const SuccessText = styled.div`
-    font-weight: 600;
-    flex: 1;
-  `
+  font-weight: 600;
+  flex: 1;
+`
 
 const CloseSuccessButton = styled.button`
-    background: none;
-    border: none;
-    font-size: 1.2rem;
-    cursor: pointer;
-    color: #155724;
-    padding: 0.25rem;
-    
-    &:hover {
-      opacity: 0.7;
-    }
-  `
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  cursor: pointer;
+  color: #155724;
+  padding: 0.25rem;
+  
+  &:hover {
+    opacity: 0.7;
+  }
+`
 
 const ModalOverlay = styled.div`
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0,0,0,0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2000;
-    padding: 1rem;
-  `
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 1rem;
+`
 
 const ModalContainer = styled.div`
-    background: white;
-    border-radius: 20px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-    width: 100%;
-    max-width: 500px;
-    max-height: 90vh;
-    overflow-y: auto;
-    animation: modalAppear 0.3s ease;
-    
-    @keyframes modalAppear {
-      from {
-        opacity: 0;
-        transform: scale(0.9) translateY(-20px);
-      }
-      to {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-      }
+  background: white;
+  border-radius: 20px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  width: 100%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: modalAppear 0.3s ease;
+  
+  @keyframes modalAppear {
+    from {
+      opacity: 0;
+      transform: scale(0.9) translateY(-20px);
     }
-  `
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+`
 
 const ModalHeader = styled.div`
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1.5rem 2rem;
-    border-bottom: 1px solid #e9ecef;
-  `
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid #e9ecef;
+`
 
 const ModalTitle = styled.h2`
-    margin: 0;
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: #2c3e50;
-  `
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #2c3e50;
+`
 
 const CloseButton = styled.button`
-    background: none;
-    border: none;
-    font-size: 1.5rem;
-    cursor: pointer;
-    color: #6c757d;
-    padding: 0.25rem;
-    
-    &:hover {
-      color: #2c3e50;
-    }
-  `
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #6c757d;
+  padding: 0.25rem;
+  
+  &:hover {
+    color: #2c3e50;
+  }
+`
 
 const ModalContent = styled.div`
-    padding: 2rem;
-  `
+  padding: 2rem;
+`
 
 const ModalActions = styled.div`
-    display: flex;
-    gap: 1rem;
-    padding: 1.5rem 2rem;
-    border-top: 1px solid #e9ecef;
-    justify-content: flex-end;
-    
-    @media (max-width: 480px) {
-      flex-direction: column;
-    }
-  `
+  display: flex;
+  gap: 1rem;
+  padding: 1.5rem 2rem;
+  border-top: 1px solid #e9ecef;
+  justify-content: flex-end;
+  
+  @media (max-width: 480px) {
+    flex-direction: column;
+  }
+`
 
 // FORM COMPONENTS
 const FormGroup = styled.div`
-    margin-bottom: 1.5rem;
-  `
+  margin-bottom: 1.5rem;
+`
 
 const Label = styled.label`
-    display: block;
-    margin-bottom: 0.5rem;
-    font-weight: 600;
-    color: #2c3e50;
-    font-size: 0.9rem;
-  `
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: #2c3e50;
+  font-size: 0.9rem;
+`
 
 const EditInput = styled.input`
-    width: 100%;
-    padding: 0.75rem 1rem;
-    border: 2px solid rgba(107, 193, 225, 0.3);
-    border-radius: 8px;
-    font-size: 0.9rem;
-    transition: all 0.3s ease;
-    
-    &:focus {
-      outline: none;
-      border-color: #34B89C;
-      box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.1);
-    }
-  `
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 2px solid rgba(107, 193, 225, 0.3);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  transition: all 0.3s ease;
+  
+  &:focus {
+    outline: none;
+    border-color: #34B89C;
+    box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.1);
+  }
+`
 
 const DateInput = styled(EditInput)``
 
 const SelectInput = styled.select`
-    width: 100%;
-    padding: 0.75rem 1rem;
-    border: 2px solid rgba(107, 193, 225, 0.3);
-    border-radius: 8px;
-    font-size: 0.9rem;
-    transition: all 0.3s ease;
-    background: white;
-    
-    &:focus {
-      outline: none;
-      border-color: #34B89C;
-      box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.1);
-    }
-  `
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 2px solid rgba(107, 193, 225, 0.3);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  transition: all 0.3s ease;
+  background: white;
+  
+  &:focus {
+    outline: none;
+    border-color: #34B89C;
+    box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.1);
+  }
+`
 
 const EmailDisplay = styled.div`
-    padding: 0.75rem 1rem;
-    background: linear-gradient(135deg, #f0f9ff 0%, #ffffff 100%);
-    border: 2px solid rgba(107, 193, 225, 0.2);
-    border-radius: 8px;
-    color: #6c757d;
-    font-size: 0.9rem;
-  `
+  padding: 0.75rem 1rem;
+  background: linear-gradient(135deg, #f0f9ff 0%, #ffffff 100%);
+  border: 2px solid rgba(107, 193, 225, 0.2);
+  border-radius: 8px;
+  color: #6c757d;
+  font-size: 0.9rem;
+`
 
 // PROFILE MODAL COMPONENTS
 const ProfileSection = styled.div`
-    margin-bottom: 2rem;
-  `
+  margin-bottom: 2rem;
+`
 
 const SecuritySection = styled.div`
-    margin-bottom: 1rem;
-  `
+  margin-bottom: 1rem;
+`
 
 const ProfileImageSection = styled.div`
-    text-align: center;
-    margin-bottom: 1.5rem;
-  `
+  text-align: center;
+  margin-bottom: 1.5rem;
+`
 
 const ProfileImagePreview = styled.div`
   width: 100px;
@@ -3348,14 +3139,14 @@ const ImageUploadLabel = styled.label`
 `
 
 const ImageUploadInput = styled.input`
-    display: none;
-  `
+  display: none;
+`
 
 const ImageUploadHint = styled.div`
-    font-size: 0.8rem;
-    color: #6c757d;
-    margin-top: 0.5rem;
-  `
+  font-size: 0.8rem;
+  color: #6c757d;
+  margin-top: 0.5rem;
+`
 
 const TwoFactorContainer = styled.div`
   display: flex;
@@ -3368,41 +3159,225 @@ const TwoFactorContainer = styled.div`
 `
 
 const TwoFactorInfo = styled.div`
-    flex: 1;
-  `
+  flex: 1;
+`
 
 const TwoFactorLabel = styled.div`
-    font-weight: 600;
-    color: #2c3e50;
-    margin-bottom: 0.25rem;
-  `
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 0.25rem;
+`
 
 const TwoFactorDescription = styled.div`
-    font-size: 0.85rem;
-    color: #6c757d;
-    line-height: 1.4;
-  `
+  font-size: 0.85rem;
+  color: #6c757d;
+  line-height: 1.4;
+`
+
+const Enable2FAButton = styled.button`
+  background: #34B89C;
+  color: white;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background: #2a9d7f;
+  }
+`
+
+const Disable2FAButton = styled.button`
+  background: #dc3545;
+  color: white;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background: #c82333;
+  }
+`
+
+const OTPSetupSection = styled.div`
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.5rem;
+  background: #f8f9fa;
+  margin-top: 1rem;
+`
+
+const OTPSetupTitle = styled.h4`
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+  color: #2c3e50;
+  font-weight: 600;
+`
+
+const OTPEmailSection = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+`
+
+const EmailInput = styled.input`
+  padding: 0.8rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 1rem;
+  width: 100%;
+
+  &:focus {
+    outline: none;
+    border-color: #34B89C;
+    box-shadow: 0 0 0 2px rgba(52, 184, 156, 0.1);
+  }
+
+  &:disabled {
+    background-color: #f5f5f5;
+  }
+`
+
+const SendOTPButton = styled.button`
+  padding: 0.8rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  background: #34B89C;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  align-self: flex-start;
+
+  &:hover:not(:disabled) {
+    background: #2a9d7f;
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+`
+
+const OTPVerificationSection = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+`
+
+const OTPInstructions = styled.p`
+  margin: 0;
+  color: #666;
+  line-height: 1.5;
+  font-size: 0.9rem;
+`
+
+const OTPInputGroup = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+`
+
+const OTPInput = styled.input`
+  padding: 0.8rem;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  font-size: 1.2rem;
+  text-align: center;
+  letter-spacing: 0.5rem;
+  font-weight: 600;
+  font-family: monospace;
+  width: 100%;
+
+  &:focus {
+    outline: none;
+    border-color: #34B89C;
+    box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.1);
+  }
+`
+
+const ResendOTPText = styled.p`
+  margin: 0.5rem 0 0 0;
+  font-size: 0.9rem;
+  color: #666;
+  text-align: center;
+`
+
+const ResendLink = styled.button`
+  background: none;
+  border: none;
+  color: #34B89C;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 0.9rem;
+
+  &:hover:not(:disabled) {
+    color: #2a9d7f;
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+`
+
+const OTPButtonGroup = styled.div`
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+  
+  @media (max-width: 480px) {
+    flex-direction: column;
+  }
+`
+
+const SubmitButton = styled.button`
+  padding: 0.8rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  background: #34B89C;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+
+  &:hover:not(:disabled) {
+    background: #2a9d7f;
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+`
 
 // BUTTON COMPONENTS
 const CancelModalButton = styled.button`
-    background: #6c757d;
-    color: white;
-    border: none;
-    padding: 0.8rem 1.5rem;
-    border-radius: 8px;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    
-    &:hover {
-      background: #5a6268;
-    }
-    
-    @media (max-width: 480px) {
-      order: 2;
-    }
-  `
+  background: #6c757d;
+  color: white;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    background: #5a6268;
+  }
+  
+  @media (max-width: 480px) {
+    order: 2;
+  }
+`
 
 const SaveProfileButton = styled.button`
   background: #34B89C;
@@ -3423,20 +3398,20 @@ const SaveProfileButton = styled.button`
 const ConfirmButton = styled(SaveProfileButton)``
 
 const DeleteModalButton = styled.button`
-    background: #e74c3c;
-    color: white;
-    border: none;
-    padding: 0.8rem 1.5rem;
-    border-radius: 8px;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    
-    &:hover {
-      background: #c0392b;
-    }
-  `
+  background: #e74c3c;
+  color: white;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    background: #c0392b;
+  }
+`
 
 // APPOINTMENT INFO COMPONENTS
 const AppointmentInfoModal = styled.div`
@@ -3448,56 +3423,56 @@ const AppointmentInfoModal = styled.div`
 `
 
 const InfoItem = styled.div`
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.75rem;
-    padding-bottom: 0.75rem;
-    border-bottom: 1px solid #e9ecef;
-    
-    &:last-child {
-      margin-bottom: 0;
-      padding-bottom: 0;
-      border-bottom: none;
-    }
-  `
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #e9ecef;
+  
+  &:last-child {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+`
 
 const InfoLabel = styled.span`
-    font-weight: 600;
-    color: #6c757d;
-    font-size: 0.9rem;
-  `
+  font-weight: 600;
+  color: #6c757d;
+  font-size: 0.9rem;
+`
 
 const InfoValue = styled.span`
-    color: #2c3e50;
-    font-weight: 500;
-    text-align: right;
-    flex: 1;
-    margin-left: 1rem;
-  `
+  color: #2c3e50;
+  font-weight: 500;
+  text-align: right;
+  flex: 1;
+  margin-left: 1rem;
+`
 
 const WarningMessage = styled.div`
-    display: flex;
-    align-items: flex-start;
-    gap: 1rem;
-    background: #fff3cd;
-    border: 1px solid #ffeaa7;
-    border-radius: 12px;
-    padding: 1.5rem;
-    margin-bottom: 1.5rem;
-  `
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  background: #fff3cd;
+  border: 1px solid #ffeaa7;
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+`
 
 const WarningIcon = styled.div`
-    font-size: 1.5rem;
-    color: #856404;
-  `
+  font-size: 1.5rem;
+  color: #856404;
+`
 
 const WarningText = styled.div`
-    color: #856404;
-    font-weight: 500;
-    line-height: 1.4;
-    flex: 1;
-  `
+  color: #856404;
+  font-weight: 500;
+  line-height: 1.4;
+  flex: 1;
+`
 
 const AppointmentDetails = styled.div`
   background: #f8f9fa;
@@ -3506,91 +3481,33 @@ const AppointmentDetails = styled.div`
   border: 1px solid #e9ecef;
 `
 
-const DetailItem = styled.div`
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.75rem;
-    
-    &:last-child {
-      margin-bottom: 0;
-    }
-  `
-
-const DetailLabel = styled.span`
-    font-weight: 600;
-    color: #6c757d;
-    font-size: 0.9rem;
-  `
-
-const DetailValue = styled.span`
-    color: #2c3e50;
-    font-weight: 500;
-  `
-
 const HistoryStatusBadge = styled.span<{ status: string }>`
-    padding: 0.4rem 0.8rem;
-    border-radius: 20px;
-    font-size: 0.8rem;
-    font-weight: 700;
-    background: ${(props) => {
-      switch (props.status) {
-        case "Done":
-          return "#d4edda"
-        case "Not Attend":
-          return "#f8d7da"
-        case "Cancelled":
-          return "#f8d7da"
-        default:
-          return "#d1ecf1"
-      }
-    }};
-    color: ${(props) => {
-      switch (props.status) {
-        case "Done":
-          return "#155724"
-        case "Not Attend":
-          return "#721c24"
-        case "Cancelled":
-          return "#721c24"
-        default:
-          return "#0c5460"
-      }
-    }};
-  `
-
-// Added button to show sidebar when hidden
-const ShowSidebarButton = styled.button`
-  background: #ffffff;
-  color: black;
-  border: none;
-  padding: 0.5rem 0.75rem;
-  border-radius: 8px;
-  font-size: 1.2rem;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 40px;
-  height: 40px;
-  
-  &:hover {
-    background: #2a9d7f;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-    transform: translateY(-1px);
-  }
-  
-  &:active {
-    transform: translateY(0);
-  }
-  
-  @media (max-width: 768px) {
-    padding: 0.4rem 0.6rem; 
-    min-width: 36px;
-    height: 36px;
-    font-size: 1rem;
-  }
+  padding: 0.4rem 0.8rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  background: ${(props) => {
+    switch (props.status) {
+      case "Done":
+        return "#d4edda"
+      case "Not Attend":
+        return "#f8d7da"
+      case "Cancelled":
+        return "#f8d7da"
+      default:
+        return "#d1ecf1"
+    }
+  }};
+  color: ${(props) => {
+    switch (props.status) {
+      case "Done":
+        return "#155724"
+      case "Not Attend":
+        return "#721c24"
+      case "Cancelled":
+        return "#721c24"
+      default:
+        return "#0c5460"
+    }
+  }};
 `
