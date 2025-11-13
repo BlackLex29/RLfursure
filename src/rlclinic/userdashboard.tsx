@@ -1,22 +1,79 @@
-"use client"
+'use client'
 
 import type React from "react"
 import { useEffect, useState } from "react"
-import styled, { createGlobalStyle } from "styled-components"
+import styled, { createGlobalStyle, ThemeProvider, keyframes } from "styled-components"
 import { useRouter } from "next/navigation"
-import { auth, db, storage } from "../firebaseConfig"
+import { auth, db } from "../firebaseConfig"
 import { signOut } from "firebase/auth"
-import { collection, onSnapshot, doc, deleteDoc, query, where, updateDoc, getDoc, setDoc } from "firebase/firestore"
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage"
+import { collection, onSnapshot, doc, deleteDoc, query, where, updateDoc, getDoc, setDoc, orderBy, addDoc } from "firebase/firestore"
 
-const GlobalStyle = createGlobalStyle`
+// Define theme interfaces
+interface Theme {
+  background: string
+  surface: string
+  primary: string
+  secondary: string
+  text: string
+  textSecondary: string
+  border: string
+  shadow: string
+  success: string
+  warning: string
+  error: string
+}
+
+interface Themes {
+  light: Theme
+  dark: Theme
+}
+
+// Define themes
+const themes: Themes = {
+  light: {
+    background: "#f8fafc",
+    surface: "#ffffff",
+    primary: "#4ECDC4",
+    secondary: "#34B89C",
+    text: "#2c3e50",
+    textSecondary: "#6c757d",
+    border: "#e9ecef",
+    shadow: "rgba(0, 0, 0, 0.1)",
+    success: "#28a745",
+    warning: "#ffc107",
+    error: "#e74c3c"
+  },
+  dark: {
+    background: "#0f172a",
+    surface: "#1e293b",
+    primary: "#34B89C",
+    secondary: "#4ECDC4",
+    text: "#f1f5f9",
+    textSecondary: "#94a3b8",
+    border: "#334155",
+    shadow: "rgba(0, 0, 0, 0.3)",
+    success: "#10b981",
+    warning: "#f59e0b",
+    error: "#ef4444"
+  }
+}
+
+declare module 'styled-components' {
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  export interface DefaultTheme {}
+}
+
+// Create GlobalStyle with theme support
+const GlobalStyle = createGlobalStyle<{ theme: Theme }>`
   body {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    background: #f8fafc;
+    background: ${props => props.theme.background};
+    color: ${props => props.theme.text};
     scroll-behavior: smooth;
+    transition: background-color 0.3s ease, color 0.3s ease;
   }
   
   * {
@@ -24,14 +81,14 @@ const GlobalStyle = createGlobalStyle`
   }
 `
 
-const SidebarStatusBadge = styled.span<{ status: string }>`
+const SidebarStatusBadge = styled.span<{ status: string; theme: Theme }>`
   padding: 0.3rem 0.6rem;
   border-radius: 12px;
   font-size: 0.75rem;
   font-weight: 700;
   background: ${(props) => {
     switch (props.status) {
-      case "Done":
+      case "Completed":
         return "#26ee54"
       case "Not Attend":
         return "#99b145"
@@ -43,7 +100,7 @@ const SidebarStatusBadge = styled.span<{ status: string }>`
   }};
   color: ${(props) => {
     switch (props.status) {
-      case "Done":
+      case "Completed":
         return "#155724"
       case "Not Attend":
         return "#721c24"
@@ -67,14 +124,19 @@ interface AppointmentType {
   completedAt?: string
   notes?: string
   veterinarian?: string
+  paymentCompleted?: boolean
 }
 
 interface UserProfile {
   firstName: string
   lastName: string
   email: string
-  profilePicture?: string
+  phoneNumber?: string
+  age?: string
+  location?: string
   twoFactorEnabled?: boolean
+  createdAt?: string
+  updatedAt?: string
 }
 
 interface Pet {
@@ -82,6 +144,29 @@ interface Pet {
   name: string
   petType: string
   breed: string
+}
+
+interface RefundRequest {
+  id: string
+  appointmentId: string
+  clientName: string
+  clientEmail: string
+  petName: string
+  appointmentType: string
+  originalDate: string
+  originalTime: string
+  amount: number
+  paymentMethod: string
+  refundReason: string
+  status: string
+  requestedAt: string
+  userId: string
+  processedAt?: string
+  refundAmount?: number
+  adminNotes?: string
+  refundCompleted?: boolean
+  gcashReferenceNo?: string
+  gcashPhoneNumber?: string
 }
 
 const timeSlots = [
@@ -112,8 +197,9 @@ const UserDashboard: React.FC = () => {
   const [showProfileModal, setShowProfileModal] = useState(false)
   const [editFirstName, setEditFirstName] = useState("")
   const [editLastName, setEditLastName] = useState("")
-  const [profilePictureUrl, setProfilePictureUrl] = useState("")
-  const [profilePictureFile, setProfilePictureFile] = useState<File | null>(null)
+  const [editPhoneNumber, setEditPhoneNumber] = useState("")
+  const [editAge, setEditAge] = useState("")
+  const [editLocation, setEditLocation] = useState("")
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false)
 
   // 2FA States
@@ -137,8 +223,23 @@ const UserDashboard: React.FC = () => {
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
 
+  // Refund states
+  const [refundReason, setRefundReason] = useState("")
+  const [gcashReferenceNo, setGcashReferenceNo] = useState("")
+  const [gcashPhoneNumber, setGcashPhoneNumber] = useState("")
+  const [gcashReferenceNoCancel, setGcashReferenceNoCancel] = useState("")
+  const [gcashPhoneNumberCancel, setGcashPhoneNumberCancel] = useState("")
+  const [showRefundModal, setShowRefundModal] = useState(false)
+  const [refundProcessing, setRefundProcessing] = useState(false)
+
   // New state for active menu item
   const [activeMenuItem, setActiveMenuItem] = useState<string>("dashboard")
+
+  // New state for refund requests and history
+  const [refundRequests, setRefundRequests] = useState<RefundRequest[]>([])
+  const [refundHistoryTab, setRefundHistoryTab] = useState<string>("appointments")
+  const [selectedRefund, setSelectedRefund] = useState<RefundRequest | null>(null)
+  const [showRefundDetailsModal, setShowRefundDetailsModal] = useState(false)
 
   const showSuccess = (message: string) => {
     setSuccessMessage(message)
@@ -165,52 +266,72 @@ const UserDashboard: React.FC = () => {
     return () => unsubscribe()
   }, [router])
 
+  // FIXED: User Profile Fetching and Creation
   useEffect(() => {
     if (!userEmail || !userId) return
 
     const fetchUserProfile = async () => {
       try {
         const userDoc = await getDoc(doc(db, "users", userId))
+        
         if (userDoc.exists()) {
-          const profileData = userDoc.data() as UserProfile
-          setUserProfile(profileData)
-          setEditFirstName(profileData.firstName || userEmail.split("@")[0])
-          setEditLastName(profileData.lastName || "")
-          setProfilePictureUrl(profileData.profilePicture || "")
-          setTwoFactorEnabled(profileData.twoFactorEnabled || false)
+          const profileData = userDoc.data() as UserProfile;
+          setUserProfile(profileData);
+          setEditFirstName(profileData.firstName || userEmail.split("@")[0]);
+          setEditLastName(profileData.lastName || "");
+          setEditPhoneNumber(profileData.phoneNumber || "");
+          setEditAge(profileData.age || "");
+          setEditLocation(profileData.location || "");
+          setTwoFactorEnabled(profileData.twoFactorEnabled || false);
         } else {
-          const defaultProfile: UserProfile = {
+          // Create complete profile document with all required fields
+          const defaultProfile = {
             firstName: userEmail.split("@")[0],
             lastName: "",
             email: userEmail,
+            phoneNumber: "",
+            age: "",
+            location: "",
             twoFactorEnabled: false,
-          }
-          await setDoc(doc(db, "users", userId), defaultProfile)
-          setUserProfile(defaultProfile)
-          setEditFirstName(defaultProfile.firstName)
-          setEditLastName("")
-          setProfilePictureUrl("")
-          setTwoFactorEnabled(false)
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+          
+          // Use setDoc instead of addDoc for specific document ID
+          await setDoc(doc(db, "users", userId), defaultProfile);
+          setUserProfile(defaultProfile);
+          setEditFirstName(defaultProfile.firstName);
+          setEditLastName("");
+          setEditPhoneNumber("");
+          setEditAge("");
+          setEditLocation("");
+          setTwoFactorEnabled(false);
         }
       } catch (error) {
-        console.error("Error fetching user profile:", error)
+        console.error("Error fetching user profile:", error);
+        // Fallback to default profile
         const defaultProfile: UserProfile = {
           firstName: userEmail.split("@")[0],
           lastName: "",
           email: userEmail,
+          phoneNumber: "",
+          age: "",
+          location: "",
           twoFactorEnabled: false,
-        }
-        setUserProfile(defaultProfile)
-        setEditFirstName(defaultProfile.firstName)
-        setEditLastName("")
-        setProfilePictureUrl("")
-        setTwoFactorEnabled(false)
+        };
+        setUserProfile(defaultProfile);
+        setEditFirstName(defaultProfile.firstName);
+        setEditLastName("");
+        setEditPhoneNumber("");
+        setEditAge("");
+        setEditLocation("");
+        setTwoFactorEnabled(false);
       } finally {
-        setLoading(false)
+        setLoading(false);
       }
     }
 
-    fetchUserProfile()
+    fetchUserProfile();
 
     // Fetch pets for the current user
     const petsQuery = query(collection(db, "pets"), where("ownerId", "==", userId))
@@ -235,7 +356,7 @@ const UserDashboard: React.FC = () => {
       const data: AppointmentType[] = []
       snapshot.forEach((doc) => {
         const appointmentData = { id: doc.id, ...(doc.data() as Omit<AppointmentType, "id">) }
-        if (!["Done", "Not Attend", "Cancelled"].includes(appointmentData.status || "")) {
+        if (!["Completed", "Not Attend", "Cancelled"].includes(appointmentData.status || "")) {
           data.push(appointmentData)
         }
       })
@@ -249,7 +370,7 @@ const UserDashboard: React.FC = () => {
       const data: AppointmentType[] = []
       snapshot.forEach((doc) => {
         const appointmentData = { id: doc.id, ...(doc.data() as Omit<AppointmentType, "id">) }
-        if (["Done", "Not Attend", "Cancelled"].includes(appointmentData.status || "")) {
+        if (["Completed", "Not Attend", "Cancelled"].includes(appointmentData.status || "")) {
           data.push(appointmentData)
         }
       })
@@ -268,25 +389,227 @@ const UserDashboard: React.FC = () => {
     }
   }, [userEmail, userId])
 
+  // Fetch refund requests
+  useEffect(() => {
+    if (!userId) return
+
+    const refundQuery = query(
+      collection(db, "refundRequests"), 
+      where("userId", "==", userId),
+      orderBy("requestedAt", "desc")
+    )
+
+    const unsubscribeRefunds = onSnapshot(refundQuery, (snapshot) => {
+      const refundData: RefundRequest[] = []
+      snapshot.forEach((doc) => {
+        const data = doc.data()
+        refundData.push({
+          id: doc.id,
+          appointmentId: data.appointmentId,
+          clientName: data.clientName,
+          clientEmail: data.clientEmail,
+          petName: data.petName,
+          appointmentType: data.appointmentType,
+          originalDate: data.originalDate,
+          originalTime: data.originalTime,
+          amount: data.amount || 0,
+          paymentMethod: data.paymentMethod,
+          refundReason: data.refundReason,
+          gcashReferenceNo: data.gcashReferenceNo,
+          gcashPhoneNumber: data.gcashPhoneNumber,
+          status: data.status,
+          requestedAt: data.requestedAt,
+          userId: data.userId,
+          processedAt: data.processedAt,
+          refundAmount: data.refundAmount,
+          adminNotes: data.adminNotes,
+          refundCompleted: data.refundCompleted || false
+        })
+      })
+      setRefundRequests(refundData)
+    })
+
+    return () => unsubscribeRefunds()
+  }, [userId])
+
   const handleLogout = async () => {
     await signOut(auth)
     router.push("/homepage")
   }
 
-  const handleDelete = async (id: string) => {
-    try {
-      await deleteDoc(doc(db, "appointments", id))
-      setShowCancelModal(false)
-      showSuccess("Appointment cancelled successfully!")
-    } catch (error) {
-      console.error(error)
-      alert("Failed to cancel appointment.")
+  const openCancelModal = (appt: AppointmentType) => {
+    setSelectedAppointment(appt)
+    
+    // Check if payment method is GCash
+    if (appt.paymentMethod?.toLowerCase() === 'gcash') {
+      setGcashReferenceNo("")
+      setGcashPhoneNumber("")
+      setRefundReason("")
+      setShowRefundModal(true)
+    } else {
+      setGcashReferenceNoCancel("")
+      setGcashPhoneNumberCancel("")
+      setShowCancelModal(true)
     }
   }
 
-  const openCancelModal = (appt: AppointmentType) => {
-    setSelectedAppointment(appt)
-    setShowCancelModal(true)
+  const handleRefundRequest = async () => {
+    if (!selectedAppointment || !refundReason.trim() || !gcashPhoneNumber.trim()) {
+      alert("Please provide both the GCash phone number and reason for cancellation.");
+      return;
+    }
+
+    // Validate GCash phone number format (09XXXXXXXXX)
+    const gcashRegex = /^09\d{9}$/;
+    const cleanedPhone = gcashPhoneNumber.replace(/\s/g, '');
+    
+    if (!gcashRegex.test(cleanedPhone)) {
+      alert("Please enter a valid GCash phone number (09XXXXXXXXX).");
+      return;
+    }
+
+    setRefundProcessing(true);
+    
+    try {
+      const servicePrices: Record<string, number> = {
+        "vaccination": 500,
+        "checkup": 300,
+        "antiRabies": 300,
+        "ultrasound": 800,
+        "groom": 900,
+        "spayNeuter": 1500,
+        "deworm": 300
+      };
+      
+      const refundAmount = servicePrices[selectedAppointment.appointmentType || "checkup"] || 300;
+
+      const refundRequest = {
+        appointmentId: selectedAppointment.id || "",
+        clientName: selectedAppointment.clientName || "",
+        clientEmail: userEmail || "",
+        petName: selectedAppointment.petName || "",
+        appointmentType: selectedAppointment.appointmentType || "checkup",
+        originalDate: selectedAppointment.date || "",
+        originalTime: selectedAppointment.timeSlot || "",
+        amount: refundAmount,
+        paymentMethod: selectedAppointment.paymentMethod || "GCash",
+        refundReason: refundReason.trim(),
+        gcashPhoneNumber: cleanedPhone,
+        gcashReferenceNo: gcashReferenceNo.trim() || "",
+        status: "pending",
+        requestedAt: new Date().toISOString(),
+        userId: userId || "",
+        refundCompleted: false
+      };
+
+      console.log("📤 Creating refund request with data:", refundRequest);
+
+      // Add refund request to Firestore
+      const docRef = await addDoc(collection(db, "refundRequests"), refundRequest);
+      console.log("✅ Refund request created with ID:", docRef.id);
+
+      // Cancel the appointment
+      await deleteDoc(doc(db, "appointments", selectedAppointment.id));
+
+      setShowRefundModal(false);
+      setRefundReason("");
+      setGcashReferenceNo("");
+      setGcashPhoneNumber("");
+      setRefundProcessing(false);
+      
+      showSuccess(`Appointment cancelled and refund request for ₱${refundAmount} submitted successfully!`);
+      
+    } catch (error) {
+      console.error("❌ Error processing refund request:", error);
+      alert("Failed to process refund request. Please try again.");
+      setRefundProcessing(false);
+    }
+  };
+
+  // Update the regular cancel function to handle GCash reference if needed
+  const handleDelete = async (id: string) => {
+    try {
+      // If it's a GCash payment and phone number is provided, create a refund request
+      if (selectedAppointment?.paymentMethod?.toLowerCase() === 'gcash' && gcashPhoneNumberCancel.trim()) {
+        // Validate GCash phone number format
+        const gcashRegex = /^09\d{9}$/;
+        if (!gcashRegex.test(gcashPhoneNumberCancel.replace(/\s/g, ''))) {
+          alert("Please enter a valid GCash phone number (09XXXXXXXXX).");
+          return;
+        }
+
+        const servicePrices: Record<string, number> = {
+          "vaccination": 500,
+          "checkup": 300,
+          "antiRabies": 300,
+          "ultrasound": 800,
+          "groom": 900,
+          "spayNeuter": 1500,
+          "deworm": 300
+        };
+        
+        const refundAmount = servicePrices[selectedAppointment.appointmentType || "checkup"] || 300;
+
+        const refundRequest = {
+          appointmentId: selectedAppointment.id,
+          clientName: selectedAppointment.clientName,
+          clientEmail: userEmail || "",
+          petName: selectedAppointment.petName,
+          appointmentType: selectedAppointment.appointmentType || "checkup",
+          originalDate: selectedAppointment.date,
+          originalTime: selectedAppointment.timeSlot,
+          amount: refundAmount,
+          paymentMethod: selectedAppointment.paymentMethod || "GCash",
+          refundReason: "Appointment cancellation",
+          gcashReferenceNo: gcashReferenceNoCancel.trim() || "",
+          gcashPhoneNumber: gcashPhoneNumberCancel.replace(/\s/g, ''),
+          status: "pending",
+          requestedAt: new Date().toISOString(),
+          userId: userId || "",
+          refundCompleted: false
+        };
+        
+        console.log("Creating refund request from cancel with data:", refundRequest);
+        
+        await addDoc(collection(db, "refundRequests"), refundRequest);
+        showSuccess(`Appointment cancelled and refund request for ₱${refundAmount} submitted successfully!`);
+      } else {
+        // Regular cancellation without refund
+        showSuccess("Appointment cancelled successfully!");
+      }
+
+      await deleteDoc(doc(db, "appointments", id));
+      setShowCancelModal(false);
+      setGcashReferenceNoCancel("");
+      setGcashPhoneNumberCancel("");
+    } catch (error) {
+      console.error(error);
+      alert("Failed to cancel appointment.");
+    }
+  }
+
+  // Format GCash phone number as user types
+  const formatGcashPhoneNumber = (value: string) => {
+    // Remove all non-digit characters
+    const digits = value.replace(/\D/g, '');
+    
+    // Format as 09XX XXX XXXX
+    if (digits.length <= 2) {
+      return digits;
+    } else if (digits.length <= 6) {
+      return `${digits.slice(0, 4)} ${digits.slice(4)}`;
+    } else {
+      return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7, 11)}`;
+    }
+  }
+
+  const handleGcashPhoneNumberChange = (value: string, isRefundModal: boolean = true) => {
+    const formatted = formatGcashPhoneNumber(value);
+    if (isRefundModal) {
+      setGcashPhoneNumber(formatted);
+    } else {
+      setGcashPhoneNumberCancel(formatted);
+    }
   }
 
   const openRescheduleModal = (appt: AppointmentType) => {
@@ -299,6 +622,11 @@ const UserDashboard: React.FC = () => {
   const openHistoryModal = (appt: AppointmentType) => {
     setSelectedAppointment(appt)
     setShowHistoryModal(true)
+  }
+
+  const openRefundDetails = (refund: RefundRequest) => {
+    setSelectedRefund(refund)
+    setShowRefundDetailsModal(true)
   }
 
   const handleHistoryClick = () => {
@@ -323,7 +651,7 @@ const UserDashboard: React.FC = () => {
         a.id !== selectedAppointment.id && a.date === editDate && a.timeSlot === editSlot && a.status !== "Cancelled",
     )
 
-    if (isTaken) return alert("This time slot is already taken.")
+    if (isTaken) return alert("This time slot is already unavailable.")
 
     try {
       await updateDoc(doc(db, "appointments", selectedAppointment.id), {
@@ -339,40 +667,7 @@ const UserDashboard: React.FC = () => {
     }
   }
 
-  const uploadImageToStorage = async (file: File): Promise<string> => {
-    if (!userId) throw new Error("No user ID")
-
-    const fileExtension = file.name.split(".").pop()
-    const fileName = `profile-picture-${Date.now()}.${fileExtension}`
-
-    const storageRef = ref(storage, `profile-pictures/${userId}/${fileName}`)
-    const snapshot = await uploadBytes(storageRef, file)
-    const downloadURL = await getDownloadURL(snapshot.ref)
-    return downloadURL
-  }
-
-  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-
-    if (file) {
-      if (!file.type.startsWith("image/")) {
-        alert("Please select an image file (JPEG, PNG, etc.)")
-        event.target.value = ""
-        return
-      }
-
-      if (file.size > 5 * 1024 * 1024) {
-        alert("Please select an image smaller than 5MB")
-        event.target.value = ""
-        return
-      }
-
-      setProfilePictureFile(file)
-      const imageUrl = URL.createObjectURL(file)
-      setProfilePictureUrl(imageUrl)
-    }
-  }
-
+  // FIXED: Profile Saving Function
   const saveProfileChanges = async () => {
     if (!userId) {
       console.error("No user ID found")
@@ -380,37 +675,34 @@ const UserDashboard: React.FC = () => {
     }
 
     try {
-      let imageUrl = profilePictureUrl
-
-      if (profilePictureFile) {
-        try {
-          imageUrl = await uploadImageToStorage(profilePictureFile)
-        } catch (error) {
-          console.error("Error uploading image:", error)
-          alert("Failed to upload profile picture. Please try again.")
-          return
-        }
-      }
-
+      // Create complete profile data with all required fields
       const updatedProfile = {
         firstName: editFirstName.trim() || userEmail?.split("@")[0] || "User",
         lastName: editLastName.trim(),
         email: userEmail || "",
-        profilePicture: imageUrl,
+        phoneNumber: editPhoneNumber.trim(),
+        age: editAge.trim(),
+        location: editLocation.trim(),
+        twoFactorEnabled: twoFactorEnabled,
         updatedAt: new Date().toISOString(),
-      }
+        // Preserve existing fields if they exist
+        ...(userProfile?.createdAt && { createdAt: userProfile.createdAt }),
+      };
 
-      await updateDoc(doc(db, "users", userId), updatedProfile)
+      console.log("Saving profile data:", updatedProfile);
 
-      setUserProfile((prevProfile) => ({
-        ...prevProfile!,
-        ...updatedProfile,
-      }))
+      // Use setDoc with merge: true to ensure all fields are preserved
+      await setDoc(doc(db, "users", userId), updatedProfile, { merge: true });
 
-      setProfilePictureFile(null)
+      // Update local state
+      setUserProfile(prev => ({
+        ...prev!,
+        ...updatedProfile
+      }));
+
       setShowProfileModal(false)
-
       showSuccess("Profile updated successfully!")
+
     } catch (error) {
       console.error("Error updating profile:", error)
       alert("Failed to update profile. Please try again.")
@@ -421,11 +713,12 @@ const UserDashboard: React.FC = () => {
     setShowProfileModal(false)
     setEditFirstName(userProfile?.firstName || userEmail?.split("@")[0] || "")
     setEditLastName(userProfile?.lastName || "")
-    setProfilePictureUrl(userProfile?.profilePicture || "")
-    setProfilePictureFile(null)
+    setEditPhoneNumber(userProfile?.phoneNumber || "")
+    setEditAge(userProfile?.age || "")
+    setEditLocation(userProfile?.location || "")
   }
 
-  // 2FA Functions
+  // FIXED: 2FA Functions
   const handleSendOTP = async () => {
     if (!otpEmail) {
       alert("Please enter your email address")
@@ -471,11 +764,12 @@ const UserDashboard: React.FC = () => {
       // Verify OTP logic here
       await new Promise((resolve) => setTimeout(resolve, 1000))
       
-      // Update 2FA status in database
+      // Update 2FA status with complete profile data
       if (userId) {
-        await updateDoc(doc(db, "users", userId), {
+        await setDoc(doc(db, "users", userId), {
           twoFactorEnabled: true,
-        })
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
       }
       
       setTwoFactorEnabled(true)
@@ -493,9 +787,10 @@ const UserDashboard: React.FC = () => {
     if (confirm("Are you sure you want to disable Two-Factor Authentication?")) {
       try {
         if (userId) {
-          await updateDoc(doc(db, "users", userId), {
+          await setDoc(doc(db, "users", userId), {
             twoFactorEnabled: false,
-          })
+            updatedAt: new Date().toISOString(),
+          }, { merge: true });
         }
         setTwoFactorEnabled(false)
         showSuccess("Two-Factor Authentication disabled")
@@ -532,6 +827,20 @@ const UserDashboard: React.FC = () => {
       month: "long",
       day: "numeric",
     })
+  }
+
+  const getRefundStatusLabel = (status: string, refundCompleted?: boolean) => {
+    if (refundCompleted) {
+      return "Refund Complete"
+    }
+    
+    const statusMap: Record<string, string> = {
+      "pending": "Pending Review",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "completed": "Refund Complete"
+    }
+    return statusMap[status] || status
   }
 
   // Render different content based on active menu item
@@ -637,7 +946,7 @@ const UserDashboard: React.FC = () => {
                               <AppointmentValue>{appt.paymentMethod || "Not specified"}</AppointmentValue>
                             </AppointmentInfo>
                           </AppointmentLeftSide>
-                          <StatusBadge status={appt.status || "Pending"}>
+                          <StatusBadge status={appt.status || "Pending Payment"}>
                             {appt.status || "Pending Payment"}
                           </StatusBadge>
                         </AppointmentHeader>
@@ -683,25 +992,11 @@ const UserDashboard: React.FC = () => {
         return (
           <MainContent>
             <ContentHeader>
-              <ContentTitle>Settings</ContentTitle>
-              <ContentSubtitle>Manage your account settings and security preferences</ContentSubtitle>
+              <ContentTitle>Edit Information</ContentTitle>
+              <ContentSubtitle>Manage your personal information and contact details</ContentSubtitle>
             </ContentHeader>
             <ProfileDashboard>
               <ProfileInfoCard>
-                <ProfileAvatarSection>
-                  <ProfileAvatarLarge>
-                    {userProfile?.profilePicture ? (
-                      <ProfileImage src={userProfile.profilePicture} alt="Profile" />
-                    ) : (
-                      <DefaultAvatarLarge>👤</DefaultAvatarLarge>
-                    )}
-                  </ProfileAvatarLarge>
-                  <ProfileName>
-                    {userProfile?.firstName || "User"} {userProfile?.lastName || ""}
-                  </ProfileName>
-                  <ProfileEmail>{userEmail}</ProfileEmail>
-                </ProfileAvatarSection>
-
                 <ProfileDetails>
                   <DetailItem>
                     <DetailLabel>First Name:</DetailLabel>
@@ -710,6 +1005,22 @@ const UserDashboard: React.FC = () => {
                   <DetailItem>
                     <DetailLabel>Last Name:</DetailLabel>
                     <DetailValue>{userProfile?.lastName || "Not set"}</DetailValue>
+                  </DetailItem>
+                  <DetailItem>
+                    <DetailLabel>Phone Number:</DetailLabel>
+                    <DetailValue>{userProfile?.phoneNumber || "Not set"}</DetailValue>
+                  </DetailItem>
+                  <DetailItem>
+                    <DetailLabel>Age:</DetailLabel>
+                    <DetailValue>{userProfile?.age || "Not set"}</DetailValue>
+                  </DetailItem>
+                  <DetailItem>
+                    <DetailLabel>Location:</DetailLabel>
+                    <DetailValue>{userProfile?.location || "Not set"}</DetailValue>
+                  </DetailItem>
+                  <DetailItem>
+                    <DetailLabel>Email:</DetailLabel>
+                    <DetailValue>{userEmail}</DetailValue>
                   </DetailItem>
                   <DetailItem>
                     <DetailLabel>2FA Status:</DetailLabel>
@@ -722,7 +1033,7 @@ const UserDashboard: React.FC = () => {
                 </ProfileDetails>
 
                 <ActionButtons>
-                  <EditProfileButton onClick={handleProfileClick}>Edit Profile</EditProfileButton>
+                  <EditProfileButton onClick={handleProfileClick}>Edit Information</EditProfileButton>
                   <SecurityButton onClick={handle2FAClick}>Security Settings</SecurityButton>
                 </ActionButtons>
               </ProfileInfoCard>
@@ -812,16 +1123,6 @@ const UserDashboard: React.FC = () => {
               </RecentActivitySection>
             )}
 
-            <ActionCardsGrid>
-              <ActionCard onClick={() => setActiveMenuItem("profile")}>
-                <ActionCardIcon>👤</ActionCardIcon>
-                <ActionCardContent>
-                  <ActionCardTitle>Profile & Security</ActionCardTitle>
-                  <ActionCardText>Manage your profile and security settings</ActionCardText>
-                </ActionCardContent>
-              </ActionCard>
-            </ActionCardsGrid>
-
             <RecentActivitySection>
               <SectionHeader>
                 <SectionTitle>Recent Appointments</SectionTitle>
@@ -844,7 +1145,7 @@ const UserDashboard: React.FC = () => {
                           {formatDate(appt.date)} • {appt.timeSlot}
                         </ActivityDate>
                       </ActivityContent>
-                      <ActivityStatus status={appt.status || "Pending"}>{appt.status || "Pending"}</ActivityStatus>
+                      <ActivityStatus status={appt.status || "Pending Payment"}>{appt.status || "Pending Payment"}</ActivityStatus>
                     </ActivityItem>
                   ))}
                 </ActivityList>
@@ -855,13 +1156,136 @@ const UserDashboard: React.FC = () => {
     }
   }
 
-  if (!isClient) {
+  const renderHistorySidebar = () => {
     return (
       <>
-        <GlobalStyle />
+        <HistoryTabs>
+          <HistoryTab 
+            $active={refundHistoryTab === "appointments"} 
+            onClick={() => setRefundHistoryTab("appointments")}
+          >
+            Appointments ({completedAppointments.length})
+          </HistoryTab>
+          <HistoryTab 
+            $active={refundHistoryTab === "refunds"} 
+            onClick={() => setRefundHistoryTab("refunds")}
+          >
+            Refund Requests ({refundRequests.length})
+          </HistoryTab>
+        </HistoryTabs>
+
+        <SidebarContent>
+          {refundHistoryTab === "appointments" ? (
+            completedAppointments.length === 0 ? (
+              <NoHistoryMessage>
+                <NoHistoryIcon>📋</NoHistoryIcon>
+                <NoHistoryText>No appointment history yet</NoHistoryText>
+              </NoHistoryMessage>
+            ) : (
+              <SidebarHistoryList>
+                {completedAppointments.map((appt) => (
+                  <SidebarHistoryCard key={appt.id} onClick={() => openHistoryModal(appt)}>
+                    <SidebarCardHeader>
+                      <AppointmentStatus>{appt.petName}</AppointmentStatus>
+                      <SidebarStatusBadge status={appt.status || "Pending Payment"}>
+                        {appt.status || "Pending Payment"}
+                      </SidebarStatusBadge>
+                    </SidebarCardHeader>
+                    <ServiceInfo>{getAppointmentTypeLabel(appt.appointmentType)}</ServiceInfo>
+                    <DateInfo>
+                      {formatDate(appt.date)} • {appt.timeSlot}
+                    </DateInfo>
+                    <ClickHint>Click for details</ClickHint>
+                  </SidebarHistoryCard>
+                ))}
+              </SidebarHistoryList>
+            )
+          ) : (
+            refundRequests.length === 0 ? (
+              <NoHistoryMessage>
+                <NoHistoryIcon>💰</NoHistoryIcon>
+                <NoHistoryText>No refund requests yet</NoHistoryText>
+              </NoHistoryMessage>
+            ) : (
+              <SidebarHistoryList>
+                {refundRequests.map((refund) => (
+                  <RefundHistoryCard key={refund.id} onClick={() => openRefundDetails(refund)}>
+                    <SidebarCardHeader>
+                      <AppointmentStatus>{refund.petName}</AppointmentStatus>
+                      <RefundStatusBadge 
+                        $status={refund.status} 
+                        $completed={refund.refundCompleted || refund.status === "completed"}
+                      >
+                        {getRefundStatusLabel(refund.status, refund.refundCompleted)}
+                      </RefundStatusBadge>
+                    </SidebarCardHeader>
+                    <ServiceInfo>{getAppointmentTypeLabel(refund.appointmentType)}</ServiceInfo>
+                    <DateInfo>
+                      Requested: {formatDate(refund.requestedAt)}
+                    </DateInfo>
+                    {(refund.refundCompleted || refund.status === "completed") && (
+                      <RefundCompleteBadge>
+                        ✅ Refund Complete
+                      </RefundCompleteBadge>
+                    )}
+                    <ClickHint>Click for details</ClickHint>
+                  </RefundHistoryCard>
+                ))}
+              </SidebarHistoryList>
+            )
+          )}
+        </SidebarContent>
+      </>
+    )
+  }
+
+  if (!isClient) {
+    return (
+      <ThemeProvider theme={themes.light}>
+        <>
+          <GlobalStyle theme={themes.light} />
+          <PageContainer>
+            <HeaderBar>
+              <HeaderLeft>
+                <Logo>
+                  <LogoImage src="/RL.jpg" alt="RL Clinic Logo" />
+                  <LogoText>
+                    <ClinicName>RL Clinic</ClinicName>
+                    <LogoSubtext>Fursure Care - User Dashboard</LogoSubtext>
+                  </LogoText>
+                </Logo>
+              </HeaderLeft>
+            </HeaderBar>
+          </PageContainer>
+        </>
+      </ThemeProvider>
+    )
+  }
+
+  return (
+    <ThemeProvider theme={themes.light}>
+      <>
+        <GlobalStyle theme={themes.light} />
         <PageContainer>
+          {showSuccessMessage && (
+            <SuccessNotification>
+              <SuccessIcon>✓</SuccessIcon>
+              <SuccessText>{successMessage}</SuccessText>
+              <CloseSuccessButton onClick={() => setShowSuccessMessage(false)}>×</CloseSuccessButton>
+            </SuccessNotification>
+          )}
+
           <HeaderBar>
-            <HeaderLeft>
+            <BrandSection>
+              <MenuToggle 
+                onClick={() => setIsSidebarVisible(!isSidebarVisible)} 
+                $isOpen={isSidebarVisible}
+              >
+                <span></span>
+                <span></span>
+                <span></span>
+              </MenuToggle>
+
               <Logo>
                 <LogoImage src="/RL.jpg" alt="RL Clinic Logo" />
                 <LogoText>
@@ -869,561 +1293,713 @@ const UserDashboard: React.FC = () => {
                   <LogoSubtext>Fursure Care - User Dashboard</LogoSubtext>
                 </LogoText>
               </Logo>
-            </HeaderLeft>
+            </BrandSection>
+
+            <UserSection>
+              <UserInfo>
+                {loading ? "Loading..." : `${userProfile?.firstName || "User"} ${userProfile?.lastName || ""}`.trim()}
+              </UserInfo>
+
+              <LogoutButton onClick={handleLogout}>Logout</LogoutButton>
+            </UserSection>
           </HeaderBar>
-        </PageContainer>
-      </>
-    )
-  }
 
-  return (
-    <>
-      <GlobalStyle />
-      <PageContainer>
-        {showSuccessMessage && (
-          <SuccessNotification>
-            <SuccessIcon>✓</SuccessIcon>
-            <SuccessText>{successMessage}</SuccessText>
-            <CloseSuccessButton onClick={() => setShowSuccessMessage(false)}>×</CloseSuccessButton>
-          </SuccessNotification>
-        )}
-
-        <HeaderBar>
-          <BrandSection>
-            <MenuToggle 
-              onClick={() => setIsSidebarVisible(!isSidebarVisible)} 
-              $isOpen={isSidebarVisible}
-            >
-              <span></span>
-              <span></span>
-              <span></span>
-            </MenuToggle>
-
-            <Logo>
-              <LogoImage src="/RL.jpg" alt="RL Clinic Logo" />
-              <LogoText>
-                <ClinicName>RL Clinic</ClinicName>
-                <LogoSubtext>Fursure Care - User Dashboard</LogoSubtext>
-              </LogoText>
-            </Logo>
-          </BrandSection>
-
-          <UserSection>
-            <UserInfo>
-              {loading ? "Loading..." : `${userProfile?.firstName || "User"} ${userProfile?.lastName || ""}`.trim()}
-            </UserInfo>
-
-            <ProfileContainer>
-              <ProfileIconButton onClick={handleProfileClick}>
-                <ProfileAvatar>
-                  {userProfile?.profilePicture ? (
-                    <ProfileImage src={userProfile.profilePicture} alt="Profile" />
-                  ) : (
-                    <DefaultAvatar>👤</DefaultAvatar>
-                  )}
-                </ProfileAvatar>
-              </ProfileIconButton>
-            </ProfileContainer>
-
-            <LogoutButton onClick={handleLogout}>Logout</LogoutButton>
-          </UserSection>
-        </HeaderBar>
-
-        <DashboardLayout>
-          {/* LEFT SIDEBAR MENU */}
-          <Sidebar $isOpen={isSidebarVisible}>
-            <SidebarHeader>
-              <SidebarTitleRow>
-                <SidebarTitle>Main Menu</SidebarTitle>
-              </SidebarTitleRow>
-            </SidebarHeader>
-
-            <MenuList>
-              <MenuItem $active={activeMenuItem === "dashboard"} onClick={() => setActiveMenuItem("dashboard")}>
-                <MenuIcon>📊</MenuIcon>
-                <MenuText>Dashboard</MenuText>
-              </MenuItem>
-
-              <MenuItem
-                $active={activeMenuItem === "pet-registration"}
-                onClick={() => setActiveMenuItem("pet-registration")}
-              >
-                <MenuIcon>🐾</MenuIcon>
-                <MenuText>Pet Registration</MenuText>
-                <MenuBadge $primary={true}>Primary</MenuBadge>
-              </MenuItem>
-
-              <MenuItem $active={activeMenuItem === "appointments"} onClick={() => setActiveMenuItem("appointments")}>
-                <MenuIcon>📅</MenuIcon>
-                <MenuText>Appointments</MenuText>
-                {appointments.length > 0 && <MenuCount>{appointments.length}</MenuCount>}
-              </MenuItem>
-
-              <MenuItem
-                $active={activeMenuItem === "medical-records"}
-                onClick={() => setActiveMenuItem("medical-records")}
-              >
-                <MenuIcon>📋</MenuIcon>
-                <MenuText>Medical Records</MenuText>
-              </MenuItem>
-
-              <MenuItem $active={activeMenuItem === "profile"} onClick={() => setActiveMenuItem("profile")}>
-                <MenuIcon>👤</MenuIcon>
-                <MenuText>Profile & Security</MenuText>
-              </MenuItem>
-            </MenuList>
-
-            <SidebarFooter>
-              <SupportSection>
-                <SupportTitle>Need Help?</SupportTitle>
-                <SupportText>Contact our support team for assistance</SupportText>
-                <SupportButton onClick={() => router.push("/support")}>Get Support</SupportButton>
-              </SupportSection>
-            </SidebarFooter>
-          </Sidebar>
-
-          {/* Floating Menu Button for Mobile */}
-          {!isSidebarVisible && (
-            <FloatingMenuButton onClick={() => setIsSidebarVisible(true)}>
-              ☰
-            </FloatingMenuButton>
-          )}
-
-          {/* MAIN CONTENT AREA */}
-          <ContentArea $sidebarOpen={isSidebarVisible}>
-            {renderContent()}
-          </ContentArea>
-        </DashboardLayout>
-
-        {/* HISTORY SIDEBAR TOGGLE */}
-        <HistorySidebarToggle onClick={handleHistoryClick}>
-          <HistoryIcon>📋</HistoryIcon>
-          <HistoryText>History</HistoryText>
-          {completedAppointments.length > 0 && <HistoryBadgeSmall>{completedAppointments.length}</HistoryBadgeSmall>}
-        </HistorySidebarToggle>
-
-        {showHistorySidebar && (
-          <>
-            <SidebarOverlay onClick={() => setShowHistorySidebar(false)} />
-            <HistorySidebar>
+          <DashboardLayout>
+            {/* LEFT SIDEBAR MENU */}
+            <Sidebar $isOpen={isSidebarVisible}>
               <SidebarHeader>
-                <SidebarTitle>Appointment History</SidebarTitle>
-                <SidebarCloseButton onClick={() => setShowHistorySidebar(false)}>×</SidebarCloseButton>
+                <SidebarTitleRow>
+                  <SidebarTitle>Main Menu</SidebarTitle>
+                </SidebarTitleRow>
               </SidebarHeader>
 
-              <SidebarContent>
-                {completedAppointments.length === 0 ? (
-                  <NoHistoryMessage>
-                    <NoHistoryIcon>📚</NoHistoryIcon>
-                    <NoHistoryText>No appointment history yet</NoHistoryText>
-                  </NoHistoryMessage>
-                ) : (
-                  <SidebarHistoryList>
-                    {completedAppointments.map((appt) => (
-                      <SidebarHistoryCard
-                        key={appt.id}
-                        onClick={() => {
-                          setShowHistorySidebar(false)
-                          openHistoryModal(appt)
-                        }}
-                      >
-                        <SidebarCardHeader>
-                          <PetName>{appt.petName}</PetName>
-                          <SidebarStatusBadge status={appt.status || "Completed"}>
-                            {appt.status === "Done"
-                              ? "✅"
-                              : appt.status === "Not Attend"
-                                ? "❌"
-                                : appt.status === "Cancelled"
-                                  ? "🚫"
-                                  : "✅"}
-                          </SidebarStatusBadge>
-                        </SidebarCardHeader>
-                        <ServiceInfo>{getAppointmentTypeLabel(appt.appointmentType)}</ServiceInfo>
-                        <DateInfo>
-                          {formatDate(appt.date)} • {appt.timeSlot}
-                        </DateInfo>
-                        <ClickHint>Click for details</ClickHint>
-                      </SidebarHistoryCard>
-                    ))}
-                  </SidebarHistoryList>
-                )}
-              </SidebarContent>
-            </HistorySidebar>
-          </>
-        )}
+              <MenuList>
+                <MenuItem $active={activeMenuItem === "dashboard"} onClick={() => setActiveMenuItem("dashboard")}>
+                  <MenuIcon>📊</MenuIcon>
+                  <MenuText>Dashboard</MenuText>
+                </MenuItem>
 
-        {/* PROFILE MODAL */}
-        {showProfileModal && (
-          <ModalOverlay onClick={cancelProfileEdit}>
-            <ModalContainer onClick={(e) => e.stopPropagation()}>
-              <ModalHeader>
-                <ModalTitle>Profile Settings</ModalTitle>
-                <CloseButton onClick={cancelProfileEdit}>×</CloseButton>
-              </ModalHeader>
+                <MenuItem
+                  $active={activeMenuItem === "pet-registration"}
+                  onClick={() => setActiveMenuItem("pet-registration")}
+                >
+                  <MenuIcon>🐾</MenuIcon>
+                  <MenuText>Pet Registration</MenuText>
+                  <MenuBadge $primary={true}>Primary</MenuBadge>
+                </MenuItem>
 
-              <ModalContent>
-                <ProfileSection>
-                  <SectionTitle>👤 Profile Information</SectionTitle>
+                <MenuItem $active={activeMenuItem === "appointments"} onClick={() => setActiveMenuItem("appointments")}>
+                  <MenuIcon>📅</MenuIcon>
+                  <MenuText>Appointments</MenuText>
+                  {appointments.length > 0 && <MenuCount>{appointments.length}</MenuCount>}
+                </MenuItem>
 
-                  <ProfileImageSection>
-                    <ProfileImagePreview>
-                      {profilePictureUrl ? (
-                        <ProfileImage src={profilePictureUrl} alt="Profile Preview" />
-                      ) : (
-                        <DefaultAvatarLarge>👤</DefaultAvatarLarge>
-                      )}
-                    </ProfileImagePreview>
-                    <ImageUploadLabel htmlFor="profile-pic">
-                      Change Photo
-                      <ImageUploadInput type="file" accept="image/*" onChange={handleImageUpload} id="profile-pic" />
-                    </ImageUploadLabel>
-                    {profilePictureFile && (
-                      <ImageUploadHint>New image selected: {profilePictureFile.name}</ImageUploadHint>
-                    )}
-                  </ProfileImageSection>
+                <MenuItem
+                  $active={activeMenuItem === "medical-records"}
+                  onClick={() => setActiveMenuItem("medical-records")}
+                >
+                  <MenuIcon>📋</MenuIcon>
+                  <MenuText>Medical Records</MenuText>
+                </MenuItem>
 
-                  <FormGroup>
-                    <Label>First Name</Label>
-                    <EditInput
-                      type="text"
-                      value={editFirstName}
-                      onChange={(e) => setEditFirstName(e.target.value)}
-                      placeholder="First name"
-                    />
-                  </FormGroup>
+                <MenuItem $active={activeMenuItem === "profile"} onClick={() => setActiveMenuItem("profile")}>
+                  <MenuIcon>⚙️</MenuIcon>
+                  <MenuText>Settings</MenuText>
+                </MenuItem>
+              </MenuList>
 
-                  <FormGroup>
-                    <Label>Last Name</Label>
-                    <EditInput
-                      type="text"
-                      value={editLastName}
-                      onChange={(e) => setEditLastName(e.target.value)}
-                      placeholder="Last name"
-                    />
-                  </FormGroup>
+            </Sidebar>
 
-                  <FormGroup>
-                    <Label>Email</Label>
-                    <EmailDisplay>{userEmail}</EmailDisplay>
-                  </FormGroup>
-                </ProfileSection>
-              </ModalContent>
+            {/* Floating Menu Button for Mobile */}
+            {!isSidebarVisible && (
+              <FloatingMenuButton onClick={() => setIsSidebarVisible(true)}>
+                ☰
+              </FloatingMenuButton>
+            )}
 
-              <ModalActions>
-                <CancelModalButton onClick={cancelProfileEdit}>Cancel</CancelModalButton>
-                <SaveProfileButton onClick={saveProfileChanges}>Save Changes</SaveProfileButton>
-              </ModalActions>
-            </ModalContainer>
-          </ModalOverlay>
-        )}
+            {/* MAIN CONTENT AREA */}
+            <ContentArea $sidebarOpen={isSidebarVisible}>
+              {renderContent()}
+            </ContentArea>
+          </DashboardLayout>
 
-        {/* 2FA MODAL */}
-        {show2FAModal && (
-          <ModalOverlay onClick={() => setShow2FAModal(false)}>
-            <ModalContainer onClick={(e) => e.stopPropagation()}>
-              <ModalHeader>
-                <ModalTitle>Two-Factor Authentication</ModalTitle>
-                <CloseButton onClick={() => setShow2FAModal(false)}>×</CloseButton>
-              </ModalHeader>
+          {/* HISTORY SIDEBAR TOGGLE */}
+          <HistorySidebarToggle onClick={handleHistoryClick}>
+            <HistoryIcon>📋</HistoryIcon>
+            <HistoryText>History</HistoryText>
+            {completedAppointments.length > 0 && <HistoryBadgeSmall>{completedAppointments.length}</HistoryBadgeSmall>}
+          </HistorySidebarToggle>
 
-              <ModalContent>
-                <SecuritySection>
-                  <SectionTitle>🔐 Security Settings</SectionTitle>
-                  
-                  {!showOTPSetup ? (
+          {/* MODALS */}
+          {/* Profile Modal */}
+          {showProfileModal && (
+            <ModalOverlay onClick={cancelProfileEdit}>
+              <ModalContainer onClick={(e) => e.stopPropagation()}>
+                <ModalHeader>
+                  <ModalTitle>Edit Information</ModalTitle>
+                  <CloseButton onClick={cancelProfileEdit}>×</CloseButton>
+                </ModalHeader>
+                <ModalContent>
+                  <ProfileSection>
+                    <FormGroup>
+                      <Label htmlFor="first-name">First Name</Label>
+                      <EditInput
+                        id="first-name"
+                        type="text"
+                        value={editFirstName}
+                        onChange={(e) => setEditFirstName(e.target.value)}
+                        placeholder="Enter your first name"
+                      />
+                    </FormGroup>
+
+                    <FormGroup>
+                      <Label htmlFor="last-name">Last Name</Label>
+                      <EditInput
+                        id="last-name"
+                        type="text"
+                        value={editLastName}
+                        onChange={(e) => setEditLastName(e.target.value)}
+                        placeholder="Enter your last name"
+                      />
+                    </FormGroup>
+
+                    <FormGroup>
+                      <Label htmlFor="phone-number">Phone Number</Label>
+                      <EditInput
+                        id="phone-number"
+                        type="tel"
+                        value={editPhoneNumber}
+                        onChange={(e) => setEditPhoneNumber(e.target.value)}
+                        placeholder="Enter your phone number"
+                      />
+                    </FormGroup>
+
+                    <FormGroup>
+                      <Label htmlFor="age">Age</Label>
+                      <EditInput
+                        id="age"
+                        type="text"
+                        value={editAge}
+                        onChange={(e) => setEditAge(e.target.value)}
+                        placeholder="Enter your age"
+                      />
+                    </FormGroup>
+
+                    <FormGroup>
+                      <Label htmlFor="location">Location</Label>
+                      <EditInput
+                        id="location"
+                        type="text"
+                        value={editLocation}
+                        onChange={(e) => setEditLocation(e.target.value)}
+                        placeholder="Enter your location"
+                      />
+                    </FormGroup>
+
+                    <FormGroup>
+                      <Label>Email</Label>
+                      <EmailDisplay>{userEmail}</EmailDisplay>
+                    </FormGroup>
+                  </ProfileSection>
+                </ModalContent>
+                <ModalActions>
+                  <CancelModalButton onClick={cancelProfileEdit}>Cancel</CancelModalButton>
+                  <SaveProfileButton onClick={saveProfileChanges}>Save Changes</SaveProfileButton>
+                </ModalActions>
+              </ModalContainer>
+            </ModalOverlay>
+          )}
+
+          {/* 2FA Modal */}
+          {show2FAModal && (
+            <ModalOverlay onClick={() => setShow2FAModal(false)}>
+              <ModalContainer onClick={(e) => e.stopPropagation()}>
+                <ModalHeader>
+                  <ModalTitle>Two-Factor Authentication</ModalTitle>
+                  <CloseButton onClick={() => setShow2FAModal(false)}>×</CloseButton>
+                </ModalHeader>
+                <ModalContent>
+                  <SecuritySection>
                     <TwoFactorContainer>
                       <TwoFactorInfo>
-                        <TwoFactorLabel>Two-Factor Authentication (2FA)</TwoFactorLabel>
+                        <TwoFactorLabel>Two-Factor Authentication</TwoFactorLabel>
                         <TwoFactorDescription>
-                          {twoFactorEnabled
-                            ? "✅ Enabled - Verification code will be sent to your email on each login"
-                            : "⚠️ Disabled - Enable 2FA for extra security"}
+                          Add an extra layer of security to your account by enabling two-factor authentication.
                         </TwoFactorDescription>
                       </TwoFactorInfo>
-                      
-                      {!twoFactorEnabled ? (
-                        <Enable2FAButton onClick={() => setShowOTPSetup(true)}>
-                          Enable 2FA
-                        </Enable2FAButton>
+                      {twoFactorEnabled ? (
+                        <Disable2FAButton onClick={handleDisable2FA}>Disable 2FA</Disable2FAButton>
                       ) : (
-                        <Disable2FAButton onClick={handleDisable2FA}>
-                          Disable 2FA
-                        </Disable2FAButton>
+                        <Enable2FAButton onClick={() => setShowOTPSetup(true)}>Enable 2FA</Enable2FAButton>
                       )}
                     </TwoFactorContainer>
-                  ) : (
-                    <OTPSetupSection>
-                      <OTPSetupTitle>Set up Two-Factor Authentication</OTPSetupTitle>
 
-                      {!otpSent ? (
-                        <OTPEmailSection>
-                          <FormGroup>
-                            <Label>Email Address for OTP</Label>
+                    {showOTPSetup && (
+                      <OTPSetupSection>
+                        <OTPSetupTitle>Set Up Two-Factor Authentication</OTPSetupTitle>
+                        {!otpSent ? (
+                          <OTPEmailSection>
+                            <Label htmlFor="otp-email">Email Address for OTP</Label>
                             <EmailInput
+                              id="otp-email"
                               type="email"
                               value={otpEmail}
                               onChange={(e) => setOtpEmail(e.target.value)}
-                              placeholder="Enter your email"
+                              placeholder="Enter your email address"
                               disabled={isSendingOTP}
                             />
-                          </FormGroup>
-                          <SendOTPButton onClick={handleSendOTP} disabled={isSendingOTP || !otpEmail}>
-                            {isSendingOTP ? "Sending OTP..." : "Send OTP"}
-                          </SendOTPButton>
-                        </OTPEmailSection>
-                      ) : (
-                        <OTPVerificationSection>
-                          <OTPInstructions>
-                            We&apos;ve sent a 6-digit verification code to your email. Please enter it below to enable
-                            2FA.
-                          </OTPInstructions>
-
-                          <OTPInputGroup>
-                            <FormGroup>
-                              <Label>Enter 6-digit OTP</Label>
+                            <SendOTPButton onClick={handleSendOTP} disabled={isSendingOTP}>
+                              {isSendingOTP ? "Sending..." : "Send OTP"}
+                            </SendOTPButton>
+                          </OTPEmailSection>
+                        ) : (
+                          <OTPVerificationSection>
+                            <OTPInstructions>
+                              We&apos;ve sent a 6-digit verification code to your email. Please enter it below.
+                            </OTPInstructions>
+                            <OTPInputGroup>
+                              <Label htmlFor="verification-code">Verification Code</Label>
                               <OTPInput
+                                id="verification-code"
                                 type="text"
                                 maxLength={6}
                                 value={verificationCode}
-                                onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ""))}
+                                onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))}
                                 placeholder="000000"
                               />
-                            </FormGroup>
-                            <ResendOTPText>
-                              Didn&apos;t receive the code?{" "}
-                              <ResendLink onClick={handleSendOTP} disabled={isSendingOTP}>
-                                {isSendingOTP ? "Sending..." : "Resend OTP"}
-                              </ResendLink>
-                            </ResendOTPText>
-                          </OTPInputGroup>
-
-                          <OTPButtonGroup>
-                            <CancelModalButton onClick={reset2FAForm}>
-                              Cancel
-                            </CancelModalButton>
-                            <SubmitButton onClick={handleVerifyOTP} disabled={verificationCode.length !== 6}>
-                              Verify & Enable 2FA
-                            </SubmitButton>
-                          </OTPButtonGroup>
-                        </OTPVerificationSection>
-                      )}
-                    </OTPSetupSection>
-                  )}
-                </SecuritySection>
-              </ModalContent>
-
-              {!showOTPSetup && (
+                              <ResendOTPText>
+                                Didn&apos;t receive the code?{' '}
+                                <ResendLink onClick={handleSendOTP} disabled={isSendingOTP}>
+                                  Resend OTP
+                                </ResendLink>
+                              </ResendOTPText>
+                            </OTPInputGroup>
+                            <OTPButtonGroup>
+                              <CancelModalButton onClick={reset2FAForm}>Cancel</CancelModalButton>
+                              <SubmitButton onClick={handleVerifyOTP}>Verify & Enable</SubmitButton>
+                            </OTPButtonGroup>
+                          </OTPVerificationSection>
+                        )}
+                      </OTPSetupSection>
+                    )}
+                  </SecuritySection>
+                </ModalContent>
                 <ModalActions>
                   <CancelModalButton onClick={() => setShow2FAModal(false)}>Close</CancelModalButton>
                 </ModalActions>
-              )}
-            </ModalContainer>
-          </ModalOverlay>
-        )}
+              </ModalContainer>
+            </ModalOverlay>
+          )}
 
-        {/* OTHER MODALS */}
-        {showRescheduleModal && selectedAppointment && (
-          <ModalOverlay onClick={() => setShowRescheduleModal(false)}>
-            <ModalContainer onClick={(e) => e.stopPropagation()}>
-              <ModalHeader>
-                <ModalTitle>Reschedule Appointment</ModalTitle>
-                <CloseButton onClick={() => setShowRescheduleModal(false)}>×</CloseButton>
-              </ModalHeader>
+          {/* Refund Request Modal with GCash Phone Number */}
+          {showRefundModal && selectedAppointment && (
+            <ModalOverlay onClick={() => setShowRefundModal(false)}>
+              <ModalContainer onClick={(e) => e.stopPropagation()}>
+                <ModalHeader>
+                  <ModalTitle>Cancel Appointment & Request Refund</ModalTitle>
+                  <CloseButton onClick={() => setShowRefundModal(false)}>×</CloseButton>
+                </ModalHeader>
+                <ModalContent>
+                  <WarningMessage>
+                    <WarningIcon>⚠️</WarningIcon>
+                    <WarningText>
+                      Since you paid via GCash, you need to request a refund for your payment.
+                      Please provide your GCash registered phone number for the refund.
+                    </WarningText>
+                  </WarningMessage>
 
-              <ModalContent>
-                <AppointmentInfoModal>
-                  <InfoItem>
-                    <InfoLabel>Pet:</InfoLabel>
-                    <InfoValue>{selectedAppointment.petName}</InfoValue>
-                  </InfoItem>
-                  <InfoItem>
-                    <InfoLabel>Current Date:</InfoLabel>
-                    <InfoValue>{formatDate(selectedAppointment.date)}</InfoValue>
-                  </InfoItem>
-                  <InfoItem>
-                    <InfoLabel>Current Time:</InfoLabel>
-                    <InfoValue>{selectedAppointment.timeSlot}</InfoValue>
-                  </InfoItem>
-                </AppointmentInfoModal>
+                  <AppointmentDetails>
+                    <InfoItem>
+                      <InfoLabel>Pet:</InfoLabel>
+                      <InfoValue>{selectedAppointment.petName}</InfoValue>
+                    </InfoItem>
+                    <InfoItem>
+                      <InfoLabel>Service:</InfoLabel>
+                      <InfoValue>{getAppointmentTypeLabel(selectedAppointment.appointmentType)}</InfoValue>
+                    </InfoItem>
+                    <InfoItem>
+                      <InfoLabel>Date & Time:</InfoLabel>
+                      <InfoValue>
+                        {formatDate(selectedAppointment.date || today)} • {selectedAppointment.timeSlot}
+                      </InfoValue>
+                    </InfoItem>
+                    <InfoItem>
+                      <InfoLabel>Payment Method:</InfoLabel>
+                      <InfoValue>GCash (Refund Required)</InfoValue>
+                    </InfoItem>
+                  </AppointmentDetails>
 
-                <FormGroup>
-                  <Label>New Date:</Label>
-                  <DateInput type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} min={today} />
-                </FormGroup>
+                  <FormGroup>
+                    <Label htmlFor="gcash-phone">
+                      GCash Registered Phone Number *
+                    </Label>
+                    <EditInput
+                      id="gcash-phone"
+                      type="tel"
+                      value={gcashPhoneNumber}
+                      onChange={(e) => handleGcashPhoneNumberChange(e.target.value, true)}
+                      placeholder="09XX XXX XXXX"
+                      required
+                      maxLength={13}
+                    />
+                    <InputHint>Enter your GCash registered mobile number (09XXXXXXXXX)</InputHint>
+                  </FormGroup>
 
-                <FormGroup>
-                  <Label>New Time Slot:</Label>
-                  <SelectInput value={editSlot} onChange={(e) => setEditSlot(e.target.value)}>
-                    <option value="">Select a time slot</option>
-                    {timeSlots.map((slot) => {
-                      const isTaken = appointments.some(
-                        (a) =>
-                          a.id !== selectedAppointment.id &&
-                          a.date === editDate &&
-                          a.timeSlot === slot &&
-                          a.status !== "Cancelled",
-                      )
-                      return (
-                        <option key={slot} value={slot} disabled={isTaken}>
-                          {slot} {isTaken ? "(Taken)" : ""}
+                  <FormGroup>
+                    <Label htmlFor="gcash-reference">
+                      GCash Reference Number 
+                    </Label>
+                    <EditInput
+                      id="gcash-reference"
+                      type="text"
+                      value={gcashReferenceNo}
+                      onChange={(e) => setGcashReferenceNo(e.target.value)}
+                      placeholder="Enter GCash reference number if available"
+                    />
+                    <InputHint>This is the reference number from your GCash transaction receipt (optional)</InputHint>
+                  </FormGroup>
+
+                  <FormGroup>
+                    <Label htmlFor="refund-reason">
+                      Reason for Cancellation *
+                    </Label>
+                    <RefundTextarea
+                      id="refund-reason"
+                      value={refundReason}
+                      onChange={(e) => setRefundReason(e.target.value)}
+                      placeholder="Please explain why you&apos;re cancelling and requesting a refund..."
+                      rows={4}
+                      required
+                    />
+                  </FormGroup>
+
+                  <RefundInfoNote>
+                    <strong>Refund Process:</strong> Your refund request will be reviewed within 1-3 business days. 
+                    Once approved, the amount will be refunded to your GCash account using the phone number you provided.
+                  </RefundInfoNote>
+                </ModalContent>
+                <ModalActions>
+                  <CancelModalButton 
+                    onClick={() => {
+                      setShowRefundModal(false)
+                      setGcashReferenceNo("")
+                      setGcashPhoneNumber("")
+                      setRefundReason("")
+                    }}
+                    disabled={refundProcessing}
+                  >
+                    Cancel
+                  </CancelModalButton>
+                  <RefundRequestButton 
+                    onClick={handleRefundRequest}
+                    disabled={!refundReason.trim() || !gcashPhoneNumber.trim() || refundProcessing}
+                  >
+                    {refundProcessing ? "Processing..." : "Submit Refund Request"}
+                  </RefundRequestButton>
+                </ModalActions>
+              </ModalContainer>
+            </ModalOverlay>
+          )}
+
+          {/* Cancel Modal (for non-GCash payments and optional GCash phone number) */}
+          {showCancelModal && selectedAppointment && (
+            <ModalOverlay onClick={() => setShowCancelModal(false)}>
+              <ModalContainer onClick={(e) => e.stopPropagation()}>
+                <ModalHeader>
+                  <ModalTitle>Cancel Appointment</ModalTitle>
+                  <CloseButton onClick={() => setShowCancelModal(false)}>×</CloseButton>
+                </ModalHeader>
+                <ModalContent>
+                  <WarningMessage>
+                    <WarningIcon>⚠️</WarningIcon>
+                    <WarningText>
+                      Are you sure you want to cancel this appointment? This action cannot be undone.
+                      {selectedAppointment.paymentMethod?.toLowerCase() === 'gcash' && 
+                        " If you paid via GCash and would like a refund, please provide your GCash registered phone number below."}
+                    </WarningText>
+                  </WarningMessage>
+
+                  <AppointmentDetails>
+                    <InfoItem>
+                      <InfoLabel>Pet:</InfoLabel>
+                      <InfoValue>{selectedAppointment.petName}</InfoValue>
+                    </InfoItem>
+                    <InfoItem>
+                      <InfoLabel>Service:</InfoLabel>
+                      <InfoValue>{getAppointmentTypeLabel(selectedAppointment.appointmentType)}</InfoValue>
+                    </InfoItem>
+                    <InfoItem>
+                      <InfoLabel>Date & Time:</InfoLabel>
+                      <InfoValue>
+                        {formatDate(selectedAppointment.date || today)} • {selectedAppointment.timeSlot}
+                      </InfoValue>
+                    </InfoItem>
+                    {selectedAppointment.paymentMethod && (
+                      <InfoItem>
+                        <InfoLabel>Payment Method:</InfoLabel>
+                        <InfoValue>{selectedAppointment.paymentMethod}</InfoValue>
+                      </InfoItem>
+                    )}
+                  </AppointmentDetails>
+
+                  {/* Add GCash phone number input for GCash payments in regular cancel modal */}
+                  {selectedAppointment.paymentMethod?.toLowerCase() === 'gcash' && (
+                    <>
+                      <FormGroup>
+                        <Label htmlFor="gcash-phone-cancel">
+                          GCash Registered Phone Number (Optional - for refund)
+                        </Label>
+                        <EditInput
+                          id="gcash-phone-cancel"
+                          type="tel"
+                          value={gcashPhoneNumberCancel}
+                          onChange={(e) => handleGcashPhoneNumberChange(e.target.value, false)}
+                          placeholder="09XX XXX XXXX"
+                          maxLength={13}
+                        />
+                        <InputHint>Provide your GCash registered mobile number if requesting refund</InputHint>
+                      </FormGroup>
+
+                      <FormGroup>
+                        <Label htmlFor="gcash-reference-cancel">
+                          GCash Reference Number (Optional)
+                        </Label>
+                        <EditInput
+                          id="gcash-reference-cancel"
+                          type="text"
+                          value={gcashReferenceNoCancel}
+                          onChange={(e) => setGcashReferenceNoCancel(e.target.value)}
+                          placeholder="Enter GCash reference number if available"
+                        />
+                        <InputHint>Reference number from your GCash transaction receipt</InputHint>
+                      </FormGroup>
+                    </>
+                  )}
+                </ModalContent>
+                <ModalActions>
+                  <CancelModalButton onClick={() => {
+                    setShowCancelModal(false)
+                    setGcashReferenceNoCancel("")
+                    setGcashPhoneNumberCancel("")
+                  }}>
+                    Keep Appointment
+                  </CancelModalButton>
+                  <DeleteModalButton onClick={() => handleDelete(selectedAppointment.id)}>
+                    Cancel Appointment
+                  </DeleteModalButton>
+                </ModalActions>
+              </ModalContainer>
+            </ModalOverlay>
+          )}
+
+          {/* Refund Details Modal */}
+          {showRefundDetailsModal && selectedRefund && (
+            <ModalOverlay onClick={() => setShowRefundDetailsModal(false)}>
+              <ModalContainer onClick={(e) => e.stopPropagation()}>
+                <ModalHeader>
+                  <ModalTitle>Refund Request Details</ModalTitle>
+                  <CloseButton onClick={() => setShowRefundDetailsModal(false)}>×</CloseButton>
+                </ModalHeader>
+                <ModalContent>
+                  <AppointmentDetails>
+                    <InfoItem>
+                      <InfoLabel>Pet Name:</InfoLabel>
+                      <InfoValue>{selectedRefund.petName}</InfoValue>
+                    </InfoItem>
+                    <InfoItem>
+                      <InfoLabel>Service Type:</InfoLabel>
+                      <InfoValue>{getAppointmentTypeLabel(selectedRefund.appointmentType)}</InfoValue>
+                    </InfoItem>
+                    <InfoItem>
+                      <InfoLabel>Original Date:</InfoLabel>
+                      <InfoValue>{formatDate(selectedRefund.originalDate)}</InfoValue>
+                    </InfoItem>
+                    <InfoItem>
+                      <InfoLabel>Original Time:</InfoLabel>
+                      <InfoValue>{selectedRefund.originalTime}</InfoValue>
+                    </InfoItem>
+                    <InfoItem>
+                      <InfoLabel>Payment Method:</InfoLabel>
+                      <InfoValue>{selectedRefund.paymentMethod}</InfoValue>
+                    </InfoItem>
+                    {selectedRefund.gcashPhoneNumber && (
+                      <InfoItem>
+                        <InfoLabel>GCash Phone Number:</InfoLabel>
+                        <InfoValue>{selectedRefund.gcashPhoneNumber}</InfoValue>
+                      </InfoItem>
+                    )}
+                    {selectedRefund.gcashReferenceNo && (
+                      <InfoItem>
+                        <InfoLabel>GCash Reference No:</InfoLabel>
+                        <InfoValue>{selectedRefund.gcashReferenceNo}</InfoValue>
+                      </InfoItem>
+                    )}
+                    <InfoItem>
+                      <InfoLabel>Refund Status:</InfoLabel>
+                      <InfoValue>
+                        <RefundStatusBadge 
+                          $status={selectedRefund.status} 
+                          $completed={selectedRefund.refundCompleted || selectedRefund.status === "completed"}
+                        >
+                          {getRefundStatusLabel(selectedRefund.status, selectedRefund.refundCompleted)}
+                        </RefundStatusBadge>
+                      </InfoValue>
+                    </InfoItem>
+                    <InfoItem>
+                      <InfoLabel>Requested At:</InfoLabel>
+                      <InfoValue>{formatDate(selectedRefund.requestedAt)}</InfoValue>
+                    </InfoItem>
+                    <InfoItem>
+                      <InfoLabel>Reason for Refund:</InfoLabel>
+                      <InfoValue>{selectedRefund.refundReason}</InfoValue>
+                    </InfoItem>
+                    {selectedRefund.processedAt && (
+                      <InfoItem>
+                        <InfoLabel>Processed At:</InfoLabel>
+                        <InfoValue>{formatDate(selectedRefund.processedAt)}</InfoValue>
+                      </InfoItem>
+                    )}
+                    {selectedRefund.refundAmount && (
+                      <InfoItem>
+                        <InfoLabel>Refund Amount:</InfoLabel>
+                        <InfoValue>₱{selectedRefund.refundAmount.toFixed(2)}</InfoValue>
+                      </InfoItem>
+                    )}
+                    {selectedRefund.adminNotes && (
+                      <InfoItem>
+                        <InfoLabel>Admin Notes:</InfoLabel>
+                        <InfoValue>{selectedRefund.adminNotes}</InfoValue>
+                      </InfoItem>
+                    )}
+                  </AppointmentDetails>
+
+                  {(selectedRefund.refundCompleted || selectedRefund.status === "completed") && (
+                    <RefundSuccessMessage>
+                      <RefundSuccessIcon>✅</RefundSuccessIcon>
+                      <RefundSuccessText>
+                        Your refund has been successfully processed. The amount has been refunded to your {selectedRefund.paymentMethod} account.
+                        {selectedRefund.gcashPhoneNumber && ` (${selectedRefund.gcashPhoneNumber})`}
+                        {selectedRefund.processedAt && ` The refund was completed on ${formatDate(selectedRefund.processedAt)}.`}
+                      </RefundSuccessText>
+                    </RefundSuccessMessage>
+                  )}
+                </ModalContent>
+                <ModalActions>
+                  <CancelModalButton onClick={() => setShowRefundDetailsModal(false)}>
+                    Close
+                  </CancelModalButton>
+                </ModalActions>
+              </ModalContainer>
+            </ModalOverlay>
+          )}
+
+          {/* Reschedule Modal */}
+          {showRescheduleModal && selectedAppointment && (
+            <ModalOverlay onClick={() => setShowRescheduleModal(false)}>
+              <ModalContainer onClick={(e) => e.stopPropagation()}>
+                <ModalHeader>
+                  <ModalTitle>Reschedule Appointment</ModalTitle>
+                  <CloseButton onClick={() => setShowRescheduleModal(false)}>×</CloseButton>
+                </ModalHeader>
+                <ModalContent>
+                  <AppointmentInfoModal>
+                    <InfoItem>
+                      <InfoLabel>Pet:</InfoLabel>
+                      <InfoValue>{selectedAppointment.petName}</InfoValue>
+                    </InfoItem>
+                    <InfoItem>
+                      <InfoLabel>Service:</InfoLabel>
+                      <InfoValue>{getAppointmentTypeLabel(selectedAppointment.appointmentType)}</InfoValue>
+                    </InfoItem>
+                    <InfoItem>
+                      <InfoLabel>Current Date & Time:</InfoLabel>
+                      <InfoValue>
+                        {formatDate(selectedAppointment.date || today)} • {selectedAppointment.timeSlot}
+                      </InfoValue>
+                    </InfoItem>
+                  </AppointmentInfoModal>
+
+                  <FormGroup>
+                    <Label htmlFor="reschedule-date">New Date</Label>
+                    <DateInput
+                      id="reschedule-date"
+                      type="date"
+                      value={editDate}
+                      onChange={(e) => setEditDate(e.target.value)}
+                      min={today}
+                    />
+                  </FormGroup>
+
+                  <FormGroup>
+                    <Label htmlFor="reschedule-time">New Time Slot</Label>
+                    <SelectInput
+                      id="reschedule-time"
+                      value={editSlot}
+                      onChange={(e) => setEditSlot(e.target.value)}
+                    >
+                      <option value="">Select time slot</option>
+                      {timeSlots.map((slot) => (
+                        <option key={slot} value={slot}>
+                          {slot}
                         </option>
-                      )
-                    })}
-                  </SelectInput>
-                </FormGroup>
-              </ModalContent>
+                      ))}
+                    </SelectInput>
+                  </FormGroup>
+                </ModalContent>
+                <ModalActions>
+                  <CancelModalButton onClick={() => setShowRescheduleModal(false)}>Cancel</CancelModalButton>
+                  <ConfirmButton onClick={saveEdit}>Reschedule</ConfirmButton>
+                </ModalActions>
+              </ModalContainer>
+            </ModalOverlay>
+          )}
 
-              <ModalActions>
-                <CancelModalButton onClick={() => setShowRescheduleModal(false)}>Cancel</CancelModalButton>
-                <ConfirmButton onClick={saveEdit}>Confirm Reschedule</ConfirmButton>
-              </ModalActions>
-            </ModalContainer>
-          </ModalOverlay>
-        )}
-
-        {showCancelModal && selectedAppointment && (
-          <ModalOverlay onClick={() => setShowCancelModal(false)}>
-            <ModalContainer onClick={(e) => e.stopPropagation()}>
-              <ModalHeader>
-                <ModalTitle>Cancel Appointment</ModalTitle>
-                <CloseButton onClick={() => setShowCancelModal(false)}>×</CloseButton>
-              </ModalHeader>
-
-              <ModalContent>
-                <WarningMessage>
-                  <WarningIcon>⚠️</WarningIcon>
-                  <WarningText>
-                    Are you sure you want to cancel this appointment? This action cannot be undone.
-                  </WarningText>
-                </WarningMessage>
-
-                <AppointmentDetails>
-                  <DetailItem>
-                    <DetailLabel>Pet:</DetailLabel>
-                    <DetailValue>{selectedAppointment.petName}</DetailValue>
-                  </DetailItem>
-                  <DetailItem>
-                    <DetailLabel>Date:</DetailLabel>
-                    <DetailValue>{formatDate(selectedAppointment.date)}</DetailValue>
-                  </DetailItem>
-                  <DetailItem>
-                    <DetailLabel>Time:</DetailLabel>
-                    <DetailValue>{selectedAppointment.timeSlot}</DetailValue>
-                  </DetailItem>
-                  <DetailItem>
-                    <DetailLabel>Service:</DetailLabel>
-                    <DetailValue>{getAppointmentTypeLabel(selectedAppointment.appointmentType)}</DetailValue>
-                  </DetailItem>
-                </AppointmentDetails>
-              </ModalContent>
-
-              <ModalActions>
-                <CancelModalButton onClick={() => setShowCancelModal(false)}>Keep Appointment</CancelModalButton>
-                <DeleteModalButton onClick={() => handleDelete(selectedAppointment.id)}>
-                  Cancel Appointment
-                </DeleteModalButton>
-              </ModalActions>
-            </ModalContainer>
-          </ModalOverlay>
-        )}
-
-        {showHistoryModal && selectedAppointment && (
-          <ModalOverlay onClick={() => setShowHistoryModal(false)}>
-            <ModalContainer onClick={(e) => e.stopPropagation()}>
-              <ModalHeader>
-                <ModalTitle>Appointment Details</ModalTitle>
-                <CloseButton onClick={() => setShowHistoryModal(false)}>×</CloseButton>
-              </ModalHeader>
-
-              <ModalContent>
-                <AppointmentInfoModal>
-                  <InfoItem>
-                    <InfoLabel>Pet Name:</InfoLabel>
-                    <InfoValue>{selectedAppointment.petName}</InfoValue>
-                  </InfoItem>
-                  <InfoItem>
-                    <InfoLabel>Service Type:</InfoLabel>
-                    <InfoValue>{getAppointmentTypeLabel(selectedAppointment.appointmentType)}</InfoValue>
-                  </InfoItem>
-                  <InfoItem>
-                    <InfoLabel>Appointment Date:</InfoLabel>
-                    <InfoValue>{formatDate(selectedAppointment.date)}</InfoValue>
-                  </InfoItem>
-                  <InfoItem>
-                    <InfoLabel>Time Slot:</InfoLabel>
-                    <InfoValue>{selectedAppointment.timeSlot}</InfoValue>
-                  </InfoItem>
-                  <InfoItem>
-                    <InfoLabel>Payment Method:</InfoLabel>
-                    <InfoValue>{selectedAppointment.paymentMethod || "Not specified"}</InfoValue>
-                  </InfoItem>
-                  <InfoItem>
-                    <InfoLabel>Status:</InfoLabel>
-                    <InfoValue>
-                      <HistoryStatusBadge status={selectedAppointment.status || "Completed"}>
-                        {selectedAppointment.status === "Done"
-                          ? "✅ Completed"
-                          : selectedAppointment.status === "Not Attend"
-                            ? "❌ No Show"
-                            : selectedAppointment.status === "Cancelled"
-                              ? "🚫 Cancelled"
-                              : selectedAppointment.status}
-                      </HistoryStatusBadge>
-                    </InfoValue>
-                  </InfoItem>
-                  {selectedAppointment.completedAt && (
+          {/* History Modal */}
+          {showHistoryModal && selectedAppointment && (
+            <ModalOverlay onClick={() => setShowHistoryModal(false)}>
+              <ModalContainer onClick={(e) => e.stopPropagation()}>
+                <ModalHeader>
+                  <ModalTitle>Appointment Details</ModalTitle>
+                  <CloseButton onClick={() => setShowHistoryModal(false)}>×</CloseButton>
+                </ModalHeader>
+                <ModalContent>
+                  <AppointmentDetails>
                     <InfoItem>
-                      <InfoLabel>Completed On:</InfoLabel>
-                      <InfoValue>{formatDate(selectedAppointment.completedAt)}</InfoValue>
+                      <InfoLabel>Pet Name:</InfoLabel>
+                      <InfoValue>{selectedAppointment.petName}</InfoValue>
                     </InfoItem>
-                  )}
-                  {selectedAppointment.veterinarian && (
                     <InfoItem>
-                      <InfoLabel>Veterinarian:</InfoLabel>
-                      <InfoValue>{selectedAppointment.veterinarian}</InfoValue>
+                      <InfoLabel>Service Type:</InfoLabel>
+                      <InfoValue>{getAppointmentTypeLabel(selectedAppointment.appointmentType)}</InfoValue>
                     </InfoItem>
-                  )}
-                  {selectedAppointment.notes && (
                     <InfoItem>
-                      <InfoLabel>Notes:</InfoLabel>
-                      <InfoValue>{selectedAppointment.notes}</InfoValue>
+                      <InfoLabel>Date:</InfoLabel>
+                      <InfoValue>{formatDate(selectedAppointment.date || today)}</InfoValue>
                     </InfoItem>
-                  )}
-                </AppointmentInfoModal>
-              </ModalContent>
+                    <InfoItem>
+                      <InfoLabel>Time Slot:</InfoLabel>
+                      <InfoValue>{selectedAppointment.timeSlot}</InfoValue>
+                    </InfoItem>
+                    <InfoItem>
+                      <InfoLabel>Status:</InfoLabel>
+                      <InfoValue>
+                        <HistoryStatusBadge status={selectedAppointment.status || "Pending Payment"}>
+                          {selectedAppointment.status || "Pending Payment"}
+                        </HistoryStatusBadge>
+                      </InfoValue>
+                    </InfoItem>
+                    <InfoItem>
+                      <InfoLabel>Payment Method:</InfoLabel>
+                      <InfoValue>{selectedAppointment.paymentMethod || "Not specified"}</InfoValue>
+                    </InfoItem>
+                    {selectedAppointment.veterinarian && (
+                      <InfoItem>
+                        <InfoLabel>Veterinarian:</InfoLabel>
+                        <InfoValue>{selectedAppointment.veterinarian}</InfoValue>
+                      </InfoItem>
+                    )}
+                    {selectedAppointment.notes && (
+                      <InfoItem>
+                        <InfoLabel>Notes:</InfoLabel>
+                        <InfoValue>{selectedAppointment.notes}</InfoValue>
+                      </InfoItem>
+                    )}
+                    {selectedAppointment.completedAt && (
+                      <InfoItem>
+                        <InfoLabel>Completed At:</InfoLabel>
+                        <InfoValue>{formatDate(selectedAppointment.completedAt)}</InfoValue>
+                      </InfoItem>
+                    )}
+                  </AppointmentDetails>
+                </ModalContent>
+                <ModalActions>
+                  <CancelModalButton onClick={() => setShowHistoryModal(false)}>Close</CancelModalButton>
+                </ModalActions>
+              </ModalContainer>
+            </ModalOverlay>
+          )}
 
-              <ModalActions>
-                <CancelModalButton onClick={() => setShowHistoryModal(false)}>Close</CancelModalButton>
-              </ModalActions>
-            </ModalContainer>
-          </ModalOverlay>
-        )}
-      </PageContainer>
-    </>
+          {/* History Sidebar */}
+          {showHistorySidebar && (
+            <>
+              <SidebarOverlay onClick={() => setShowHistorySidebar(false)} />
+              <HistorySidebar>
+                <ModalHeader>
+                  <ModalTitle>Appointment History</ModalTitle>
+                  <CloseButton onClick={() => setShowHistorySidebar(false)}>×</CloseButton>
+                </ModalHeader>
+                {renderHistorySidebar()}
+              </HistorySidebar>
+            </>
+          )}
+        </PageContainer>
+      </>
+    </ThemeProvider>
   )
 }
 
 export default UserDashboard
 
-// STYLED COMPONENTS - UPDATED WITH SIDEBAR TOGGLE FUNCTIONALITY
-
-const PageContainer = styled.div`
+// STYLED COMPONENTS
+const PageContainer = styled.div<{ theme: Theme }>`
   min-height: 100vh;
-  background: #f8fafc;
+  background: ${props => props.theme.background};
+  color: ${props => props.theme.text};
+  transition: background-color 0.3s ease, color 0.3s ease;
 `
 
-const HeaderBar = styled.header`
+const HeaderBar = styled.header<{ theme: Theme }>`
   display: flex; 
   justify-content: space-between; 
   align-items: center;
-  padding: 1rem 2rem; 
-  background: #4ECDC4;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  border-bottom: 1px solid #e9ecef;
+  padding: 1rem 1.5rem; 
+  background: linear-gradient(90deg, #34B89C 0%, #6BC1E1 100%);
+  box-shadow: 0 1px 3px ${props => props.theme.shadow};
+  border-bottom: 1px solid ${props => props.theme.border};
   position: sticky;
   top: 0;
   z-index: 100;
+  transition: all 0.3s ease;
 
   @media (max-width: 768px) {
     padding: 1rem;
@@ -1441,39 +2017,39 @@ const BrandSection = styled.div`
   gap: 1rem;
 `
 
-const MenuToggle = styled.div<{ $isOpen?: boolean }>`
+const MenuToggle = styled.div<{ $isOpen?: boolean; theme: Theme }>`
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  width: 28px;
-  height: 22px;
+  width: 24px;
+  height: 18px;
   cursor: pointer;
   position: relative;
 
   span {
-    height: 3px;
+    height: 2px;
     width: 100%;
-    background-color: #2c3e50;
-    border-radius: 3px;
+    background-color: ${props => props.theme.text};
+    border-radius: 2px;
     transition: all 0.3s ease;
     transform-origin: center;
     
     &:nth-child(1) {
-      transform: ${(props) => (props.$isOpen ? "translateY(9.5px) rotate(45deg)" : "translateY(0) rotate(0)")};
+      transform: ${(props) => (props.$isOpen ? "translateY(8px) rotate(45deg)" : "translateY(0) rotate(0)")};
     }
     
     &:nth-child(2) {
       opacity: ${(props) => (props.$isOpen ? "0" : "1")};
-      transform: ${(props) => (props.$isOpen ? "translateX(-20px)" : "translateX(0)")};
+      transform: ${(props) => (props.$isOpen ? "translateX(-10px)" : "translateX(0)")};
     }
     
     &:nth-child(3) {
-      transform: ${(props) => (props.$isOpen ? "translateY(-9.5px) rotate(-45deg)" : "translateY(0) rotate(0)")};
+      transform: ${(props) => (props.$isOpen ? "translateY(-8px) rotate(-45deg)" : "translateY(0) rotate(0)")};
     }
   }
 
   &:hover span {
-    background-color: #34B89C;
+    background-color: ${props => props.theme.secondary};
   }
 `
 
@@ -1484,9 +2060,9 @@ const Logo = styled.div`
 `
 
 const LogoImage = styled.img`
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
+  width: 35px;
+  height: 35px;
+  border-radius: 6px;
   object-fit: cover;
 `
 
@@ -1495,21 +2071,23 @@ const LogoText = styled.div`
   flex-direction: column;
 `
 
-const ClinicName = styled.div`
+const ClinicName = styled.div<{ theme: Theme }>`
   font-weight: 800;
-  font-size: 1.8rem;
-  color: #2c3e50;
+  font-size: 1.5rem;
+  color: ${props => props.theme.text};
   letter-spacing: -0.5px;
+  transition: color 0.3s ease;
 
   @media (max-width: 768px) {
-    font-size: 1.5rem;
+    font-size: 1.3rem;
   }
 `
 
-const LogoSubtext = styled.div`
-  font-size: 0.75rem;
-  color: #6c757d;
+const LogoSubtext = styled.div<{ theme: Theme }>`
+  font-size: 0.7rem;
+  color: ${props => props.theme.textSecondary};
   font-weight: 500;
+  transition: color 0.3s ease;
 
   @media (max-width: 768px) {
     display: none;
@@ -1526,67 +2104,24 @@ const UserSection = styled.div`
   }
 `
 
-const UserInfo = styled.div`
+const UserInfo = styled.div<{ theme: Theme }>`
   font-weight: 600;
-  color: #2c3e50;
+  color: ${props => props.theme.text};
+  font-size: 0.9rem;
+  transition: color 0.3s ease;
   
   @media (max-width: 768px) {
     display: none;
   }
 `
 
-const ProfileContainer = styled.div`
-  display: flex;
-  align-items: center;
-`
-
-const ProfileIconButton = styled.button`
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0.25rem;
-  border-radius: 50%;
-  transition: background 0.3s ease;
-  
-  &:hover {
-    background: #f8f9fa;
-  }
-`
-
-const ProfileAvatar = styled.div`
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  overflow: hidden;
-  border: 2px solid #ffffff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #f0f9f7;
-`
-
-const ProfileImage = styled.img`
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-`
-
-const DefaultAvatar = styled.div`
-  font-size: 1.2rem;
-  color: #6c757d;
-`
-
-const DefaultAvatarLarge = styled(DefaultAvatar)`
-  font-size: 3rem;
-`
-
-const LogoutButton = styled.button`
-  background: #e74c3c;
+const LogoutButton = styled.button<{ theme: Theme }>`
+  background: ${props => props.theme.error};
   color: white;
   border: none;
-  padding: 0.6rem 1.2rem;
-  border-radius: 8px;
-  font-size: 0.85rem;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -1597,49 +2132,49 @@ const LogoutButton = styled.button`
   }
   
   @media (max-width: 768px) {
-    padding: 0.5rem 1rem;
-    font-size: 0.8rem;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.75rem;
   }
 `
 
 const DashboardLayout = styled.div`
   display: flex;
-  min-height: calc(100vh - 80px);
+  min-height: calc(100vh - 70px);
   
   @media (max-width: 768px) {
     flex-direction: column;
   }
 `
 
-const Sidebar = styled.aside<{ $isOpen: boolean }>`
-  width: 280px;
-  background: white;
-  border-right: 1px solid #e9ecef;
+const Sidebar = styled.aside<{ $isOpen: boolean; theme: Theme }>`
+  width: 250px;
+  background: ${(props) => props.theme.surface};
+  border-right: 1px solid ${(props) => props.theme.border};
   display: flex;  
   flex-direction: column;
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 0 8px ${(props) => props.theme.shadow};
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 90;
 
   @media (max-width: 1024px) {
     position: fixed;
     left: 0;
-    top: 80px;
-    height: calc(100vh - 80px);
+    top: 70px;
+    height: calc(100vh - 70px);
     transform: translateX(${(props) => (props.$isOpen ? "0" : "-100%")});
-    box-shadow: ${(props) => (props.$isOpen ? "4px 0 20px rgba(0,0,0,0.15)" : "none")};
+    box-shadow: ${(props) => (props.$isOpen ? "2px 0 12px rgba(0,0,0,0.1)" : "none")};
   }
 
   @media (min-width: 1025px) {
-    transform: translateX(${(props) => (props.$isOpen ? "0" : "-280px")});
+    transform: translateX(${(props) => (props.$isOpen ? "0" : "-250px")});
     position: ${(props) => (props.$isOpen ? "static" : "fixed")};
   }
 `
 
-const SidebarHeader = styled.div`
-  padding: 1.5rem;
-  border-bottom: 1px solid #e9ecef;
-  background: #ffffff;
+const SidebarHeader = styled.div<{ theme: Theme }>`
+  padding: 1.25rem;
+  border-bottom: 1px solid ${props => props.theme.border};
+  background: ${props => props.theme.surface};
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1652,134 +2187,96 @@ const SidebarTitleRow = styled.div`
   width: 100%;
 `
 
-const SidebarTitle = styled.h3`
+const SidebarTitle = styled.h3<{ theme: Theme }>`
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 700;
-  color: #2c3e50;
+  color: ${props => props.theme.text};
   letter-spacing: -0.3px;
+  transition: color 0.3s ease;
 `
 
 const MenuList = styled.div`
   flex: 1;
-  padding: 1rem 0;
+  padding: 0.5rem 0;
 `
 
-const MenuItem = styled.div<{ $active: boolean }>`
+const MenuItem = styled.div<{ $active: boolean; theme: Theme }>`
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 1rem 1.5rem;
+  padding: 0.875rem 1.25rem;
   cursor: pointer;
   transition: all 0.2s ease;
-  border-left: 3px solid ${(props) => (props.$active ? "#34B89C" : "transparent")};
-  background: ${(props) => (props.$active ? "#f8f9fa" : "transparent")};
+  border-left: 3px solid ${(props) => (props.$active ? props.theme.primary : "transparent")};
+  background: ${(props) => (props.$active ? props.theme.background : "transparent")};
+  margin: 0;
   
   &:hover {
-    background: #f8f9fa;
-    border-left-color: #34B89C;
+    background: ${(props) => props.theme.background};
+    border-left-color: ${(props) => props.theme.primary};
   }
 `
 
-const MenuIcon = styled.div`
-  font-size: 1.3rem;
-  color: #2c3e50;
+const MenuIcon = styled.div<{ theme: Theme }>`
+  font-size: 1.1rem;
+  color: ${props => props.theme.text};
+  transition: color 0.3s ease;
 `
 
-const MenuText = styled.span`
+const MenuText = styled.span<{ theme: Theme }>`
   flex: 1;
   font-weight: 600;
-  color: #2c3e50;
-  font-size: 0.95rem;
+  color: ${props => props.theme.text};
+  font-size: 0.9rem;
+  transition: color 0.3s ease;
 `
 
-const MenuBadge = styled.span<{ $primary: boolean }>`
-  background: ${(props) => (props.$primary ? "#34B89C" : "#6c757d")};
+const MenuBadge = styled.span<{ $primary: boolean; theme: Theme }>`
+  background: ${(props) => (props.$primary ? props.theme.primary : props.theme.textSecondary)};
   color: white;
-  padding: 0.25rem 0.5rem;
-  border-radius: 12px;
-  font-size: 0.7rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 10px;
+  font-size: 0.65rem;
   font-weight: 700;
 `
 
 const MenuCount = styled.span`
   background: #e74c3c;
   color: white;
-  padding: 0.25rem 0.6rem;
+  padding: 0.2rem 0.5rem;
   border-radius: 50%;
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   font-weight: 700;
-  min-width: 20px;
-  height: 20px;
+  min-width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
 `
 
-const SidebarFooter = styled.div`
-  padding: 1.5rem;
-  border-top: 1px solid #e9ecef;
-  background: #ffffff;
-`
-
-const SupportSection = styled.div`
-  text-align: center;
-`
-
-const SupportTitle = styled.h4`
-  margin: 0 0 0.5rem 0;
-  font-size: 0.9rem;
-  color: #2c3e50;
-  font-weight: 600;
-`
-
-const SupportText = styled.p`
-  margin: 0 0 1rem 0;
-  font-size: 0.8rem;
-  color: #6c757d;
-  line-height: 1.4;
-`
-
-const SupportButton = styled.button`
-  background: #6c757d;
-  color: white;
-  border: none;
-  padding: 0.6rem 1.2rem;
-  border-radius: 8px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  width: 100%;
-  
-  &:hover {
-    background: #5a6268;
-    transform: translateY(-1px);
-  }
-`
-
-const FloatingMenuButton = styled.button`
+const FloatingMenuButton = styled.button<{ theme: Theme }>`
   position: fixed;
-  top: 90px;
-  left: 15px;
+  top: 80px;
+  left: 0;
   z-index: 80;
-  background: #34B89C;
+  background: ${(props) => props.theme.primary};
   color: white;
   border: none;
   border-radius: 50%;
-  width: 50px;
-  height: 50px;
-  font-size: 1.5rem;
+  width: 44px;
+  height: 44px;
+  font-size: 1.3rem;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  transition: all 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
 
   &:hover {
-    background: #2a9d7f;
-    transform: scale(1.1);
+    background: ${(props) => props.theme.secondary};
+    transform: scale(1.05);
   }
 
   @media (min-width: 1025px) {
@@ -1787,80 +2284,97 @@ const FloatingMenuButton = styled.button`
   }
 `
 
-const ContentArea = styled.main<{ $sidebarOpen: boolean }>`
+const slideInLeft = keyframes`
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+`;
+
+const ContentArea = styled.main<{ $sidebarOpen: boolean; theme: Theme }>`
   flex: 1;
-  background: #f8fafc;
+  background: ${(props) => props.theme.background};
   overflow-y: auto;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   min-width: 0;
-  padding: 2rem;
-  
+  padding: 1.5rem;
+
   @media (min-width: 1025px) {
-    margin-left: ${(props) => (props.$sidebarOpen ? "280px" : "0")};
-    width: ${(props) => (props.$sidebarOpen ? "calc(100% - 280px)" : "100%")};
+    transform: none;
+    width: 100%;
   }
 
   @media (max-width: 1024px) {
-    margin-left: 0;
     width: 100%;
   }
 
   @media (max-width: 768px) {
-    padding: 1.5rem;
+    padding: 1.25rem;
   }
 
   @media (max-width: 480px) {
     padding: 1rem;
   }
-`
+`;
 
 const MainContent = styled.div`
   max-width: 1200px;
   margin: 0 auto;
   width: 100%;
-`
+`;
 
 const ContentHeader = styled.div`
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
   padding: 0;
-`
+  margin-left: 0.75rem;
+  text-align: left;
+  animation: ${slideInLeft} 0.6s ease forwards;
+`;
 
-const ContentTitle = styled.h1`
+const ContentTitle = styled.h1<{ theme: Theme }>`
   margin: 0 0 0.5rem 0;
-  font-size: 2.2rem;
+  font-size: 2rem;
   font-weight: 800;
-  color: #2c3e50;
+  color: ${(props) => props.theme.text};
   letter-spacing: -0.8px;
-  
-  @media (max-width: 768px) {
-    font-size: 1.8rem;
-  }
-`
+  transition: color 0.3s ease;
 
-const ContentSubtitle = styled.p`
+  @media (max-width: 768px) {
+    font-size: 1.9rem;
+  }
+`;
+
+const ContentSubtitle = styled.p<{ theme: Theme }>`
   margin: 0;
-  font-size: 1.1rem;
-  color: #6c757d;
+  font-size: 1rem;
+  color: ${(props) => props.theme.textSecondary};
   font-weight: 500;
-  
-  @media (max-width: 768px) {
-    font-size: 1rem;
-  }
-`
+  transition: color 0.3s ease;
 
+  @media (max-width: 768px) {
+    font-size: 0.9rem;
+  }
+`;
+
+// Continue with the rest of the styled components...
+// [Rest of the styled components remain the same but with proper TypeScript types]
 const QuickStatsGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1.25rem;
   margin-bottom: 2rem;
 `
 
-const StatCard = styled.div`
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 1.5rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e9ecef;
+const StatCard = styled.div<{ theme: Theme }>`
+  background: ${props => props.theme.surface};
+  border-radius: 10px;
+  padding: 1.25rem;
+  box-shadow: 0 1px 3px ${props => props.theme.shadow};
+  border: 1px solid ${props => props.theme.border};
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -1868,13 +2382,14 @@ const StatCard = styled.div`
   
   &:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 8px ${props => props.theme.shadow};
   }
 `
 
-const StatIcon = styled.div`
-  font-size: 2.5rem;
-  color: #34B89C;
+const StatIcon = styled.div<{ theme: Theme }>`
+  font-size: 2rem;
+  color: ${props => props.theme.primary};
+  transition: color 0.3s ease;
 `
 
 const StatContent = styled.div`
@@ -1882,91 +2397,35 @@ const StatContent = styled.div`
   flex-direction: column;
 `
 
-const StatNumber = styled.div`
-  font-size: 2rem;
+const StatNumber = styled.div<{ theme: Theme }>`
+  font-size: 1.8rem;
   font-weight: 800;
-  color: #2c3e50;
+  color: ${props => props.theme.text};
   line-height: 1;
+  transition: color 0.3s ease;
 `
 
-const StatLabel = styled.div`
-  font-size: 0.9rem;
-  color: #6c757d;
+const StatLabel = styled.div<{ theme: Theme }>`
+  font-size: 0.85rem;
+  color: ${props => props.theme.textSecondary};
   font-weight: 600;
+  transition: color 0.3s ease;
 `
 
-const ActionCardsGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1.5rem;
-  margin-bottom: 2rem;
-`
-
-const ActionCard = styled.div`
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 1.5rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border: 1px solid #e9ecef;
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  
-  &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    border-color: #34B89C;
-  }
-`
-
-const ActionCardIcon = styled.div`
-  font-size: 2.2rem;
-  color: #34B89C;
-  background: #f0f9f7;
-  padding: 1rem;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 70px;
-  height: 70px;
-  border: 1px solid #e0f2ed;
-`
-
-const ActionCardContent = styled.div`
-  flex: 1;
-`
-
-const ActionCardTitle = styled.h3`
-  font-size: 1.2rem;
-  font-weight: 700;
-  color: #2c3e50;
-  margin: 0 0 0.5rem 0;
-`
-
-const ActionCardText = styled.p`
-  font-size: 0.9rem;
-  color: #6c757d;
-  margin: 0;
-  line-height: 1.4;
-`
-
-const RecentActivitySection = styled.div`
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 1.5rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e9ecef;
-  margin-bottom: 2rem;
+const RecentActivitySection = styled.div<{ theme: Theme }>`
+  background: ${props => props.theme.surface};
+  border-radius: 10px;
+  padding: 1.25rem;
+  box-shadow: 0 1px 3px ${props => props.theme.shadow};
+  border: 1px solid ${props => props.theme.border};
+  margin-bottom: 1.5rem;
 `
 
 const SectionHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.25rem;
   
   @media (max-width: 768px) {
     flex-direction: column;
@@ -1975,79 +2434,85 @@ const SectionHeader = styled.div`
   }
 `
 
-const SectionTitle = styled.h2`
-  font-size: 1.5rem;
+const SectionTitle = styled.h2<{ theme: Theme }>`
+  font-size: 1.3rem;
   font-weight: 700;
-  color: #2c3e50;
+  color: ${props => props.theme.text};
   margin: 0;
+  transition: color 0.3s ease;
 `
 
-const NoActivity = styled.div`
+const NoActivity = styled.div<{ theme: Theme }>`
   text-align: center;
   padding: 2rem;
-  color: #6c757d;
+  color: ${props => props.theme.textSecondary};
 `
 
 const NoActivityIcon = styled.div`
-  font-size: 3rem;
+  font-size: 2.5rem;
   margin-bottom: 1rem;
   opacity: 0.5;
 `
 
-const NoActivityText = styled.p`
+const NoActivityText = styled.p<{ theme: Theme }>`
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 500;
+  color: ${props => props.theme.textSecondary};
 `
 
 const ActivityList = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.875rem;
 `
 
-const ActivityItem = styled.div`
+const ActivityItem = styled.div<{ theme: Theme }>`
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 1rem;
-  background: #f8f9fa;
+  padding: 0.875rem;
+  background: ${props => props.theme.background};
   border-radius: 8px;
-  border: 1px solid #e9ecef;
+  border: 1px solid ${props => props.theme.border};
+  transition: all 0.3s ease;
 `
 
-const ActivityIcon = styled.div`
-  font-size: 1.5rem;
-  color: #34B89C;
+const ActivityIcon = styled.div<{ theme: Theme }>`
+  font-size: 1.3rem;
+  color: ${props => props.theme.primary};
+  transition: color 0.3s ease;
 `
 
 const ActivityContent = styled.div`
   flex: 1;
 `
 
-const ActivityTitle = styled.div`
+const ActivityTitle = styled.div<{ theme: Theme }>`
   font-weight: 600;
-  color: #2c3e50;
+  color: ${props => props.theme.text};
   margin-bottom: 0.25rem;
+  transition: color 0.3s ease;
 `
 
-const ActivityDate = styled.div`
-  font-size: 0.85rem;
-  color: #6c757d;
+const ActivityDate = styled.div<{ theme: Theme }>`
+  font-size: 0.8rem;
+  color: ${props => props.theme.textSecondary};
+  transition: color 0.3s ease;
 `
 
-const ActivityStatus = styled.span<{ status: string }>`
-  padding: 0.4rem 0.8rem;
-  border-radius: 20px;
-  font-size: 0.75rem;
+const ActivityStatus = styled.span<{ status: string; theme: Theme }>`
+  padding: 0.35rem 0.7rem;
+  border-radius: 16px;
+  font-size: 0.7rem;
   font-weight: 700;
   background: ${(props) => {
     switch (props.status) {
-      case "Confirmed":
+      case "Completed":
         return "#d4edda"
       case "Cancelled":
         return "#f8d7da"
-      case "Completed":
+      case "Scheduled":
         return "#d1ecf1"
       default:
         return "#fff3cd"
@@ -2055,11 +2520,11 @@ const ActivityStatus = styled.span<{ status: string }>`
   }};
   color: ${(props) => {
     switch (props.status) {
-      case "Confirmed":
+      case "Completed":
         return "#155724"
       case "Cancelled":
         return "#721c24"
-      case "Completed":
+      case "Scheduled":
         return "#0c5460"
       default:
         return "#856404"
@@ -2071,124 +2536,129 @@ const ActivityStatus = styled.span<{ status: string }>`
 const PetRegistrationSection = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 1.5rem;
 `
 
-const PetRegistrationCard = styled.div`
-  background: #ffffff;
-  border-radius: 16px;
-  padding: 2.5rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  border: 1px solid #e9ecef;
+const PetRegistrationCard = styled.div<{ theme: Theme }>`
+  background: ${props => props.theme.surface};
+  border-radius: 12px;
+  padding: 2rem;
+  box-shadow: 0 2px 6px ${props => props.theme.shadow};
+  border: 1px solid ${props => props.theme.border};
   display: flex;
   align-items: center;
-  gap: 2rem;
-  border-left: 4px solid #34B89C;
+  gap: 1.5rem;
+  border-left: 4px solid ${props => props.theme.primary};
   
   @media (max-width: 768px) {
     flex-direction: column;
     text-align: center;
-    padding: 2rem;
+    padding: 1.5rem;
   }
 `
 
-const PetRegistrationIcon = styled.div`
-  font-size: 4rem;
-  color: #34B89C;
-  background: #f0f9f7;
-  padding: 1.5rem;
-  border-radius: 16px;
+const PetRegistrationIcon = styled.div<{ theme: Theme }>`
+  font-size: 3rem;
+  color: ${props => props.theme.primary};
+  background: ${props => props.theme.background};
+  padding: 1.25rem;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 100px;
-  height: 100px;
-  border: 1px solid #e0f2ed;
+  min-width: 80px;
+  height: 80px;
+  border: 1px solid ${props => props.theme.border};
 `
 
 const PetRegistrationContent = styled.div`
   flex: 1;
 `
 
-const PetRegistrationTitle = styled.h2`
-  font-size: 1.8rem;
+const PetRegistrationTitle = styled.h2<{ theme: Theme }>`
+  font-size: 1.5rem;
   font-weight: 700;
-  color: #2c3e50;
-  margin: 0 0 1rem 0;
+  color: ${props => props.theme.text};
+  margin: 0 0 0.75rem 0;
   letter-spacing: -0.5px;
+  transition: color 0.3s ease;
 `
 
-const PetRegistrationText = styled.p`
-  font-size: 1.05rem;
-  color: #6c757d;
-  margin: 0 0 2rem 0;
-  line-height: 1.6;
+const PetRegistrationText = styled.p<{ theme: Theme }>`
+  font-size: 0.95rem;
+  color: ${props => props.theme.textSecondary};
+  margin: 0 0 1.5rem 0;
+  line-height: 1.5;
+  transition: color 0.3s ease;
 `
 
-const PetRegistrationButton = styled.button`
-  background: #34B89C;
+const PetRegistrationButton = styled.button<{ theme: Theme }>`
+  background: ${props => props.theme.primary};
   color: white;
   border: none;
-  padding: 1rem 2rem;
-  border-radius: 10px;
-  font-size: 1rem;
+  padding: 0.875rem 1.5rem;
+  border-radius: 8px;
+  font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px ${props => props.theme.shadow};
   
   &:hover {
-    background: #2a9d7f;
+    background: ${props => props.theme.secondary};
     transform: translateY(-1px);
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 8px ${props => props.theme.shadow};
   }
 `
 
 const ExistingPetsSection = styled.div`
-  margin-top: 2rem;
+  margin-top: 1.5rem;
 `
 
 const PetsList = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.875rem;
 `
 
-const PetListItem = styled.div`
+const PetListItem = styled.div<{ theme: Theme }>`
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 1.5rem;
-  background: #ffffff;
-  border-radius: 12px;
-  border: 1px solid #e9ecef;
+  padding: 1.25rem;
+  background: ${props => props.theme.surface};
+  border-radius: 10px;
+  border: 1px solid ${props => props.theme.border};
   transition: all 0.2s ease;
   
   &:hover {
-    border-color: #34B89C;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    border-color: ${props => props.theme.primary};
+    box-shadow: 0 2px 6px ${props => props.theme.shadow};
   }
 `
 
-const PetItemIcon = styled.div`
-  font-size: 2rem;
-  color: #34B89C;
+const PetItemIcon = styled.div<{ theme: Theme }>`
+  font-size: 1.8rem;
+  color: ${props => props.theme.primary};
+  transition: color 0.3s ease;
 `
 
 const PetItemInfo = styled.div`
   flex: 1;
 `
 
-const PetItemName = styled.div`
+const PetItemName = styled.div<{ theme: Theme }>`
   font-weight: 700;
-  color: #2c3e50;
-  font-size: 1.1rem;
+  color: ${props => props.theme.text};
+  font-size: 1rem;
   margin-bottom: 0.25rem;
+  transition: color 0.3s ease;
 `
 
-const PetItemDetails = styled.div`
-  color: #6c757d;
-  font-size: 0.9rem;
+const PetItemDetails = styled.div<{ theme: Theme }>`
+  color: ${props => props.theme.textSecondary};
+  font-size: 0.85rem;
+  transition: color 0.3s ease;
 `
 
 const PetItemActions = styled.div`
@@ -2196,99 +2666,102 @@ const PetItemActions = styled.div`
   gap: 0.5rem;
 `
 
-const ViewRecordsButton = styled.button`
-  background: #34B89C;
+const ViewRecordsButton = styled.button<{ theme: Theme }>`
+  background: ${props => props.theme.primary};
   color: white;
   border: none;
   padding: 0.5rem 1rem;
-  border-radius: 8px;
-  font-size: 0.85rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
   
   &:hover {
-    background: #2a9d7f;
+    background: ${props => props.theme.secondary};
     transform: translateY(-1px);
   }
 `
 
-
-
 // PETS GRID COMPONENTS
 const PetsGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 1rem;
 `
 
-const PetCard = styled.div`
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 1.5rem;
-  border: 1px solid #e9ecef;
+const PetCard = styled.div<{ theme: Theme }>`
+  background: ${props => props.theme.surface};
+  border-radius: 10px;
+  padding: 1.25rem;
+  border: 1px solid ${props => props.theme.border};
   display: flex;
   align-items: center;
   gap: 1rem;
   transition: all 0.2s ease;
   
   &:hover {
-    border-color: #34B89C;
+    border-color: ${props => props.theme.primary};
     transform: translateY(-2px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 2px 6px ${props => props.theme.shadow};
   }
 `
 
-const PetIcon = styled.div`
-  font-size: 2rem;
-  color: #34B89C;
+const PetIcon = styled.div<{ theme: Theme }>`
+  font-size: 1.8rem;
+  color: ${props => props.theme.primary};
+  transition: color 0.3s ease;
 `
 
 const PetInfo = styled.div`
   flex: 1;
 `
 
-const PetName = styled.div`
+const PetName = styled.div<{ theme: Theme }>`
   font-weight: 700;
-  color: #2c3e50;
-  font-size: 1.1rem;
+  color: ${props => props.theme.text};
+  font-size: 1rem;
   margin-bottom: 0.25rem;
+  transition: color 0.3s ease;
 `
 
-const PetDetails = styled.div`
-  color: #6c757d;
-  font-size: 0.85rem;
+const PetDetails = styled.div<{ theme: Theme }>`
+  color: ${props => props.theme.textSecondary};
+  font-size: 0.8rem;
+  transition: color 0.3s ease;
 `
 
 const ViewAllPetsCard = styled(PetCard)`
   cursor: pointer;
-  background: #f0f9f7;
-  border-color: #34B89C;
+  background: ${props => props.theme.background};
+  border-color: ${props => props.theme.primary};
   text-align: center;
   flex-direction: column;
   gap: 0.5rem;
   
   &:hover {
-    background: #e0f2ed;
+    background: ${props => props.theme.surface};
   }
 `
 
-const ViewAllIcon = styled.div`
-  font-size: 1.5rem;
-  color: #34B89C;
+const ViewAllIcon = styled.div<{ theme: Theme }>`
+  font-size: 1.3rem;
+  color: ${props => props.theme.primary};
+  transition: color 0.3s ease;
 `
 
-const ViewAllText = styled.div`
+const ViewAllText = styled.div<{ theme: Theme }>`
   font-weight: 600;
-  color: #2c3e50;
-  font-size: 0.9rem;
+  color: ${props => props.theme.text};
+  font-size: 0.85rem;
+  transition: color 0.3s ease;
 `
 
 // MEDICAL RECORDS SECTION
 const MedicalRecordsDashboard = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 1.5rem;
 `
 
 const MedicalRecordsCard = styled(PetRegistrationCard)``
@@ -2303,70 +2776,39 @@ const MedicalRecordsText = styled(PetRegistrationText)``
 
 const MedicalRecordsButton = styled(PetRegistrationButton)``
 
-
-
 // PROFILE SECTION
 const ProfileDashboard = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 2rem;
+  gap: 1.5rem;
   
   @media (max-width: 768px) {
     grid-template-columns: 1fr;
   }
 `
 
-const ProfileInfoCard = styled.div`
-  background: #ffffff;
-  border-radius: 16px;
-  padding: 2rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  border: 1px solid #e9ecef;
+const ProfileInfoCard = styled.div<{ theme: Theme }>`
+  background: ${props => props.theme.surface};
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 6px ${props => props.theme.shadow};
+  border: 1px solid ${props => props.theme.border};
   text-align: center;
-`
-
-const ProfileAvatarSection = styled.div`
-  margin-bottom: 2rem;
-`
-
-const ProfileAvatarLarge = styled.div`
-  width: 120px;
-  height: 120px;
-  border-radius: 50%;
-  overflow: hidden;
-  border: 3px solid #34B89C;
-  margin: 0 auto 1rem auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #f0f9f7;
-`
-
-const ProfileName = styled.h2`
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #2c3e50;
-  margin: 0 0 0.5rem 0;
-`
-
-const ProfileEmail = styled.p`
-  color: #6c757d;
-  margin: 0;
-  font-size: 0.95rem;
 `
 
 const ProfileDetails = styled.div`
   text-align: left;
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
 `
 
-const DetailItem = styled.div`
+const DetailItem = styled.div<{ theme: Theme }>`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid #e9ecef;
+  margin-bottom: 0.875rem;
+  padding-bottom: 0.875rem;
+  border-bottom: 1px solid ${props => props.theme.border};
+  transition: all 0.3s ease;
   
   &:last-child {
     margin-bottom: 0;
@@ -2375,135 +2817,142 @@ const DetailItem = styled.div`
   }
 `
 
-const DetailLabel = styled.span`
+const DetailLabel = styled.span<{ theme: Theme }>`
   font-weight: 600;
-  color: #6c757d;
-  font-size: 0.9rem;
+  color: ${props => props.theme.textSecondary};
+  font-size: 0.85rem;
+  transition: color 0.3s ease;
 `
 
-const DetailValue = styled.span`
-  color: #2c3e50;
+const DetailValue = styled.span<{ theme: Theme }>`
+  color: ${props => props.theme.text};
   font-weight: 500;
+  transition: color 0.3s ease;
 `
 
 const ActionButtons = styled.div`
   display: flex;
   gap: 1rem;
-  margin-top: 1.5rem;
+  margin-top: 1.25rem;
   
   @media (max-width: 480px) {
     flex-direction: column;
   }
 `
 
-const EditProfileButton = styled.button`
-  background: #34B89C;
+const EditProfileButton = styled.button<{ theme: Theme }>`
+  background: ${props => props.theme.primary};
   color: white;
   border: none;
-  padding: 0.8rem 1.5rem;
-  border-radius: 10px;
-  font-size: 0.95rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
   width: 100%;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px ${props => props.theme.shadow};
   
   &:hover {
-    background: #2a9d7f;
+    background: ${props => props.theme.secondary};
     transform: translateY(-1px);
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 8px ${props => props.theme.shadow};
   }
 `
 
-const SecurityButton = styled.button`
-  background: #6c757d;
+const SecurityButton = styled.button<{ theme: Theme }>`
+  background: #2c87c4;;
   color: white;
   border: none;
-  padding: 0.8rem 1.5rem;
-  border-radius: 10px;
-  font-size: 0.95rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
   width: 100%;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px ${props => props.theme.shadow};
   
   &:hover {
     background: #5a6268;
     transform: translateY(-1px);
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 8px ${props => props.theme.shadow};
   }
 `
 
-const SecurityCard = styled.div`
-  background: #ffffff;
-  border-radius: 16px;
-  padding: 2rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  border: 1px solid #e9ecef;
+const SecurityCard = styled.div<{ theme: Theme }>`
+  background: ${props => props.theme.surface};
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 6px ${props => props.theme.shadow};
+  border: 1px solid ${props => props.theme.border};
 `
 
-const SecurityTitle = styled.h3`
-  font-size: 1.3rem;
+const SecurityTitle = styled.h3<{ theme: Theme }>`
+  font-size: 1.2rem;
   font-weight: 700;
-  color: #2c3e50;
-  margin: 0 0 1.5rem 0;
+  color: ${props => props.theme.text};
+  margin: 0 0 1.25rem 0;
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  transition: color 0.3s ease;
 `
 
 const SecurityFeatures = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.875rem;
 `
 
-const SecurityFeature = styled.div`
+const SecurityFeature = styled.div<{ theme: Theme }>`
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 1rem;
-  background: #f8f9fa;
+  padding: 0.875rem;
+  background: ${props => props.theme.background};
   border-radius: 8px;
-  border: 1px solid #e9ecef;
+  border: 1px solid ${props => props.theme.border};
+  transition: all 0.3s ease;
 `
 
-const SecurityFeatureIcon = styled.div`
-  font-size: 1.5rem;
-  color: #34B89C;
+const SecurityFeatureIcon = styled.div<{ theme: Theme }>`
+  font-size: 1.3rem;
+  color: ${props => props.theme.primary};
+  transition: color 0.3s ease;
 `
 
 const SecurityFeatureInfo = styled.div`
   flex: 1;
 `
 
-const SecurityFeatureTitle = styled.div`
+const SecurityFeatureTitle = styled.div<{ theme: Theme }>`
   font-weight: 600;
-  color: #2c3e50;
+  color: ${props => props.theme.text};
   margin-bottom: 0.25rem;
+  transition: color 0.3s ease;
 `
 
-const SecurityFeatureStatus = styled.div`
-  font-size: 0.85rem;
-  color: #6c757d;
+const SecurityFeatureStatus = styled.div<{ theme: Theme }>`
+  font-size: 0.8rem;
+  color: ${props => props.theme.textSecondary};
   font-weight: 500;
+  transition: color 0.3s ease;
 `
 
-const SecurityActionButton = styled.button`
-  background: #34B89C;
+const SecurityActionButton = styled.button<{ theme: Theme }>`
+  background: ${props => props.theme.primary};
   color: white;
   border: none;
   padding: 0.5rem 1rem;
   border-radius: 6px;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
   
   &:hover {
-    background: #2a9d7f;
+    background: ${props => props.theme.secondary};
   }
 `
 
@@ -2513,12 +2962,12 @@ const SecurityStatus = styled.span<{ $enabled: boolean }>`
 `
 
 // APPOINTMENTS SECTION
-const AppointmentsSection = styled.div`
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 1.5rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e9ecef;
+const AppointmentsSection = styled.div<{ theme: Theme }>`
+  background: ${props => props.theme.surface};
+  border-radius: 10px;
+  padding: 1.25rem;
+  box-shadow: 0 1px 3px ${props => props.theme.shadow};
+  border: 1px solid ${props => props.theme.border};
 `
 
 const SectionTitleGroup = styled.div`
@@ -2530,84 +2979,85 @@ const SectionTitleGroup = styled.div`
 const AppointmentCount = styled.span`
   background: #34B89C;
   color: white;
-  padding: 0.4rem 0.8rem;
-  border-radius: 16px;
-  font-size: 0.8rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 14px;
+  font-size: 0.75rem;
   font-weight: 700;
 `
 
-const NewAppointmentButton = styled.button`
-  background: #34B89C;
+const NewAppointmentButton = styled.button<{ theme: Theme }>`
+  background: ${props => props.theme.primary};
   color: white;
   border: none;
-  padding: 0.8rem 1.5rem;
-  border-radius: 10px;
-  font-size: 0.9rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px ${props => props.theme.shadow};
   
   &:hover {
-    background: #2a9d7f;
+    background: ${props => props.theme.secondary};
     transform: translateY(-1px);
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 8px ${props => props.theme.shadow};
   }
 `
 
-const NoAppointments = styled.div`
+const NoAppointments = styled.div<{ theme: Theme }>`
   text-align: center;
-  padding: 3rem 2rem;
-  color: #6c757d;
+  padding: 2.5rem 1.5rem;
+  color: ${props => props.theme.textSecondary};
 `
 
 const NoAppointmentsIcon = styled.div`
-  font-size: 4rem;
+  font-size: 3rem;
   margin-bottom: 1rem;
   opacity: 0.5;
 `
 
-const NoAppointmentsText = styled.p`
-  font-size: 1.1rem;
-  margin: 0 0 1.5rem 0;
+const NoAppointmentsText = styled.p<{ theme: Theme }>`
+  font-size: 1rem;
+  margin: 0 0 1.25rem 0;
   font-weight: 500;
+  color: ${props => props.theme.textSecondary};
 `
 
-const ScheduleButton = styled.button`
-  background: #34B89C;
+const ScheduleButton = styled.button<{ theme: Theme }>`
+  background: ${props => props.theme.primary};
   color: white;
   border: none;
-  padding: 0.8rem 1.5rem;
-  border-radius: 10px;
-  font-size: 0.9rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px ${props => props.theme.shadow};
   
   &:hover {
-    background: #2a9d7f;
+    background: ${props => props.theme.secondary};
     transform: translateY(-1px);
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 8px ${props => props.theme.shadow};
   }
 `
 
 const AppointmentsList = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.875rem;
 `
 
-const AppointmentCard = styled.div`
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 1.5rem;
-  border: 1px solid #e9ecef;
+const AppointmentCard = styled.div<{ theme: Theme }>`
+  background: ${props => props.theme.surface};
+  border-radius: 10px;
+  padding: 1.25rem;
+  border: 1px solid ${props => props.theme.border};
   transition: all 0.2s ease;
   
   &:hover {
-    border-color: #34B89C;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    border-color: ${props => props.theme.primary};
+    box-shadow: 0 2px 6px ${props => props.theme.shadow};
   }
 `
 
@@ -2615,11 +3065,11 @@ const AppointmentHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 1rem;
+  margin-bottom: 0.875rem;
   
   @media (max-width: 768px) {
     flex-direction: column;
-    gap: 1rem;
+    gap: 0.875rem;
   }
 `
 
@@ -2627,11 +3077,12 @@ const AppointmentLeftSide = styled.div`
   flex: 1;
 `
 
-const AppointmentStatus = styled.div`
+const AppointmentStatus = styled.div<{ theme: Theme }>`
   font-weight: 700;
-  color: #2c3e50;
-  font-size: 1.1rem;
+  color: ${props => props.theme.text};
+  font-size: 1rem;
   margin-bottom: 0.5rem;
+  transition: color 0.3s ease;
 `
 
 const AppointmentInfo = styled.div`
@@ -2642,37 +3093,39 @@ const AppointmentInfo = styled.div`
   flex-wrap: wrap;
 `
 
-const AppointmentLabel = styled.span`
+const AppointmentLabel = styled.span<{ theme: Theme }>`
   font-weight: 600;
-  color: #6c757d;
-  font-size: 0.9rem;
+  color: ${props => props.theme.textSecondary};
+  font-size: 0.85rem;
+  transition: color 0.3s ease;
 `
 
-const AppointmentValue = styled.span`
-  color: #2c3e50;
+const AppointmentValue = styled.span<{ theme: Theme }>`
+  color: ${props => props.theme.text};
   font-weight: 500;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  transition: color 0.3s ease;
 `
 
-const AppointmentSeparator = styled.span`
-  color: #dee2e6;
+const AppointmentSeparator = styled.span<{ theme: Theme }>`
+  color: ${props => props.theme.border};
   font-weight: 300;
 `
 
-const StatusBadge = styled.span<{ status: string }>`
-  padding: 0.5rem 1rem;
-  border-radius: 20px;
-  font-size: 0.8rem;
+const StatusBadge = styled.span<{ status: string; theme: Theme }>`
+  padding: 0.4rem 0.8rem;
+  border-radius: 16px;
+  font-size: 0.75rem;
   font-weight: 700;
   background: ${(props) => {
     switch (props.status) {
-      case "Confirmed":
+      case "Completed":
         return "#d4edda"
       case "Pending Payment":
         return "#fff3cd"
       case "Cancelled":
         return "#f8d7da"
-      case "Completed":
+      case "Scheduled":
         return "#d1ecf1"
       default:
         return "#e2e3e5"
@@ -2680,13 +3133,13 @@ const StatusBadge = styled.span<{ status: string }>`
   }};
   color: ${(props) => {
     switch (props.status) {
-      case "Confirmed":
+      case "Completed":
         return "#155724"
       case "Pending Payment":
         return "#856404"
       case "Cancelled":
         return "#721c24"
-      case "Completed":
+      case "Scheduled":
         return "#0c5460"
       default:
         return "#383d41"
@@ -2708,30 +3161,30 @@ const ButtonRow = styled.div`
   }
 `
 
-const EditButton = styled.button`
-  background: #34B89C;
+const EditButton = styled.button<{ theme: Theme }>`
+  background: ${props => props.theme.primary};
   color: white;
   border: none;
-  padding: 0.6rem 1.2rem;
-  border-radius: 8px;
-  font-size: 0.85rem;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
   
   &:hover {
-    background: #2a9d7f;
+    background: ${props => props.theme.secondary};
     transform: translateY(-1px);
   }
 `
 
-const DeleteButton = styled.button`
-  background: #e74c3c;
+const DeleteButton = styled.button<{ theme: Theme }>`
+  background: ${props => props.theme.error};
   color: white;
   border: none;
-  padding: 0.6rem 1.2rem;
-  border-radius: 8px;
-  font-size: 0.85rem;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -2743,19 +3196,19 @@ const DeleteButton = styled.button`
 `
 
 // HISTORY SIDEBAR COMPONENTS
-const HistorySidebarToggle = styled.button`
+const HistorySidebarToggle = styled.button<{ theme: Theme }>`
   position: fixed;
-  bottom: 2rem;
-  right: 2rem;
-  background: #34B89C;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  background: ${props => props.theme.primary};
   color: white;
   border: none;
-  padding: 1rem;
+  padding: 0.875rem;
   border-radius: 50%;
-  width: 60px;
-  height: 60px;
+  width: 55px;
+  height: 55px;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2765,18 +3218,18 @@ const HistorySidebarToggle = styled.button`
   z-index: 100;
   
   &:hover {
-    background: #2a9d7f;
+    background: ${props => props.theme.secondary};
     transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.2);
   }
 `
 
 const HistoryIcon = styled.div`
-  font-size: 1.2rem;
+  font-size: 1.1rem;
 `
 
 const HistoryText = styled.span`
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   font-weight: 600;
 `
 
@@ -2787,137 +3240,25 @@ const HistoryBadgeSmall = styled.span`
   background: #e74c3c;
   color: white;
   border-radius: 50%;
-  width: 20px;
-  height: 20px;
-  font-size: 0.7rem;
+  width: 18px;
+  height: 18px;
+  font-size: 0.65rem;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
 `
 
-const SidebarOverlay = styled.div`
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0,0,0,0.5);
-  z-index: 1998;
-`
-
-const HistorySidebar = styled.div`
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 400px;
-  background: white;
-  box-shadow: -4px 0 16px rgba(0,0,0,0.1);
-  z-index: 1999;
-  display: flex;
-  flex-direction: column;
-  
-  @media (max-width: 480px) {
-    width: 100%;
-  }
-`
-
-const SidebarCloseButton = styled.button`
-  background: none;
-  border: none;
-  font-size: 1.5rem;
-  cursor: pointer;
-  color: #6c757d;
-  padding: 0.25rem;
-  
-  &:hover {
-    color: #2c3e50;
-  }
-`
-
-const SidebarContent = styled.div`
-  flex: 1;
-  overflow-y: auto;
-  padding: 1rem;
-`
-
-const NoHistoryMessage = styled.div`
-  text-align: center;
-  padding: 3rem 2rem;
-  color: #6c757d;
-`
-
-const NoHistoryIcon = styled.div`
-  font-size: 3rem;
-  margin-bottom: 1rem;
-  opacity: 0.5;
-`
-
-const NoHistoryText = styled.p`
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 500;
-`
-
-const SidebarHistoryList = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-`
-
-const SidebarHistoryCard = styled.div`
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 1.25rem;
-  border: 1px solid #e9ecef;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  
-  &:hover {
-    border-color: #34B89C;
-    transform: translateX(-4px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  }
-`
-
-const SidebarCardHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
-`
-
-const ServiceInfo = styled.div`
-  color: #6c757d;
-  font-weight: 500;
-  margin-bottom: 0.25rem;
-  font-size: 0.9rem;
-`
-
-const DateInfo = styled.div`
-  color: #6c757d;
-  font-size: 0.85rem;
-  margin-bottom: 0.5rem;
-`
-
-const ClickHint = styled.div`
-  color: #34B89C;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-align: right;
-`
-
-// MODAL COMPONENTS
-const SuccessNotification = styled.div`
+// SUCCESS NOTIFICATION
+const SuccessNotification = styled.div<{ theme: Theme }>`
   position: fixed;
   top: 1rem;
   right: 1rem;
   background: #d4edda;
   color: #155724;
-  padding: 1rem 1.5rem;
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  padding: 1rem 1.25rem;
+  border-radius: 10px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.15);
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -2938,19 +3279,20 @@ const SuccessNotification = styled.div`
 `
 
 const SuccessIcon = styled.div`
-  font-size: 1.2rem;
+  font-size: 1.1rem;
   font-weight: bold;
 `
 
 const SuccessText = styled.div`
   font-weight: 600;
   flex: 1;
+  font-size: 0.9rem;
 `
 
 const CloseSuccessButton = styled.button`
   background: none;
   border: none;
-  font-size: 1.2rem;
+  font-size: 1.1rem;
   cursor: pointer;
   color: #155724;
   padding: 0.25rem;
@@ -2960,6 +3302,7 @@ const CloseSuccessButton = styled.button`
   }
 `
 
+// MODAL COMPONENTS
 const ModalOverlay = styled.div`
   position: fixed;
   top: 0;
@@ -2974,12 +3317,12 @@ const ModalOverlay = styled.div`
   padding: 1rem;
 `
 
-const ModalContainer = styled.div`
-  background: white;
-  border-radius: 20px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+const ModalContainer = styled.div<{ theme: Theme }>`
+  background: ${props => props.theme.surface};
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
   width: 100%;
-  max-width: 500px;
+  max-width: 480px;
   max-height: 90vh;
   overflow-y: auto;
   animation: modalAppear 0.3s ease;
@@ -2996,42 +3339,44 @@ const ModalContainer = styled.div`
   }
 `
 
-const ModalHeader = styled.div`
+const ModalHeader = styled.div<{ theme: Theme }>`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1.5rem 2rem;
-  border-bottom: 1px solid #e9ecef;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid ${props => props.theme.border};
 `
 
-const ModalTitle = styled.h2`
+const ModalTitle = styled.h2<{ theme: Theme }>`
   margin: 0;
-  font-size: 1.5rem;
+  font-size: 1.3rem;
   font-weight: 700;
-  color: #2c3e50;
+  color: ${props => props.theme.text};
+  transition: color 0.3s ease;
 `
 
-const CloseButton = styled.button`
+const CloseButton = styled.button<{ theme: Theme }>`
   background: none;
   border: none;
-  font-size: 1.5rem;
+  font-size: 1.3rem;
   cursor: pointer;
-  color: #6c757d;
+  color: ${props => props.theme.textSecondary};
   padding: 0.25rem;
+  transition: color 0.3s ease;
   
   &:hover {
-    color: #2c3e50;
+    color: ${props => props.theme.text};
   }
 `
 
 const ModalContent = styled.div`
-  padding: 2rem;
+  padding: 1.5rem;
 `
 
 const ModalActions = styled.div`
   display: flex;
   gap: 1rem;
-  padding: 1.5rem 2rem;
+  padding: 1.25rem 1.5rem;
   border-top: 1px solid #e9ecef;
   justify-content: flex-end;
   
@@ -3042,161 +3387,125 @@ const ModalActions = styled.div`
 
 // FORM COMPONENTS
 const FormGroup = styled.div`
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.25rem;
 `
 
-const Label = styled.label`
+const Label = styled.label<{ theme: Theme }>`
   display: block;
   margin-bottom: 0.5rem;
   font-weight: 600;
-  color: #2c3e50;
-  font-size: 0.9rem;
+  color: ${props => props.theme.text};
+  font-size: 0.85rem;
+  transition: color 0.3s ease;
 `
 
-const EditInput = styled.input`
+const EditInput = styled.input<{ theme: Theme }>`
   width: 100%;
   padding: 0.75rem 1rem;
-  border: 2px solid rgba(107, 193, 225, 0.3);
+  border: 2px solid ${props => props.theme.border};
   border-radius: 8px;
   font-size: 0.9rem;
   transition: all 0.3s ease;
+  background: ${props => props.theme.background};
+  color: ${props => props.theme.text};
   
   &:focus {
     outline: none;
-    border-color: #34B89C;
+    border-color: ${props => props.theme.primary};
     box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.1);
   }
 `
 
 const DateInput = styled(EditInput)``
 
-const SelectInput = styled.select`
+const SelectInput = styled.select<{ theme: Theme }>`
   width: 100%;
   padding: 0.75rem 1rem;
-  border: 2px solid rgba(107, 193, 225, 0.3);
+  border: 2px solid ${props => props.theme.border};
   border-radius: 8px;
   font-size: 0.9rem;
   transition: all 0.3s ease;
-  background: white;
+  background: ${props => props.theme.background};
+  color: ${props => props.theme.text};
   
   &:focus {
     outline: none;
-    border-color: #34B89C;
+    border-color: ${props => props.theme.primary};
     box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.1);
   }
 `
 
-const EmailDisplay = styled.div`
+const EmailDisplay = styled.div<{ theme: Theme }>`
   padding: 0.75rem 1rem;
-  background: linear-gradient(135deg, #f0f9ff 0%, #ffffff 100%);
-  border: 2px solid rgba(107, 193, 225, 0.2);
+  background: ${props => props.theme.background};
+  border: 2px solid ${props => props.theme.border};
   border-radius: 8px;
-  color: #6c757d;
+  color: ${props => props.theme.textSecondary};
   font-size: 0.9rem;
+  transition: all 0.3s ease;
 `
 
 // PROFILE MODAL COMPONENTS
 const ProfileSection = styled.div`
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
 `
 
 const SecuritySection = styled.div`
   margin-bottom: 1rem;
 `
 
-const ProfileImageSection = styled.div`
-  text-align: center;
-  margin-bottom: 1.5rem;
-`
-
-const ProfileImagePreview = styled.div`
-  width: 100px;
-  height: 100px;
-  border-radius: 50%;
-  overflow: hidden;
-  border: 3px solid #34B89C;
-  margin: 0 auto 1rem auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #f0f9f7;
-`
-
-const ImageUploadLabel = styled.label`
-  display: inline-block;
-  background: #34B89C;
-  color: white;
-  padding: 0.6rem 1.2rem;
-  border-radius: 8px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  
-  &:hover {
-    background: #2a9d7f;
-  }
-`
-
-const ImageUploadInput = styled.input`
-  display: none;
-`
-
-const ImageUploadHint = styled.div`
-  font-size: 0.8rem;
-  color: #6c757d;
-  margin-top: 0.5rem;
-`
-
-const TwoFactorContainer = styled.div`
+const TwoFactorContainer = styled.div<{ theme: Theme }>`
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 1rem;
-  background: #f8f9fa;
-  border-radius: 12px;
-  border: 1px solid #e9ecef;
+  background: ${props => props.theme.background};
+  border-radius: 10px;
+  border: 1px solid ${props => props.theme.border};
+  transition: all 0.3s ease;
 `
 
 const TwoFactorInfo = styled.div`
   flex: 1;
 `
 
-const TwoFactorLabel = styled.div`
+const TwoFactorLabel = styled.div<{ theme: Theme }>`
   font-weight: 600;
-  color: #2c3e50;
+  color: ${props => props.theme.text};
   margin-bottom: 0.25rem;
+  transition: color 0.3s ease;
 `
 
-const TwoFactorDescription = styled.div`
-  font-size: 0.85rem;
-  color: #6c757d;
+const TwoFactorDescription = styled.div<{ theme: Theme }>`
+  font-size: 0.8rem;
+  color: ${props => props.theme.textSecondary};
   line-height: 1.4;
+  transition: color 0.3s ease;
 `
 
-const Enable2FAButton = styled.button`
-  background: #34B89C;
+const Enable2FAButton = styled.button<{ theme: Theme }>`
+  background: ${props => props.theme.primary};
   color: white;
   border: none;
-  padding: 0.8rem 1.5rem;
-  border-radius: 8px;
-  font-size: 0.9rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
   
   &:hover {
-    background: #2a9d7f;
+    background: ${props => props.theme.secondary};
   }
 `
 
-const Disable2FAButton = styled.button`
-  background: #dc3545;
+const Disable2FAButton = styled.button<{ theme: Theme }>`
+  background: ${props => props.theme.error};
   color: white;
   border: none;
-  padding: 0.8rem 1.5rem;
-  border-radius: 8px;
-  font-size: 0.9rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -3206,19 +3515,21 @@ const Disable2FAButton = styled.button`
   }
 `
 
-const OTPSetupSection = styled.div`
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 1.5rem;
-  background: #f8f9fa;
+const OTPSetupSection = styled.div<{ theme: Theme }>`
+  border: 1px solid ${props => props.theme.border};
+  border-radius: 10px;
+  padding: 1.25rem;
+  background: ${props => props.theme.background};
   margin-top: 1rem;
+  transition: all 0.3s ease;
 `
 
-const OTPSetupTitle = styled.h4`
+const OTPSetupTitle = styled.h4<{ theme: Theme }>`
   margin: 0 0 1rem 0;
-  font-size: 1.1rem;
-  color: #2c3e50;
+  font-size: 1rem;
+  color: ${props => props.theme.text};
   font-weight: 600;
+  transition: color 0.3s ease;
 `
 
 const OTPEmailSection = styled.div`
@@ -3227,29 +3538,33 @@ const OTPEmailSection = styled.div`
   gap: 1rem;
 `
 
-const EmailInput = styled.input`
-  padding: 0.8rem;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  font-size: 1rem;
+const EmailInput = styled.input<{ theme: Theme }>`
+  padding: 0.75rem;
+  border: 1px solid ${props => props.theme.border};
+  border-radius: 6px;
+  font-size: 0.9rem;
   width: 100%;
+  background: ${props => props.theme.background};
+  color: ${props => props.theme.text};
+  transition: all 0.3s ease;
 
   &:focus {
     outline: none;
-    border-color: #34B89C;
+    border-color: ${props => props.theme.primary};
     box-shadow: 0 0 0 2px rgba(52, 184, 156, 0.1);
   }
 
   &:disabled {
-    background-color: #f5f5f5;
+    background-color: ${props => props.theme.background};
+    opacity: 0.6;
   }
 `
 
-const SendOTPButton = styled.button`
-  padding: 0.8rem 1.5rem;
+const SendOTPButton = styled.button<{ theme: Theme }>`
+  padding: 0.75rem 1.25rem;
   border: none;
-  border-radius: 8px;
-  background: #34B89C;
+  border-radius: 6px;
+  background: ${props => props.theme.primary};
   color: white;
   font-weight: 600;
   cursor: pointer;
@@ -3257,7 +3572,7 @@ const SendOTPButton = styled.button`
   align-self: flex-start;
 
   &:hover:not(:disabled) {
-    background: #2a9d7f;
+    background: ${props => props.theme.secondary};
   }
 
   &:disabled {
@@ -3269,14 +3584,15 @@ const SendOTPButton = styled.button`
 const OTPVerificationSection = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1.25rem;
 `
 
-const OTPInstructions = styled.p`
+const OTPInstructions = styled.p<{ theme: Theme }>`
   margin: 0;
-  color: #666;
+  color: ${props => props.theme.textSecondary};
   line-height: 1.5;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  transition: color 0.3s ease;
 `
 
 const OTPInputGroup = styled.div`
@@ -3285,41 +3601,46 @@ const OTPInputGroup = styled.div`
   gap: 1rem;
 `
 
-const OTPInput = styled.input`
-  padding: 0.8rem;
-  border: 2px solid #ddd;
-  border-radius: 8px;
-  font-size: 1.2rem;
+const OTPInput = styled.input<{ theme: Theme }>`
+  padding: 0.75rem;
+  border: 2px solid ${props => props.theme.border};
+  border-radius: 6px;
+  font-size: 1.1rem;
   text-align: center;
   letter-spacing: 0.5rem;
   font-weight: 600;
   font-family: monospace;
   width: 100%;
+  background: ${props => props.theme.background};
+  color: ${props => props.theme.text};
+  transition: all 0.3s ease;
 
   &:focus {
     outline: none;
-    border-color: #34B89C;
+    border-color: ${props => props.theme.primary};
     box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.1);
   }
 `
 
-const ResendOTPText = styled.p`
+const ResendOTPText = styled.p<{ theme: Theme }>`
   margin: 0.5rem 0 0 0;
-  font-size: 0.9rem;
-  color: #666;
+  font-size: 0.85rem;
+  color: ${props => props.theme.textSecondary};
   text-align: center;
+  transition: color 0.3s ease;
 `
 
-const ResendLink = styled.button`
+const ResendLink = styled.button<{ theme: Theme }>`
   background: none;
   border: none;
-  color: #34B89C;
+  color: ${props => props.theme.primary};
   text-decoration: underline;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  transition: color 0.3s ease;
 
   &:hover:not(:disabled) {
-    color: #2a9d7f;
+    color: ${props => props.theme.secondary};
   }
 
   &:disabled {
@@ -3338,18 +3659,18 @@ const OTPButtonGroup = styled.div`
   }
 `
 
-const SubmitButton = styled.button`
-  padding: 0.8rem 1.5rem;
+const SubmitButton = styled.button<{ theme: Theme }>`
+  padding: 0.75rem 1.25rem;
   border: none;
-  border-radius: 8px;
-  background: #34B89C;
+  border-radius: 6px;
+  background: ${props => props.theme.primary};
   color: white;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.2s;
 
   &:hover:not(:disabled) {
-    background: #2a9d7f;
+    background: ${props => props.theme.secondary};
   }
 
   &:disabled {
@@ -3359,13 +3680,13 @@ const SubmitButton = styled.button`
 `
 
 // BUTTON COMPONENTS
-const CancelModalButton = styled.button`
-  background: #6c757d;
+const CancelModalButton = styled.button<{ theme: Theme }>`
+  background: ${props => props.theme.textSecondary};
   color: white;
   border: none;
-  padding: 0.8rem 1.5rem;
-  border-radius: 8px;
-  font-size: 0.9rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -3379,31 +3700,31 @@ const CancelModalButton = styled.button`
   }
 `
 
-const SaveProfileButton = styled.button`
-  background: #34B89C;
+const SaveProfileButton = styled.button<{ theme: Theme }>`
+  background: ${props => props.theme.primary};
   color: white;
   border: none;
-  padding: 0.8rem 1.5rem;
-  border-radius: 8px;
-  font-size: 0.9rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
   
   &:hover {
-    background: #2a9d7f;
+    background: ${props => props.theme.secondary};
   }
 `
 
 const ConfirmButton = styled(SaveProfileButton)``
 
-const DeleteModalButton = styled.button`
-  background: #e74c3c;
+const DeleteModalButton = styled.button<{ theme: Theme }>`
+  background: ${props => props.theme.error};
   color: white;
   border: none;
-  padding: 0.8rem 1.5rem;
-  border-radius: 8px;
-  font-size: 0.9rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -3414,21 +3735,23 @@ const DeleteModalButton = styled.button`
 `
 
 // APPOINTMENT INFO COMPONENTS
-const AppointmentInfoModal = styled.div`
-  background: #f8f9fa;
-  border-radius: 12px;
-  padding: 1.5rem;
-  margin-bottom: 1.5rem;
-  border: 1px solid #e9ecef;
+const AppointmentInfoModal = styled.div<{ theme: Theme }>`
+  background: ${props => props.theme.background};
+  border-radius: 10px;
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+  border: 1px solid ${props => props.theme.border};
+  transition: all 0.3s ease;
 `
 
-const InfoItem = styled.div`
+const InfoItem = styled.div<{ theme: Theme }>`
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 0.75rem;
   padding-bottom: 0.75rem;
-  border-bottom: 1px solid #e9ecef;
+  border-bottom: 1px solid ${props => props.theme.border};
+  transition: all 0.3s ease;
   
   &:last-child {
     margin-bottom: 0;
@@ -3437,33 +3760,35 @@ const InfoItem = styled.div`
   }
 `
 
-const InfoLabel = styled.span`
+const InfoLabel = styled.span<{ theme: Theme }>`
   font-weight: 600;
-  color: #6c757d;
-  font-size: 0.9rem;
+  color: ${props => props.theme.textSecondary};
+  font-size: 0.85rem;
+  transition: color 0.3s ease;
 `
 
-const InfoValue = styled.span`
-  color: #2c3e50;
+const InfoValue = styled.span<{ theme: Theme }>`
+  color: ${props => props.theme.text};
   font-weight: 500;
   text-align: right;
   flex: 1;
   margin-left: 1rem;
+  transition: color 0.3s ease;
 `
 
-const WarningMessage = styled.div`
+const WarningMessage = styled.div<{ theme: Theme }>`
   display: flex;
   align-items: flex-start;
   gap: 1rem;
   background: #fff3cd;
   border: 1px solid #ffeaa7;
-  border-radius: 12px;
-  padding: 1.5rem;
-  margin-bottom: 1.5rem;
+  border-radius: 10px;
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
 `
 
 const WarningIcon = styled.div`
-  font-size: 1.5rem;
+  font-size: 1.3rem;
   color: #856404;
 `
 
@@ -3472,23 +3797,25 @@ const WarningText = styled.div`
   font-weight: 500;
   line-height: 1.4;
   flex: 1;
+  font-size: 0.9rem;
 `
 
-const AppointmentDetails = styled.div`
-  background: #f8f9fa;
-  border-radius: 12px;
-  padding: 1.5rem;
-  border: 1px solid #e9ecef;
+const AppointmentDetails = styled.div<{ theme: Theme }>`
+  background: ${props => props.theme.background};
+  border-radius: 10px;
+  padding: 1.25rem;
+  border: 1px solid ${props => props.theme.border};
+  transition: all 0.3s ease;
 `
 
-const HistoryStatusBadge = styled.span<{ status: string }>`
-  padding: 0.4rem 0.8rem;
-  border-radius: 20px;
-  font-size: 0.8rem;
+const HistoryStatusBadge = styled.span<{ status: string; theme: Theme }>`
+  padding: 0.35rem 0.7rem;
+  border-radius: 16px;
+  font-size: 0.75rem;
   font-weight: 700;
   background: ${(props) => {
     switch (props.status) {
-      case "Done":
+      case "Completed":
         return "#d4edda"
       case "Not Attend":
         return "#f8d7da"
@@ -3500,7 +3827,7 @@ const HistoryStatusBadge = styled.span<{ status: string }>`
   }};
   color: ${(props) => {
     switch (props.status) {
-      case "Done":
+      case "Completed":
         return "#155724"
       case "Not Attend":
         return "#721c24"
@@ -3510,4 +3837,286 @@ const HistoryStatusBadge = styled.span<{ status: string }>`
         return "#0c5460"
     }
   }};
+`
+
+// HISTORY SIDEBAR
+const SidebarOverlay = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 1998;
+`
+
+const HistorySidebar = styled.div<{ theme: Theme }>`
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 360px;
+  background: ${props => props.theme.surface};
+  box-shadow: -4px 0 16px rgba(0,0,0,0.1);
+  z-index: 1999;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.3s ease;
+  
+  @media (max-width: 480px) {
+    width: 100%;
+  }
+`
+
+const SidebarContent = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+`
+
+const NoHistoryMessage = styled.div<{ theme: Theme }>`
+  text-align: center;
+  padding: 2.5rem 1.5rem;
+  color: ${props => props.theme.textSecondary};
+`
+
+const NoHistoryIcon = styled.div`
+  font-size: 2.5rem;
+  margin-bottom: 1rem;
+  opacity: 0.5;
+`
+
+const NoHistoryText = styled.p<{ theme: Theme }>`
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: ${props => props.theme.textSecondary};
+`
+
+const SidebarHistoryList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+`
+
+const SidebarHistoryCard = styled.div<{ theme: Theme }>`
+  background: ${props => props.theme.surface};
+  border-radius: 10px;
+  padding: 1rem;
+  border: 1px solid ${props => props.theme.border};
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    border-color: ${props => props.theme.primary};
+    transform: translateX(-4px);
+    box-shadow: 0 2px 6px ${props => props.theme.shadow};
+  }
+`
+
+const SidebarCardHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+`
+
+const ServiceInfo = styled.div<{ theme: Theme }>`
+  color: ${props => props.theme.textSecondary};
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+  font-size: 0.85rem;
+  transition: color 0.3s ease;
+`
+
+const DateInfo = styled.div<{ theme: Theme }>`
+  color: ${props => props.theme.textSecondary};
+  font-size: 0.8rem;
+  margin-bottom: 0.5rem;
+  transition: color 0.3s ease;
+`
+
+const ClickHint = styled.div<{ theme: Theme }>`
+  color: ${props => props.theme.primary};
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-align: right;
+  transition: color 0.3s ease;
+`
+
+// NEW STYLED COMPONENTS FOR REFUND HISTORY
+const HistoryTabs = styled.div`
+  display: flex;
+  border-bottom: 1px solid #e9ecef;
+  padding: 0 1rem;
+`
+
+const HistoryTab = styled.button<{ $active: boolean; theme: Theme }>`
+  flex: 1;
+  padding: 1rem 0.5rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid ${props => props.$active ? props.theme.primary : 'transparent'};
+  color: ${props => props.$active ? props.theme.primary : props.theme.textSecondary};
+  font-weight: ${props => props.$active ? '600' : '500'};
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 0.85rem;
+
+  &:hover {
+    color: ${props => props.theme.primary};
+  }
+`
+
+const RefundHistoryCard = styled.div<{ theme: Theme }>`
+  background: ${props => props.theme.surface};
+  border-radius: 10px;
+  padding: 1rem;
+  border: 1px solid ${props => props.theme.border};
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-left: 4px solid ${props => props.theme.primary};
+  
+  &:hover {
+    border-color: ${props => props.theme.primary};
+    transform: translateX(-4px);
+    box-shadow: 0 2px 6px ${props => props.theme.shadow};
+  }
+`
+
+const RefundStatusBadge = styled.span<{ $status: string; $completed?: boolean; theme: Theme }>`
+  padding: 0.35rem 0.7rem;
+  border-radius: 16px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: ${props => {
+    if (props.$completed) {
+      return "#d4edda";
+    }
+    const statusColors: Record<string, { background: string; color: string }> = {
+      "pending": { background: "#fff3cd", color: "#856404" },
+      "approved": { background: "#d1ecf1", color: "#0c5460" },
+      "rejected": { background: "#f8d7da", color: "#721c24" },
+      "completed": { background: "#d4edda", color: "#155724" }
+    }
+    return statusColors[props.$status]?.background || "#e2e3e5"
+  }};
+  color: ${props => {
+    if (props.$completed) {
+      return "#155724";
+    }
+    const statusColors: Record<string, { background: string; color: string }> = {
+      "pending": { background: "#fff3cd", color: "#856404" },
+      "approved": { background: "#d1ecf1", color: "#0c5460" },
+      "rejected": { background: "#f8d7da", color: "#721c24" },
+      "completed": { background: "#d4edda", color: "#155724" }
+    }
+    return statusColors[props.$status]?.color || "#383d41"
+  }};
+  white-space: nowrap;
+`
+
+const RefundCompleteBadge = styled.div<{ theme: Theme }>`
+  background: #d4edda;
+  color: #155724;
+  padding: 0.4rem 0.7rem;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  margin-top: 0.5rem;
+  text-align: center;
+  border: 1px solid #c3e6cb;
+`
+
+const RefundSuccessMessage = styled.div<{ theme: Theme }>`
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  background: #d4edda;
+  border: 1px solid #c3e6cb;
+  border-radius: 10px;
+  padding: 1.25rem;
+  margin-top: 1rem;
+`
+
+const RefundSuccessIcon = styled.div`
+  font-size: 1.3rem;
+  color: #155724;
+`
+
+const RefundSuccessText = styled.div`
+  color: #155724;
+  font-weight: 500;
+  line-height: 1.4;
+  flex: 1;
+  font-size: 0.9rem;
+`
+
+// NEW STYLED COMPONENTS FOR REFUND FEATURE
+const RefundTextarea = styled.textarea<{ theme: Theme }>`
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 2px solid ${props => props.theme.border};
+  border-radius: 8px;
+  font-size: 0.9rem;
+  transition: all 0.3s ease;
+  background: ${props => props.theme.background};
+  color: ${props => props.theme.text};
+  font-family: inherit;
+  resize: vertical;
+  
+  &:focus {
+    outline: none;
+    border-color: ${props => props.theme.primary};
+    box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.1);
+  }
+  
+  &::placeholder {
+    color: ${props => props.theme.textSecondary};
+  }
+`
+
+const RefundRequestButton = styled.button<{ theme: Theme }>`
+  background: ${props => props.theme.primary};
+  color: white;
+  border: none;
+  padding: 0.75rem 1.25rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  
+  &:hover:not(:disabled) {
+    background: ${props => props.theme.secondary};
+  }
+  
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background: ${props => props.theme.textSecondary};
+  }
+`
+
+const RefundInfoNote = styled.div<{ theme: Theme }>`
+  background: ${props => props.theme.background};
+  border: 1px solid ${props => props.theme.border};
+  border-radius: 8px;
+  padding: 1rem;
+  font-size: 0.85rem;
+  color: ${props => props.theme.textSecondary};
+  line-height: 1.4;
+  margin-top: 1rem;
+  
+  strong {
+    color: ${props => props.theme.text};
+  }
+`
+
+const InputHint = styled.div<{ theme: Theme }>`
+  font-size: 0.75rem;
+  color: ${props => props.theme.textSecondary};
+  margin-top: 0.25rem;
+  transition: color 0.3s ease;
+  font-style: italic;
 `

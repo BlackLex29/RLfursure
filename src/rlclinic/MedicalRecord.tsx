@@ -1,5 +1,4 @@
-'use client';
-
+"use client"
 import React, { useState, useEffect, useCallback } from "react";
 import styled, { createGlobalStyle } from "styled-components";
 import { useRouter } from "next/navigation";
@@ -72,6 +71,19 @@ interface Appointment {
   age?: string;
 }
 
+interface NotificationType {
+  id: string;
+  userId: string;
+  type: 'appointment_approved' | 'medical_record_sent' | 'appointment_reminder' | 'general';
+  title: string;
+  message: string;
+  read: boolean;
+  createdAt: Date | null;
+  appointmentId?: string;
+  petId?: string;
+  medicalRecordId?: string;
+}
+
 const DIAGNOSIS_OPTIONS = {
   dog: ["Parvovirus","Distemper","Kennel Cough","Heartworm","Arthritis","Dental Disease","Ear Infection","Skin Allergies","Obesity","Gastroenteritis","General Consultation","Vaccination","Rabies Vaccination","Diagnostic Imaging","Sterilization","Parasitic Infection"],
   cat: ["Feline Leukemia Virus","Feline Immunodeficiency Virus","Upper Respiratory Infection","Urinary Tract Disease","Chronic Kidney Disease","Diabetes","Hyperthyroidism","Dental Disease","Fleas and Ticks","Ringworm","General Consultation","Vaccination","Rabies Vaccination","Diagnostic Imaging","Sterilization","Parasitic Infection"]
@@ -86,8 +98,6 @@ const PET_BREEDS = {
   dog: ["Aspin (Asong Pinoy)","Shih Tzu","Siberian Husky","Chihuahua","Labrador Retriever","Beagle","Golden Retriever","Poodle","Dachshund","Rottweiler","Philippine Forest Dog (Asong Gubat)"],
   cat: ["British Shorthair","Burmese","Abyssinian","Scottish Fold","Siamese","Sphynx","Ragdoll","American Shorthair","Maine Coon","Persian","Putot Cat (Pusang Putot)"]
 };
-
-
 
 const APPOINTMENT_TYPE_MAPPINGS: Record<string, {diagnosis: string, treatment: string}> = {
   "vaccination": { diagnosis: "Vaccination", treatment: "Vaccination" },
@@ -115,6 +125,69 @@ const sanitizeFirestoreData = (data: Record<string, unknown>) => {
     if (sanitized[key] === undefined || sanitized[key] === null) delete sanitized[key];
   });
   return sanitized;
+};
+
+// Function to get user ID by email
+const getUserIdByEmail = async (email: string): Promise<string | null> => {
+  try {
+    const usersQuery = query(collection(db, "users"), where("email", "==", email));
+    const querySnapshot = await getDocs(usersQuery);
+    
+    if (!querySnapshot.empty) {
+      return querySnapshot.docs[0].id;
+    }
+    return null;
+  } catch (error) {
+    console.error("Error getting user ID by email:", error);
+    return null;
+  }
+};
+
+// Function to create notification for user
+const createNotification = async (notificationData: Omit<NotificationType, 'id'>) => {
+  try {
+    await addDoc(collection(db, "notifications"), {
+      ...notificationData,
+      createdAt: new Date()
+    });
+    console.log("Notification created successfully");
+  } catch (error) {
+    console.error("Error creating notification:", error);
+  }
+};
+
+// Function to send medical record notification
+const sendMedicalRecordNotification = async (
+  ownerEmail: string, 
+  petName: string, 
+  medicalRecordId: string,
+  appointmentType?: string
+) => {
+  try {
+    const userId = await getUserIdByEmail(ownerEmail);
+    
+    if (!userId) {
+      console.warn(`User not found for email: ${ownerEmail}`);
+      return;
+    }
+
+    const serviceType = appointmentType ? APPOINTMENT_TYPE_LABELS[appointmentType] || appointmentType : "veterinary service";
+    
+    const notificationData = {
+      userId: userId,
+      type: "medical_record_sent" as const,
+      title: "Medical Record Available",
+      message: `Your pet ${petName}'s medical record for ${serviceType} is now available for viewing.`,
+      read: false,
+      medicalRecordId: medicalRecordId,
+      createdAt: new Date()
+    };
+
+    await createNotification(notificationData);
+    console.log(`Medical record notification sent to ${ownerEmail}`);
+  } catch (error) {
+    console.error("Error sending medical record notification:", error);
+  }
 };
 
 // Enhanced function to calculate age from birth date
@@ -508,12 +581,33 @@ const MedicalRecord: React.FC = () => {
       if (editingRecord) {
         await updateDoc(doc(db, "medicalRecords", editingRecord.id), sanitizedData);
         setSuccessMessage("Medical record updated successfully!");
+        
+        // Send notification if record is being marked as completed
+        if (finalStatus === "completed" && editingRecord.status !== "completed") {
+          await sendMedicalRecordNotification(
+            formData.ownerEmail,
+            formData.petName,
+            editingRecord.id,
+            formData.appointmentType
+          );
+        }
       } else {
         const docRef = await addDoc(collection(db, "medicalRecords"), {
           ...sanitizedData,
           createdAt: new Date()
         });
         console.log("Medical record created with ID:", docRef.id);
+        
+        // Send notification if record is completed
+        if (finalStatus === "completed") {
+          await sendMedicalRecordNotification(
+            formData.ownerEmail,
+            formData.petName,
+            docRef.id,
+            formData.appointmentType
+          );
+        }
+        
         setSuccessMessage("Medical record created successfully!");
         
         // NEW: Refresh appointments list to remove the used one
@@ -636,7 +730,7 @@ const MedicalRecord: React.FC = () => {
     }
     return (
       <StatusInfo $status="completed">
-        ✅ Complete Mode - This record will be visible to the user
+        ✅ Complete Mode - This record will be visible to the user and notification will be sent
       </StatusInfo>
     );
   };
@@ -1250,7 +1344,7 @@ const PageContainer = styled.div`
 `;
 
 const HeaderBar = styled.header`
-  background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
+  background: #34B89C;
   color: white;
   padding: 1rem 2rem;
   display: flex;
@@ -2069,11 +2163,6 @@ const AppointmentCard = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-
-  &:hover {
-    border-color: #8b5cf6;
-    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.1);
-  }
 `;
 
 const AppointmentInfoSection = styled.div`

@@ -53,6 +53,8 @@ const Login: React.FC = () => {
   const [resetLoading, setResetLoading] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
   const [googleUserData, setGoogleUserData] = useState<{uid: string; email: string; role: string} | null>(null);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
   const router = useRouter();
 
   // IDAGDAG: Check kung may reset password action sa URL
@@ -87,6 +89,12 @@ const Login: React.FC = () => {
     e.preventDefault();
     
     if (showForgotPassword) {
+      return;
+    }
+    
+    // IDAGDAG: Check kung na-accept na ang terms and conditions
+    if (!termsAccepted) {
+      setError("Please accept the Terms and Conditions to continue.");
       return;
     }
     
@@ -573,6 +581,12 @@ const Login: React.FC = () => {
   };
 
   const handleGoogleLogin = async () => {
+    // IDAGDAG: Check kung na-accept na ang terms and conditions
+    if (!termsAccepted) {
+      setError("Please accept the Terms and Conditions to continue.");
+      return;
+    }
+
     console.log("🔵 Google login clicked");
     setLoading(true);
     setError("");
@@ -682,6 +696,16 @@ const Login: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // IDAGDAG: Function para i-open ang terms modal
+  const handleShowTermsModal = () => {
+    setShowTermsModal(true);
+  };
+
+  // IDAGDAG: Function para i-close ang terms modal
+  const handleCloseTermsModal = () => {
+    setShowTermsModal(false);
   };
 
   // Check if we're in a Google OTP flow
@@ -812,9 +836,25 @@ const Login: React.FC = () => {
                     Forgot password?
                   </ForgotPasswordLink>
 
+                  {/* IDAGDAG: Terms and Conditions Checkbox */}
+                  <TermsContainer>
+                    <TermsCheckbox
+                      type="checkbox"
+                      id="terms"
+                      checked={termsAccepted}
+                      onChange={(e) => setTermsAccepted(e.target.checked)}
+                    />
+                    <TermsLabel htmlFor="terms">
+                      I have read and agree to the{" "}
+                      <TermsLink onClick={handleShowTermsModal}>
+                        Terms and Conditions
+                      </TermsLink>
+                    </TermsLabel>
+                  </TermsContainer>
+
                   {error && <ErrorMessage>{error}</ErrorMessage>}
 
-                  <LoginButton type="submit" disabled={loading}>
+                  <LoginButton type="submit" disabled={loading || !termsAccepted}>
                     {loading ? "Signing in..." : "Sign in"}
                   </LoginButton>
 
@@ -824,7 +864,11 @@ const Login: React.FC = () => {
                     <DividerLine />
                   </Divider>
 
-                  <GoogleLoginButton type="button" onClick={handleGoogleLogin} disabled={loading}>
+                  <GoogleLoginButton 
+                    type="button" 
+                    onClick={handleGoogleLogin} 
+                    disabled={loading || !termsAccepted}
+                  >
                     <GoogleIcon>
                       <svg width="18" height="18" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
                         <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"/>
@@ -891,20 +935,218 @@ const Login: React.FC = () => {
               <ToggleForm>
                 Don&apos;t have an account?{" "}
                 <ToggleLink onClick={handleSignUpRedirect}>
-                  Sign up for free
+                  Sign up
                 </ToggleLink>
               </ToggleForm>
             )}
           </FormContainer>
         </RightPanel>
       </LoginContainer>
+
+      {/* IDAGDAG: Terms and Conditions Modal */}
+      {showTermsModal && (
+        <ModalOverlay onClick={handleCloseTermsModal}>
+          <ModalContent onClick={(e) => e.stopPropagation()}>
+            <ModalHeader>
+              <ModalTitle>Terms and Conditions</ModalTitle>
+              <CloseButton onClick={handleCloseTermsModal}>×</CloseButton>
+            </ModalHeader>
+            <ModalBody>
+              <TermsSection>
+                <SectionTitle>1. Acceptance of Terms</SectionTitle>
+                <SectionText>
+                 By accessing and using FurSureCare, you acknowledge that you have read, understood, and agreed to be bound by these Terms and Conditions. These terms govern your use of all services, features, and content provided by FurSureCare. If you do not agree to these terms, you must discontinue using the platform immediately. We reserve the right to update, modify, or revise these terms at any time, and such changes will be effective upon posting on our website or application. It is your responsibility to regularly review these terms to stay informed of any updates.
+                </SectionText>
+
+                <SectionTitle>2. Use License</SectionTitle>
+                <SectionText>
+                  Permission is granted to temporarily download or access one copy of FurSureCare materials for personal, non-commercial, and transitory viewing purposes only. This license does not grant ownership and does not allow you to modify, reproduce, distribute, or publicly display any materials for commercial purposes. Any unauthorized use may result in termination of your access and possible legal action. FurSureCare retains full ownership of all intellectual property, including software, content, and visual materials provided on the platform.
+                </SectionText>
+
+                <SectionTitle>3. User Account</SectionTitle>
+                <SectionText>
+                  When you create an account on FurSureCare, you agree to provide accurate and complete information. You are solely responsible for safeguarding your account credentials and for any activities conducted under your account. If you suspect unauthorized access or a security breach, you must notify us immediately. FurSureCare shall not be held liable for any damages or losses arising from your failure to maintain the confidentiality of your login information. We reserve the right to suspend or terminate your account for any violation of these Terms and Conditions.
+                </SectionText>
+
+                <SectionTitle>4. Privacy Policy</SectionTitle>
+                <SectionText>
+                  Your privacy is important to us. All information collected through the FurSureCare platform is handled in accordance with our Privacy Policy. We collect and process personal information such as your name, contact details, and usage data to improve our services and provide a personalized experience. By using FurSureCare, you consent to the collection and processing of your data as described in the Privacy Policy. We implement industry-standard security measures to protect your data, but we cannot guarantee absolute security due to the nature of online transmissions.
+                </SectionText>
+
+                <SectionTitle>5. Service Modifications</SectionTitle>
+                <SectionText>
+                  FurSureCare reserves the right to modify, suspend, or discontinue any part of its services, either temporarily or permanently, with or without notice. This includes changes to features, pricing, content, or availability. We are not liable for any inconvenience, data loss, or damages resulting from such modifications. Continued use of the service after changes are made constitutes your acceptance of the modified terms.
+                </SectionText>
+
+                <SectionTitle>6. Limitation of Liability</SectionTitle>
+                <SectionText>
+                  FurSureCare shall not be liable for any indirect, incidental, special, consequential or punitive damages.In no event shall FurSureCare or its affiliates be held liable for any indirect, incidental, special, or consequential damages arising from the use or inability to use our services. This includes, but is not limited to, loss of data, profit, or business opportunities. We provide the platform and its contents “as is,” without any warranties, express or implied. Users assume full responsibility for any risks associated with using the platform. Some jurisdictions do not allow limitations on implied warranties, so these limitations may not fully apply to you.
+                </SectionText>
+
+                <SectionTitle>7. Governing Law</SectionTitle>
+                <SectionText>
+                  These Terms and Conditions shall be governed by and interpreted in accordance with the laws of the Republic of the Philippines. Any disputes arising under or in connection with these terms shall be subject to the exclusive jurisdiction of the appropriate courts in the Philippines. You agree to comply with all applicable laws and regulations regarding your use of FurSureCare.
+                </SectionText>
+              </TermsSection>
+            </ModalBody>
+            <ModalFooter>
+              <AcceptButton onClick={() => { setTermsAccepted(true); handleCloseTermsModal(); }}>
+                I Accept Terms and Conditions
+              </AcceptButton>
+            </ModalFooter>
+          </ModalContent>
+        </ModalOverlay>
+      )}
     </>
   );
 };
 
 export default Login;
 
-// STYLED COMPONENTS (SAME AS BEFORE)
+// IDAGDAG: Bagong Styled Components para sa Terms and Conditions at Modal
+
+const TermsContainer = styled.div`
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin: 0.5rem 0;
+`;
+
+const TermsCheckbox = styled.input`
+  margin-top: 0.25rem;
+  transform: scale(1.1);
+`;
+
+const TermsLabel = styled.label`
+  font-size: 0.9rem;
+  color: #333;
+  line-height: 1.4;
+  cursor: pointer;
+`;
+
+const TermsLink = styled.button`
+  background: none;
+  border: none;
+  color: #4ecdc4;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  
+  &:hover {
+    color: #3db8af;
+  }
+`;
+
+const ModalOverlay = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+`;
+
+const ModalContent = styled.div`
+  background: white;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 600px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+`;
+
+const ModalHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid #e1e5e9;
+`;
+
+const ModalTitle = styled.h2`
+  margin: 0;
+  color: #1a1a1a;
+  font-size: 1.5rem;
+  font-weight: 700;
+`;
+
+const CloseButton = styled.button`
+  background: none;
+  border: none;
+  font-size: 2rem;
+  cursor: pointer;
+  color: #666;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  &:hover {
+    color: #333;
+  }
+`;
+
+const ModalBody = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: 2rem;
+`;
+
+const ModalFooter = styled.div`
+  padding: 1.5rem 2rem;
+  border-top: 1px solid #e1e5e9;
+  display: flex;
+  justify-content: flex-end;
+`;
+
+const TermsSection = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+`;
+
+const SectionTitle = styled.h3`
+  margin: 0 0 0.5rem 0;
+  color: #1a1a1a;
+  font-size: 1.1rem;
+  font-weight: 600;
+`;
+
+const SectionText = styled.p`
+  margin: 0;
+  color: #333;
+  line-height: 1.6;
+  font-size: 0.95rem;
+`;
+
+const AcceptButton = styled.button`
+  padding: 0.875rem 2rem;
+  background: linear-gradient(135deg, #4ecdc4 0%, #44a08d 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
+  }
+`;
+
+// EXISTING STYLED COMPONENTS (SAME AS BEFORE)
 const LoginForm = styled.form`
   display: flex;
   flex-direction: column;

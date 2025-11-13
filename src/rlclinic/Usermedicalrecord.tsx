@@ -757,8 +757,8 @@ const UserMedicalRecords: React.FC = () => {
                     
                     <ButtonGroupHorizontal>
                       <PrintButton onClick={() => downloadPDF(record)}>
-                        <Icon className="material-icons">print</Icon>
-                        Print as PDF
+                        <Icon className="material-icons">Print as PDF</Icon>
+                        
                       </PrintButton>
                     </ButtonGroupHorizontal>
                   </RecordDetails>
@@ -782,7 +782,7 @@ const PageContainer = styled.div`
 `;
 
 const HeaderBar = styled.header`
-  background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
+  background: linear-gradient(90deg, #34B89C 0%, #6BC1E1 100%);
   color: white;
   padding: 1rem 2rem;
   display: flex;
@@ -849,7 +849,7 @@ const Icon = styled.span`
 
 const BackButton = styled.button`
   background: rgba(255, 255, 255, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(0, 0, 0, 0.2);
   color: white;
   padding: 0.6rem 1rem;
   border-radius: 8px;
@@ -1027,7 +1027,7 @@ const RecordDate = styled.span`
 `;
 
 const ViewDetailsButton = styled.button`
-  background: linear-gradient(90deg, #34B89C, #6BC1E1);
+  background:#3AAFA9;
   color: white;
   border: none;
   padding: 0.75rem 1rem;

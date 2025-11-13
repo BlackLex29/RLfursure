@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import styled, { createGlobalStyle } from "styled-components";
 import { useRouter } from "next/navigation";
-import Link from 'next/link';
 import { 
   doc, 
   setDoc, 
@@ -53,16 +52,18 @@ function isAuthError(error: unknown): error is AuthError {
 
 // Global Styles
 const GlobalStyle = createGlobalStyle`
-  * {
-    box-sizing: border-box;
-  }
-  
   body {
-    background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
     margin: 0;
     padding: 0;
+    box-sizing: border-box; 
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: #f5f7fa;
     min-height: 100vh;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+    overflow-x: hidden;
+  }
+  
+  * {
+    box-sizing: border-box;
   }
 `;
 
@@ -70,113 +71,146 @@ const GlobalStyle = createGlobalStyle`
 const Container = styled.div`
   min-height: 100vh;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+  }
 `;
 
-const Card = styled.div`
-  background: white;
-  border-radius: 20px;
-  padding: 40px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-  width: 100%;
-  max-width: 480px;
+const LeftPanel = styled.div`
+  flex: 1;
+  background: linear-gradient(135deg, rgba(78, 205, 196, 0.9) 0%, rgba(68, 160, 141, 0.9) 100%);
+  padding: 3rem;
+  display: flex;
+  flex-direction: column;
   position: relative;
+  color: white;
   overflow: hidden;
   
-  &::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 8px;
-    background: linear-gradient(90deg, #FF9E6D, #FFD166, #4ECDC4);
-  }
-  
-  @media (max-width: 640px) {
-    padding: 30px 20px;
+  @media (max-width: 768px) {
+    padding: 2rem;
+    min-height: 40vh;
   }
 `;
 
-// Header Styles
-const LogoContainer = styled.div`
+const PetBackground = styled.img`
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+`;
+
+const PanelOverlay = styled.div`
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, rgba(78, 205, 196, 0.85) 0%, rgba(68, 160, 141, 0.85) 100%);
+  z-index: 1;
+`;
+
+const CenteredLogoSection = styled.div`
+  position: relative;
+  z-index: 2;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  margin-bottom: 30px;
-  cursor: pointer;
+  height: 100%;
+  text-align: center;
+  gap: 1.5rem;
 `;
 
 const LogoImage = styled.img`
-  width: 100px;
-  height:100px;
-  object-fit: contain;
+  width: 350px;
+  height: 350px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 4px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
   
-  @media (max-width: 640px) {
-    width: 40px;
-    height: 40px;
+  @media (max-width: 768px) {
+    width: 120px;
+    height: 120px;
   }
 `;
 
+const LogoText = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+`;
 
-const Title = styled.h2`
-  color: #2D3748;
-  font-size: 24px;
+const ClinicName = styled.h1`
+  font-size: 2.5rem;
   font-weight: 700;
-  margin-bottom: 8px;
-  text-align: center;
+  margin: 0;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   
-  @media (max-width: 640px) {
-    font-size: 20px;
+  @media (max-width: 768px) {
+    font-size: 2rem;
   }
 `;
 
-const Subtitle = styled.p`
-  color: #718096;
-  font-size: 14px;
+const ClinicSubtitle = styled.p`
+  font-size: 1.1rem;
+  margin: 0;
+  opacity: 0.9;
+  font-weight: 400;
+  
+  @media (max-width: 768px) {
+    font-size: 1rem;
+  }
+`;
+
+const RightPanel = styled.div`
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: white;
+  
+  @media (max-width: 768px) {
+    padding: 1.5rem;
+  }
+`;
+
+const FormContainer = styled.div`
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+`;
+
+const FormHeader = styled.div`
   text-align: center;
-  margin-bottom: 30px;
+  margin-bottom: 0.5rem;
 `;
 
-// Message Styles
-const ErrorMessage = styled.div`
-  background: #FED7D7;
-  color: #C53030;
-  padding: 12px 16px;
-  border-radius: 8px;
-  margin-bottom: 20px;
-  font-size: 14px;
-  word-wrap: break-word;
+const FormTitle = styled.h1`
+  font-size: 2rem;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 0 0 0.5rem 0;
 `;
 
-const SuccessMessage = styled.div`
-  background: #C6F6D5;
-  color: #2D7843;
-  padding: 12px 16px;
-  border-radius: 8px;
-  margin-bottom: 20px;
-  font-size: 14px;
-  word-wrap: break-word;
-`;
-
-const InfoMessage = styled.div`
-  background: #BEE3F8;
-  color: #2C5282;
-  padding: 12px 16px;
-  border-radius: 8px;
-  margin-bottom: 20px;
-  font-size: 14px;
-  word-wrap: break-word;
+const FormSubtitle = styled.p`
+  color: #666;
+  margin: 0;
+  font-size: 1rem;
 `;
 
 // Form Styles
 const Form = styled.form`
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 1.5rem;
 `;
 
 const InputGrid = styled.div`
@@ -195,10 +229,10 @@ const InputGroup = styled.div`
 `;
 
 const Label = styled.label`
-  color: #2D3748;
-  font-size: 14px;
-  font-weight: 500;
-  margin-bottom: 8px;
+  color: #333;
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
   display: flex;
   align-items: center;
   
@@ -210,26 +244,29 @@ const Label = styled.label`
 `;
 
 const Input = styled.input`
-  padding: 12px 16px;
-  border: 2px solid #E2E8F0;
+  padding: 0.875rem 1rem;
+  border: 2px solid #e1e5e9;
   border-radius: 8px;
-  font-size: 14px;
-  transition: border-color 0.2s ease;
+  font-size: 1rem;
+  transition: all 0.2s ease;
+  background: white;
   width: 100%;
-  height: 48px; /* Fixed height for consistency */
+  height: 48px;
   
   &:focus {
     outline: none;
-    border-color: #4ECDC4;
+    border-color: #4ecdc4;
     box-shadow: 0 0 0 3px rgba(78, 205, 196, 0.1);
   }
   
-  &::placeholder {
-    color: #A0AEC0;
+  &:disabled {
+    background-color: #f8f9fa;
+    cursor: not-allowed;
+    opacity: 0.7;
   }
   
-  &:invalid:not(:focus):not(:placeholder-shown) {
-    border-color: #E53E3E;
+  &::placeholder {
+    color: #999;
   }
 `;
 
@@ -246,22 +283,18 @@ const PasswordToggle = styled.button`
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 16px;
   padding: 4px;
-  color: #718096;
-  height: 32px;
-  width: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  border-radius: 4px;
+  font-size: 1.1rem;
+  z-index: 2;
   
   &:hover {
-    color: #4A5568;
+    background: rgba(0, 0, 0, 0.05);
   }
   
-  &:focus {
-    outline: none;
-    color: #4ECDC4;
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 `;
 
@@ -317,34 +350,56 @@ const CheckboxLabel = styled.label`
   cursor: pointer;
 `;
 
+// Message Styles
+const ErrorMessage = styled.div`
+  background: #FED7D7;
+  color: #C53030;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-size: 14px;
+  word-wrap: break-word;
+`;
+
+const SuccessMessage = styled.div`
+  background: #C6F6D5;
+  color: #2D7843;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-size: 14px;
+  word-wrap: break-word;
+`;
+
+const InfoMessage = styled.div`
+  background: #BEE3F8;
+  color: #2C5282;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-size: 14px;
+  word-wrap: break-word;
+`;
+
 // Button Styles
 const Button = styled.button`
-  background: #4ECDC4;
+  padding: 0.875rem 1.5rem;
+  background: linear-gradient(135deg, #4ecdc4 0%, #44a08d 100%);
   color: white;
   border: none;
-  padding: 14px 24px;
   border-radius: 8px;
+  font-size: 1rem;
   font-weight: 600;
-  font-size: 16px;
   cursor: pointer;
   transition: all 0.2s ease;
-  height: 48px; /* Same height as input fields */
-  display: flex;
-  align-items: center;
-  justify-content: center;
   
   &:hover:not(:disabled) {
-    background: #3BB5AD;
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
   }
   
-  &:active:not(:disabled) {
-    transform: translateY(0);
-  }
-  
   &:disabled {
-    opacity: 0.7;
+    opacity: 0.6;
     cursor: not-allowed;
     transform: none;
   }
@@ -354,26 +409,17 @@ const SecondaryButton = styled.button`
   background: transparent;
   color: #4ECDC4;
   border: 2px solid #4ECDC4;
-  padding: 12px 24px;
+  padding: 0.75rem 1.5rem;
   border-radius: 8px;
   cursor: pointer;
   font-weight: 500;
-  font-size: 14px;
+  font-size: 0.9rem;
   transition: all 0.2s ease;
-  height: 48px; /* Same height as other buttons */
-  display: flex;
-  align-items: center;
-  justify-content: center;
   
   &:hover:not(:disabled) {
     background: #4ECDC4;
     color: white;
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
-  }
-  
-  &:active:not(:disabled) {
-    transform: translateY(0);
   }
   
   &:disabled {
@@ -387,44 +433,33 @@ const GoogleButton = styled.button`
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 0.75rem;
+  padding: 0.875rem 1.5rem;
   background: white;
-  color: #374151;
-  border: 2px solid #E5E7EB;
-  padding: 12px 24px;
+  color: #333;
+  border: 2px solid #e1e5e9;
   border-radius: 8px;
-  font-weight: 500;
-  font-size: 14px;
+  font-size: 1rem;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
   width: 100%;
-  height: 48px; /* Same height as other buttons */
   
   &:hover:not(:disabled) {
-    background: #F9FAFB;
-    border-color: #D1D5DB;
-    transform: translateY(-1px);
+    border-color: #4ecdc4;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   }
   
-  &:active:not(:disabled) {
-    transform: translateY(0);
-  }
-  
   &:disabled {
-    opacity: 0.7;
+    opacity: 0.6;
     cursor: not-allowed;
-    transform: none;
   }
 `;
 
 const GoogleIcon = styled.span`
-  font-weight: bold;
-  font-size: 16px;
-  background: linear-gradient(45deg, #4285f4, #34a853, #fbbc05, #ea4335);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 `;
 
 // Divider Styles
@@ -531,26 +566,6 @@ const LoginLink = styled.span`
   }
 `;
 
-// Pet-themed decorative elements
-const PetDecoration = styled.div`
-  position: absolute;
-  font-size: 20px;
-  z-index: 0;
-  opacity: 0.1;
-  
-  &:nth-child(1) {
-    top: 20px;
-    right: 20px;
-    transform: rotate(15deg);
-  }
-  
-  &:nth-child(2) {
-    bottom: 20px;
-    left: 20px;
-    transform: rotate(-15deg);
-  }
-`;
-
 // Main Component
 export const Createaccount = () => {
   const router = useRouter();
@@ -572,7 +587,6 @@ export const Createaccount = () => {
   const [showPasswordRules, setShowPasswordRules] = useState<boolean>(false);
   
   // Refs for OTP storage
- 
   const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Form Data
@@ -624,8 +638,6 @@ export const Createaccount = () => {
   }, [resendCooldown]);
 
   // Utility Functions
-
-
   const sanitizeInput = (input: string): string => {
     return input.trim();
   };
@@ -1239,90 +1251,104 @@ export const Createaccount = () => {
     <>
       <GlobalStyle />
       <Container>
-        <Card>
-          <PetDecoration>🐕</PetDecoration>
-          <PetDecoration>🐈</PetDecoration>
+        <LeftPanel>
+          <PetBackground 
+            src="https://images.unsplash.com/photo-1509205477838-a534e43a849f?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NHx8ZG9nJTIwYW5kJTIwY2F0JTIwYmFja2dyb3VuZHxlbnwwfHwwfHx8MA%3D%3D" 
+            alt="Dog and cat together"
+          />
+          <PanelOverlay />
           
-          {/* Logo Section with Image */}
-          <Link href="/" passHref>
-            <LogoContainer>
-             <LogoImage 
-              src="/RL.jpg" 
-              alt="FurSureCare Logo" 
-  onError={(e) => {
-    // Fallback if image fails to load
-    const target = e.target as HTMLImageElement;
-    target.style.display = 'none';
-  }}
-/>
-            </LogoContainer>
-          </Link>
-          
-          <Title>Create Account</Title>
-          <Subtitle>Join our pet-loving community</Subtitle>
-          
-          {error && <ErrorMessage>{error}</ErrorMessage>}
-          {success && <SuccessMessage>{success}</SuccessMessage>}
-          {info && <InfoMessage>{info}</InfoMessage>}
-          
-          {!otpSent ? (
-            <Form onSubmit={handleFormSubmit} noValidate>
-              <InputGrid>
+          <CenteredLogoSection>
+            <LogoImage 
+              src="/RL.jpg"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.style.display = 'none';
+              }}
+            />
+            <LogoText>
+              <ClinicName>FurSureCare</ClinicName>
+              <ClinicSubtitle>Your Pet&apos;s Health, Our Priority</ClinicSubtitle>
+            </LogoText>
+          </CenteredLogoSection>
+        </LeftPanel>
+
+        <RightPanel>
+          <FormContainer>
+            <FormHeader>
+              <FormTitle>
+                {otpSent ? "Verify Your Email" : "Create Account"}
+              </FormTitle>
+              <FormSubtitle>
+                {otpSent 
+                  ? "Enter the code sent to your email" 
+                  : "Join our pet-loving community"
+                }
+              </FormSubtitle>
+            </FormHeader>
+
+            {error && <ErrorMessage>{error}</ErrorMessage>}
+            {success && <SuccessMessage>{success}</SuccessMessage>}
+            {info && <InfoMessage>{info}</InfoMessage>}
+
+            {!otpSent ? (
+              <Form onSubmit={handleFormSubmit} noValidate>
+                <InputGrid>
+                  <InputGroup>
+                    <Label htmlFor="firstname">First Name</Label>
+                    <Input
+                      id="firstname"
+                      name="firstname"
+                      type="text"
+                      placeholder="Enter your first name"
+                      value={formData.firstname}
+                      onChange={handleInputChange}
+                      minLength={2}
+                      maxLength={50}
+                      required
+                      autoComplete="given-name"
+                    />
+                  </InputGroup>
+                  
+                  <InputGroup>
+                    <Label htmlFor="lastname">Last Name</Label>
+                    <Input
+                      id="lastname"
+                      name="lastname"
+                      type="text"
+                      placeholder="Enter your last name"
+                      value={formData.lastname}
+                      onChange={handleInputChange}
+                      minLength={2}
+                      maxLength={50}
+                      required
+                      autoComplete="family-name"
+                    />
+                  </InputGroup>
+                </InputGrid>
+                
                 <InputGroup>
-                  <Label htmlFor="firstname">First Name</Label>
+                  <Label htmlFor="email">Email Address</Label>
                   <Input
-                    id="firstname"
-                    name="firstname"
-                    type="text"
-                    placeholder="Enter your first name"
-                    value={formData.firstname}
+                    id="email"
+                    name="email"
+                    type="email"
+                    placeholder="Enter your email address"
+                    value={formData.email}
                     onChange={handleInputChange}
-                    minLength={2}
-                    maxLength={50}
                     required
-                    autoComplete="given-name"
+                    autoComplete="email"
+                    pattern="[^@\s]+@[^@\s]+\.[^@\s]+"
                   />
+                  {formData.email && !validateEmail(formData.email) && (
+                    <ErrorText>Please enter a valid email address</ErrorText>
+                  )}
                 </InputGroup>
                 
                 <InputGroup>
-                  <Label htmlFor="lastname">Last Name</Label>
+                  <Label htmlFor="phone">Phone Number</Label>
                   <Input
-                    id="lastname"
-                    name="lastname"
-                    type="text"
-                    placeholder="Enter your last name"
-                    value={formData.lastname}
-                    onChange={handleInputChange}
-                    minLength={2}
-                    maxLength={50}
-                    required
-                    autoComplete="family-name"
-                  />
-                </InputGroup>
-              </InputGrid>
-              
-              <InputGroup>
-                <Label htmlFor="email">Email Address</Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  placeholder="Enter your email address"
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  required
-                  autoComplete="email"
-                  pattern="[^@\s]+@[^@\s]+\.[^@\s]+"
-                />
-                {formData.email && !validateEmail(formData.email) && (
-                  <ErrorText>Please enter a valid email address</ErrorText>
-                )}
-              </InputGroup>
-              
-              <InputGroup>
-                <Label htmlFor="phone">Phone Number</Label>
-                <Input
-                  id="phone"
+                    id="phone"
                     name="phone"
                     type="tel"
                     placeholder="09XXXXXXXXX (11 digits)"
@@ -1493,7 +1519,14 @@ export const Createaccount = () => {
                   onClick={handleGoogleSignUp}
                   disabled={loading}
                 >
-                  <GoogleIcon>G</GoogleIcon>
+                  <GoogleIcon>
+                    <svg width="18" height="18" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+                      <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"/>
+                      <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"/>
+                      <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"/>
+                      <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"/>
+                    </svg>
+                  </GoogleIcon>
                   Sign up with Google
                 </GoogleButton>
               </>
@@ -1505,10 +1538,11 @@ export const Createaccount = () => {
                 Sign in here
               </LoginLink>
             </LoginRedirect>
-          </Card>
-        </Container>
-      </>
-    );
-  };
-  
-  export default Createaccount; 
+          </FormContainer>
+        </RightPanel>
+      </Container>
+    </>
+  );
+};
+
+export default Createaccount;
