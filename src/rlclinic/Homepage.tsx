@@ -22,6 +22,10 @@ const GlobalStyle = createGlobalStyle`
 const HomePage: React.FC = () => {
   const router = useRouter();
 
+  const handleFacebookClick = () => {
+    window.open("https://www.facebook.com/RLanimalclinic", "_blank");
+  };
+
   return (
     <>
       <GlobalStyle />
@@ -61,9 +65,6 @@ const HomePage: React.FC = () => {
               <HeroButton onClick={() => router.push("/createaccount")}>
                 Get Started Today
               </HeroButton>
-              <SecondaryButton onClick={() => router.push("/login")}>
-                Existing Account
-              </SecondaryButton>
             </ButtonGroup>
             <FeatureList>
               <FeatureItem>✓ No credit card required</FeatureItem>
@@ -75,7 +76,7 @@ const HomePage: React.FC = () => {
           {/* 🔸 CLINIC IMAGE */}
           <ImageContainer>
             <HeroImage
-              src="https://images.unsplash.com/photo-1535930749574-1399327ce78f?auto=format&fit=crop&q=80&w=1000"
+              src="/Pet.jpg"
               alt="Happy vet with dog and cat"
             />
             <ImageOverlay>
@@ -107,9 +108,9 @@ const HomePage: React.FC = () => {
               <CardText>Get notifications for vaccinations, medications, and appointments.</CardText>
             </Card>
             <Card>
-              <CardIcon>❤️</CardIcon>
-              <CardTitle>Pet Wellness Tracking</CardTitle>
-              <CardText>Monitor your pet&apos;s health trends and receive personalized insights.</CardText>
+              <CardIcon>💸</CardIcon>
+              <CardTitle>Easy Payment</CardTitle>
+              <CardText>Gcash or Cash are available</CardText>
             </Card>
           </CardContainer>
         </InfoSection>
@@ -215,15 +216,13 @@ const HomePage: React.FC = () => {
                   alt="FurSureCare Logo" 
                 />
                 <FooterLogoText>
-                  <LogoIcon>🐾</LogoIcon>
+                  <LogoIcon></LogoIcon>
                   FurSureCare
                 </FooterLogoText>
               </FooterLogoContainer>
               <FooterDescription>Providing exceptional care for your beloved pets since 2023.</FooterDescription>
               <SocialLinks>
-                <SocialLink>Facebook</SocialLink>
-                <SocialLink>Instagram</SocialLink>
-                <SocialLink>Twitter</SocialLink>
+                <SocialLink onClick={handleFacebookClick}>Facebook</SocialLink>
               </SocialLinks>
             </FooterSection>
             <FooterSection>
@@ -247,14 +246,7 @@ const HomePage: React.FC = () => {
               <FooterInfo>Address: 168 Unit A Bus Stop JP Laurel Hiway cor. V Dimayuga st. Brgy. 4, Tanauan, Philippines</FooterInfo>
             </FooterSection>
           </FooterContent>
-          <Copyright>
-            <CopyrightText>© 2023 FurSureCare Veterinary Clinic. All Rights Reserved.</CopyrightText>
-            <FooterLinks>
-              <FooterBottomLink>Privacy Policy</FooterBottomLink>
-              <FooterBottomLink>Terms of Service</FooterBottomLink>
-              <FooterBottomLink>Cookie Policy</FooterBottomLink>
-            </FooterLinks>
-          </Copyright>
+
         </Footer>
       </PageContainer>
     </>
@@ -947,38 +939,6 @@ const SocialLink = styled.span`
   }
 `;
 
-const Copyright = styled.div`
-  text-align: center;
-  padding: 1.8rem;
-  border-top: 1px solid #333;
-  background: #151515;
-`;
 
-const CopyrightText = styled.p`
-  color: #999;
-  font-size: 0.95rem;
-  margin-bottom: 0.5rem;
-`;
 
-const FooterLinks = styled.div`
-  display: flex;
-  justify-content: center;
-  gap: 1.5rem;
-  flex-wrap: wrap;
-  
-  @media (max-width: 480px) {
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-`;
 
-const FooterBottomLink = styled.span`
-  cursor: pointer;
-  color: #999;
-  font-size: 0.9rem;
-  transition: color 0.3s ease;
-  
-  &:hover {
-    color: #20c997;
-  }
-`;

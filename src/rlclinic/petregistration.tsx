@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import styled, { createGlobalStyle, keyframes } from "styled-components";
 import { useRouter } from "next/navigation";
 import { db, auth } from "../firebaseConfig";
-import { collection, doc, setDoc } from "firebase/firestore";
+import { collection, doc, setDoc, getDocs, query, where } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
 const GlobalStyle = createGlobalStyle`
@@ -49,7 +49,8 @@ const dogBreeds = [
   "Poodle",
   "Dachshund",
   "Rottweiler",
-  "Philippine Forest Dog (Asong Gubat)"
+  "Philippine Forest Dog (Asong Gubat)",
+  "Others(mixed breed)"
 ];
 
 const catBreeds = [
@@ -63,7 +64,8 @@ const catBreeds = [
   "American Shorthair",
   "Maine Coon",
   "Persian",
-  "Putot Cat (Pusang Putot)"
+  "Putot Cat (Pusang Putot)",
+  "Others(mixed breed)"
 ];
 
 const Petregister: React.FC = () => {
@@ -105,90 +107,105 @@ const Petregister: React.FC = () => {
   }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  if (!petName.trim()) {
-    setModalMessage("Please enter your pet's name.");
-    setShowErrorModal(true);
-    return;
-  }
-
-  setIsLoading(true);
-
-  try {
-    const petId = doc(collection(db, "pets")).id;
-
-    // Calculate age from birthday
-    const age = birthday ? calculateAge(birthday) : "";
-
-    // ✅ FIXED: Get current user
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      setModalMessage("You must be logged in to register a pet.");
+    e.preventDefault();
+    if (!petName.trim()) {
+      setModalMessage("Please enter your pet's name.");
       setShowErrorModal(true);
-      setIsLoading(false);
       return;
     }
 
-    // Save to pets collection
-    await setDoc(doc(db, "pets", petId), {
-      petId,
-      name: petName.trim(), // CHANGED: petName → name
-      birthday: birthday || null,
-      color: color.trim(),
-      petType: petType.trim(),
-      petBreed: petBreed.trim(),
-      gender,
-      ownerEmail: petOwnerEmail,
-      ownerId: currentUser.uid, // ✅ FIXED: Use currentUser.uid
-      createdAt: new Date().toISOString(),
-    });
+    setIsLoading(true);
 
-    // Save to petRegistrations
-    await setDoc(doc(db, "petRegistrations", petId), {
-      petId,
-      petName: petName.trim(),
-      ownerEmail: petOwnerEmail,
-      ownerId: currentUser.uid, // ✅ ADD: For consistency
-      petType: petType.trim(),
-      petBreed: petBreed.trim(),
-      age: age,
-      gender,
-      color: color.trim(),
-      createdAt: new Date().toISOString(),
-    });
+    try {
+      const petId = doc(collection(db, "pets")).id;
 
-    // Initial medical record with ALL information
-    await setDoc(doc(db, "medicalRecords", petId), {
-      petId,
-      petName: petName.trim(),
-      ownerEmail: petOwnerEmail,
-      ownerId: currentUser.uid, // ✅ ADD: For consistency
-      ownerName: "", // Will be filled from user data
-      birthDate: birthday || "", // ✅ Save birthday here
-      breed: petBreed.trim(), // ✅ Save breed here
-      petType: petType.toLowerCase(), // ✅ Convert to lowercase for consistency
-      gender: gender,
-      color: color.trim(),
-      date: new Date().toISOString().split("T")[0],
-      diagnosis: "Initial checkup",
-      treatment: "Registration",
-      notes: "Pet registration and initial medical record created",
-      veterinarian: "System",
-      createdAt: new Date().toISOString(),
-      status: "Registered",
-      petAge: age // ✅ Include calculated age
-    });
+      // Calculate age from birthday
+      const age = birthday ? calculateAge(birthday) : "";
 
-    setModalMessage("Pet registered successfully! All information has been saved to medical records.");
-    setShowSuccessModal(true);
-  } catch (error) {
-    console.error("Error saving pet:", error);
-    setModalMessage("Failed to save pet. Please try again.");
-    setShowErrorModal(true);
-  } finally {
-    setIsLoading(false);
-  }
-};
+      // ✅ FIXED: Get current user
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        setModalMessage("You must be logged in to register a pet.");
+        setShowErrorModal(true);
+        setIsLoading(false);
+        return;
+      }
+
+      // Save to pets collection with PENDING status
+      await setDoc(doc(db, "pets", petId), {
+        petId,
+        name: petName.trim(),
+        birthday: birthday || null,
+        color: color.trim(),
+        petType: petType.trim(),
+        petBreed: petBreed.trim(),
+        gender,
+        ownerEmail: petOwnerEmail,
+        ownerId: currentUser.uid,
+        // ADDED: New fields for admin approval
+        status: "Waiting Appointment ", // CHANGED: Now requires admin approval
+        approvedByAdmin: false, // Not yet approved
+        createdAt: new Date().toISOString(),
+      });
+
+      // Save to petRegistrations with PENDING status
+      await setDoc(doc(db, "petRegistrations", petId), {
+        petId,
+        petName: petName.trim(),
+        ownerEmail: petOwnerEmail,
+        ownerId: currentUser.uid,
+        petType: petType.trim(),
+        petBreed: petBreed.trim(),
+        age: age,
+        gender,
+        color: color.trim(),
+        // ADDED: New fields for admin approval
+        status: "Pending Approval", // CHANGED: Now requires admin approval
+        approvedByAdmin: false, // Not yet approved
+        createdAt: new Date().toISOString(),
+      });
+
+      // ✅ REMOVED: No longer creating medical record automatically
+      // Medical records will be created by admin after approval
+
+      // Send notification to admin for approval
+      try {
+        const adminQuery = query(collection(db, "users"), where("role", "==", "admin"));
+        const adminSnapshot = await getDocs(adminQuery);
+        
+        const adminNotifications = adminSnapshot.docs.map(async (adminDoc) => {
+          const adminData = adminDoc.data();
+          return setDoc(doc(collection(db, "notifications")), {
+            recipientId: adminDoc.id,
+            recipientEmail: adminData.email,
+            type: "new_pet_registration",
+            title: "New Pet Registration Needs Approval",
+            message: `New pet registration by ${currentUser.email}: ${petName} (${petType}, ${petBreed}). Please review and approve.`,
+            petId: petId,
+            isRead: false,
+            requiresAction: true,
+            createdAt: new Date().toISOString(),
+          });
+        });
+
+        await Promise.all(adminNotifications);
+        console.log("✅ Notifications sent to admin for approval");
+      } catch (notifError) {
+        console.error("❌ Notification error:", notifError);
+        // Continue even if notification fails
+      }
+
+      setModalMessage("Pet registration submitted successfully! Your pet registration is pending admin approval. Medical records will be created after approval.");
+      setShowSuccessModal(true);
+    } catch (error) {
+      console.error("Error saving pet:", error);
+      setModalMessage("Failed to save pet registration. Please try again.");
+      setShowErrorModal(true);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const calculateAge = (birthDate: string) => {
     const today = new Date();
     const birth = new Date(birthDate);
@@ -230,7 +247,12 @@ const Petregister: React.FC = () => {
         <Content>
           <Card>
             <Header>
-              <PetIcon>🐾</PetIcon>
+              <PetIcon>
+             <LogoImage 
+              src="RL.jpg"
+              alt="FurSureCare Logo"
+            />
+              </PetIcon>
               Pet Registration
             </Header>
             
@@ -361,9 +383,9 @@ const Petregister: React.FC = () => {
                   {isLoading ? (
                     <>
                       <Spinner />
-                      Registering...
+                      Submitting for Approval...
                     </>
-                  ) : "Register Pet"}
+                  ) : "Submit for Approval"}
                 </Button>
                 <CancelButton 
                   type="button" 
@@ -385,7 +407,7 @@ const Petregister: React.FC = () => {
                 <ModalIcon $variant="success">
                   <i className="fas fa-check-circle"></i>
                 </ModalIcon>
-                <ModalTitle>Success!</ModalTitle>
+                <ModalTitle>Registration Submitted!</ModalTitle>
                 <ModalClose onClick={handleModalClose}>
                   <i className="fas fa-times"></i>
                 </ModalClose>
@@ -406,10 +428,22 @@ const Petregister: React.FC = () => {
                     <strong>Gender:</strong> {gender}
                   </DetailItem>
                 </PetDetails>
+                <InfoBox>
+                  
+                  <InfoText>
+                    <strong>What happens next?</strong>
+                    <ul>
+                      <li>Admin will review your pet registration</li>
+                      <li>You&aposll receive notification once your appointment has done</li>
+                      <li>Medical records will be created after approval</li>
+                      <li>You can track your pet health into your medical  record</li>
+                    </ul>
+                  </InfoText>
+                </InfoBox>
               </ModalContent>
               <ModalActions>
                 <ModalButton $variant="success" onClick={handleModalClose}>
-                  Continue to Dashboard
+                  Back to Dashboard
                 </ModalButton>
               </ModalActions>
             </ModalContainer>
@@ -462,7 +496,7 @@ const HeaderBar = styled.header`
   justify-content: space-between;
   align-items: center;
   padding: 20px 40px;
-  background: linear-gradient(135deg, #6bc1e1 0%, #34b89c 100%);
+  background:#34B89C;
   color: white;
   box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.1);
   
@@ -547,6 +581,17 @@ const PetIcon = styled.span`
   @media (max-width: 768px) {
     font-size: 32px;
   }
+`;
+
+const LogoImage = styled.img`
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 2px 8px rgba(52, 184, 156, 0.15);
+  background: #fff;
+  border: 2px solid #34b89c;
+  margin-bottom: 5px;
 `;
 
 const Form = styled.form`
@@ -805,7 +850,7 @@ const ModalContainer = styled.div`
   background: white;
   border-radius: 20px;
   width: 100%;
-  max-width: 450px;
+  max-width: 500px;
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
   overflow: hidden;
   animation: ${slideUp} 0.3s ease-out;
@@ -892,6 +937,39 @@ const DetailItem = styled.p`
   
   strong {
     color: #34b89c;
+  }
+`;
+
+const InfoBox = styled.div`
+  background: linear-gradient(135deg, #fff9e6 0%, #fff3cd 100%);
+  border-radius: 12px;
+  padding: 1rem;
+  margin-top: 1rem;
+  border-left: 4px solid #ffc107;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+`;
+
+
+const InfoText = styled.div`
+  flex: 1;
+  
+  strong {
+    color: #856404;
+    display: block;
+    margin-bottom: 0.5rem;
+  }
+  
+  ul {
+    margin: 0;
+    padding-left: 1rem;
+    color: #856404;
+  }
+  
+  li {
+    margin-bottom: 0.25rem;
+    font-size: 0.9rem;
   }
 `;
 

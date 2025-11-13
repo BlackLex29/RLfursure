@@ -14,7 +14,8 @@ import {
   serverTimestamp,
   doc,
   updateDoc,
-  getDoc
+  getDoc,
+  deleteDoc
 } from "firebase/firestore";
 import { onAuthStateChanged, User } from "firebase/auth";
 
@@ -47,6 +48,7 @@ interface Appointment {
   appointmentType: string;
   price?: number;
   paymentMethod?: string;
+  referenceNumber?: string;
   createdAt?: unknown;
 }
 
@@ -150,6 +152,57 @@ const paymentMethods = [
   { value: "Cash", label: "Cash Payment", description: "Pay with cash when you arrive" },
   { value: "GCash", label: "GCash", description: "Pay online using GCash" }
 ];
+
+// 🔹 FIXED: Enhanced Manual QR Payment Processing Function with Dynamic QR
+const processPayment = async (
+  appointmentId: string, 
+  amount: number, 
+  appointmentType: string, 
+  petName: string, 
+  paymentMethod: string
+): Promise<{success: boolean; qrData?: string; referenceNumber: string}> => {
+  try {
+    if (paymentMethod === "Cash") {
+      return { success: false, referenceNumber: '' };
+    }
+    
+    console.log("📱 Starting MANUAL GCash payment process for appointment:", appointmentId);
+    console.log("💰 Amount (PHP):", amount);
+
+    const referenceNumber = `GCASH-${Date.now()}`;
+    
+    // Generate QR code data for GCash
+    const qrData = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
+      `GCASH|09171234567|${amount}|${referenceNumber}|FursureCare Veterinary Clinic`
+    )}`;
+    
+    console.log("✅ Generated QR code data:", qrData);
+
+    return { 
+      success: true,
+      qrData: qrData,
+      referenceNumber: referenceNumber
+    };
+    
+  } catch (err) {
+    console.error("❌ Manual Payment processing error:", err);
+    
+    const errorMessage = err instanceof Error ? err.message : 'Unknown payment error';
+    
+    try {
+      await updateDoc(doc(db, "appointments", appointmentId), {
+        status: "Payment Failed",
+        paymentError: errorMessage,
+        updatedAt: serverTimestamp()
+      });
+      console.log("📝 Updated appointment status to 'Payment Failed'");
+    } catch (updateError) {
+      console.error("❌ Failed to update appointment status:", updateError);
+    }
+    
+    throw new Error(`GCash payment failed: ${errorMessage}`);
+  }
+};
 
 // 🔹 Utility function to format date
 const formatBirthday = (birthday: string) => {
@@ -610,7 +663,208 @@ const PaymentMethodSelector: React.FC<{
   </FormSection>
 );
 
-// 🔹 UPDATED: Clean Printable Receipt Component with Logo and Complete Pet Details
+// 🔹 FIXED: GCash Payment Modal with Reference Number Input Only
+const GCashPaymentModal: React.FC<{
+  amount: number;
+  appointmentType: string;
+  petName: string;
+  onSuccess: () => void;
+  onCancel: (appointmentId: string) => void;
+  appointmentId: string;
+}> = ({ amount, appointmentType, petName, onSuccess, onCancel, appointmentId }) => {
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [referenceInput, setReferenceInput] = useState("");
+  const [qrLoaded, setQrLoaded] = useState(false);
+
+  // ✅ FIXED: Proper cancel handler that deletes the appointment
+  const handleCancelPayment = async () => {
+    setIsProcessing(true);
+    try {
+      console.log("❌ Cancelling payment and deleting appointment:", appointmentId);
+      
+      // Delete the appointment from Firestore
+      await deleteDoc(doc(db, "appointments", appointmentId));
+      console.log("✅ Appointment successfully deleted");
+      
+      // Call the parent cancel handler
+      onCancel(appointmentId);
+      
+    } catch (error) {
+      console.error("❌ Error cancelling appointment:", error);
+      alert("Error cancelling appointment. Please try again.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleSubmitReference = async () => {
+    if (!referenceInput.trim()) {
+      setError("Please enter your GCash reference number");
+      return;
+    }
+
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      // Update appointment with reference number
+      await updateDoc(doc(db, "appointments", appointmentId), {
+        referenceNumber: referenceInput.trim(),
+        status: "Pending Confirmation",
+        updatedAt: serverTimestamp()
+      });
+
+      console.log("✅ Reference number submitted:", referenceInput);
+      onSuccess();
+    } catch (err) {
+      console.error("❌ Error submitting reference:", err);
+      setError("Failed to submit reference number. Please try again.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // ✅ ADDED: Copy amount to clipboard
+  const copyAmount = () => {
+    navigator.clipboard.writeText(amount.toString())
+      .then(() => {
+        alert(`Amount ₱${amount.toLocaleString()} copied to clipboard!`);
+      })
+      .catch(() => {
+        const textArea = document.createElement("textarea");
+        textArea.value = amount.toString();
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textArea);
+        alert(`Amount ₱${amount.toLocaleString()} copied to clipboard!`);
+      });
+  };
+
+  return (
+    <PaymentModalOverlay>
+      <PaymentModal className="large-modal">
+        <PaymentModalHeader>
+          <PaymentModalTitle> GCash Payment</PaymentModalTitle>
+          <CloseModalButton onClick={() => handleCancelPayment()}>×</CloseModalButton>
+        </PaymentModalHeader>
+        
+        <PaymentModalContent>
+          {/* Payment Summary */}
+          <PaymentSummary>
+            <SummaryTitle>Payment Summary</SummaryTitle>
+            <SummaryGrid>
+              <SummaryItem>
+                <SummaryLabel>Service:</SummaryLabel>
+                <SummaryValue>{appointmentType}</SummaryValue>
+              </SummaryItem>
+              <SummaryItem>
+                <SummaryLabel>Pet:</SummaryLabel>
+                <SummaryValue>{petName}</SummaryValue>
+              </SummaryItem>
+              <SummaryItem>
+                <SummaryLabel>Amount:</SummaryLabel>
+                <SummaryValue className="amount">
+                  ₱{amount.toLocaleString()}
+                  <CopyButton onClick={copyAmount} title="Copy amount">
+                    ▢
+                  </CopyButton>
+                </SummaryValue>
+              </SummaryItem>
+            </SummaryGrid>
+          </PaymentSummary>
+
+          {/* QR Code Section */}
+          <QRCodeSection>
+            <QRCodeTitle>Scan this QR Code with GCash</QRCodeTitle>
+            <QRCodeNote>
+              Amount: <strong>₱{amount.toLocaleString()}</strong>
+            </QRCodeNote>
+            <QRCodeContainer>
+              <QRCodeWrapper>
+                <QRCodeImage 
+                  src= "/RL-QR.png"
+                  alt="GCash QR Code" 
+                  onLoad={() => setQrLoaded(true)}
+                  onError={(e) => {
+                    console.error("❌ Failed to load QR image");
+                    setQrLoaded(false);
+                    e.currentTarget.style.display = 'none';
+                  }}
+                />
+                {!qrLoaded && (
+                  <QRCodeFallback>
+                    <QRCodeText>GCash QR Code</QRCodeText>
+                    <QRCodeSubtext>Scan to Pay</QRCodeSubtext>
+                    <QRCodeAmount>₱{amount.toLocaleString()}</QRCodeAmount>
+                  </QRCodeFallback>
+                )}
+              </QRCodeWrapper>
+            </QRCodeContainer>
+          </QRCodeSection>
+
+          {/* Reference Number Input Section */}
+          <ReferenceInputSection>
+            <ReferenceInputTitle>Enter GCash Reference Number</ReferenceInputTitle>
+            <ReferenceInputDescription>
+              After completing the payment in GCash, please enter the reference number from your transaction:
+            </ReferenceInputDescription>
+            
+            <ReferenceInputContainer>
+              <ReferenceInputLabel>GCash Reference Number:</ReferenceInputLabel>
+              <ReferenceInput
+                type="text"
+                placeholder="Enter reference number (e.g., 1234567890)"
+                value={referenceInput}
+                onChange={(e) => setReferenceInput(e.target.value)}
+                disabled={isProcessing}
+              />
+              <ReferenceInputHint>
+                 You can find this in your GCash transaction history
+              </ReferenceInputHint>
+            </ReferenceInputContainer>
+
+            {error && (
+              <PaymentError>
+                ⚠️ {error}
+              </PaymentError>
+            )}
+          </ReferenceInputSection>
+
+          <PaymentModalActions>
+            <CancelPaymentButton 
+              onClick={handleCancelPayment} 
+              disabled={isProcessing}
+            >
+              {isProcessing ? "Cancelling..." : "❌ Cancel Payment"}
+            </CancelPaymentButton>
+            <ConfirmPaymentButton 
+              onClick={handleSubmitReference} 
+              disabled={isProcessing || !referenceInput.trim()}
+            >
+              {isProcessing ? (
+                <>
+                  <Spinner />
+                  Submitting...
+                </>
+              ) : (
+                "✅ Submit Reference Number"
+              )}
+            </ConfirmPaymentButton>
+          </PaymentModalActions>
+
+          <PaymentNote>
+           Your appointment will be confirmed once we verify your payment. 
+            Please make sure to enter the correct reference number.
+          </PaymentNote>
+        </PaymentModalContent>
+      </PaymentModal>
+    </PaymentModalOverlay>
+  );
+};
+
+// 🔹 Clean Printable Receipt Component with Logo and Complete Pet Details
 const PrintableReceipt: React.FC<{
   appointment: Appointment;
   onClose: () => void;
@@ -826,6 +1080,10 @@ const PrintableReceipt: React.FC<{
                 <span class="item-label">Payment Method:</span>
                 <span class="item-value">${appointment.paymentMethod}</span>
               </div>
+              ${appointment.referenceNumber ? `<div class="receipt-item">
+                <span class="item-label">Reference No:</span>
+                <span class="item-value">${appointment.referenceNumber}</span>
+              </div>` : ''}
               <div class="receipt-item">
                 <span class="item-label">Status:</span>
                 <span class="item-value" style="color: #27AE60;">${appointment.status}</span>
@@ -930,6 +1188,12 @@ const PrintableReceipt: React.FC<{
             <ItemLabel>Payment Method:</ItemLabel>
             <ItemValue>{appointment.paymentMethod}</ItemValue>
           </PrintItem>
+          {appointment.referenceNumber && (
+            <PrintItem>
+              <ItemLabel>Reference No:</ItemLabel>
+              <ItemValue>{appointment.referenceNumber}</ItemValue>
+            </PrintItem>
+          )}
           <PrintItem>
             <ItemLabel>Status:</ItemLabel>
             <ItemValue className="success">{appointment.status}</ItemValue>
@@ -964,7 +1228,7 @@ const PrintableReceipt: React.FC<{
   );
 };
 
-// 🔹 UPDATED: Clean Receipt Screen Component with Logo and Complete Pet Details
+// 🔹 Clean Receipt Screen Component with Logo and Complete Pet Details
 const ReceiptScreen: React.FC<{
   appointment: Appointment;
   onViewReceipt: () => void;
@@ -986,7 +1250,9 @@ const ReceiptScreen: React.FC<{
     <ReceiptContainer>
       <ReceiptHeader>
         <LogoContainer>
-          <ClinicLogo>FURSURECARE VETERINARY CLINIC</ClinicLogo>
+          <ClinicLogo>
+            <LogoImage src="/RL.jpg" alt="RL Clinic Logo" />
+          </ClinicLogo>
         </LogoContainer>
         <SuccessIcon>✅</SuccessIcon>
         <ReceiptTitleMain>Appointment Confirmed</ReceiptTitleMain>
@@ -1047,6 +1313,12 @@ const ReceiptScreen: React.FC<{
               <DetailLabel>Payment Method</DetailLabel>
               <DetailValue>{appointment.paymentMethod}</DetailValue>
             </DetailItem>
+            {appointment.referenceNumber && (
+              <DetailItem>
+                <DetailLabel>Reference Number</DetailLabel>
+                <DetailValue>{appointment.referenceNumber}</DetailValue>
+              </DetailItem>
+            )}
             <DetailItem>
               <DetailLabel>Amount Paid</DetailLabel>
               <DetailValue className="price">₱{appointment.price?.toLocaleString()}</DetailValue>
@@ -1081,87 +1353,12 @@ const ReceiptScreen: React.FC<{
   );
 };
 
-// 🔹 Payment Processing Function
-const processPayment = async (
-  appointmentId: string, 
-  amount: number, 
-  appointmentType: string, 
-  petName: string, 
-  paymentMethod: string
-): Promise<boolean> => {
-  try {
-    if (paymentMethod === "Cash") {
-      return false;
-    }
-    
-    const amountInCentavos = Math.round(amount * 100);
-    
-    console.log("💳 Starting payment process for appointment:", appointmentId);
-
-    const res = await fetch("/api/create-payment-intent", {
-      method: "POST",
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        amount: amountInCentavos,
-        description: `${appointmentType} for ${petName}`,
-        payment_method_type: paymentMethod.toLowerCase(),
-        return_url: `${window.location.origin}/appointment?payment_success=true&appointment_id=${appointmentId}`,
-        reference_number: appointmentId
-      })
-    });
-
-    if (!res.ok) {
-      const errorData = await res.json();
-      console.error("❌ Payment API error:", errorData);
-      throw new Error(errorData.error || `Payment failed: ${res.status}`);
-    }
-
-    const responseData = await res.json();
-    console.log("✅ Payment API response:", responseData);
-
-    if (!responseData.success) {
-      throw new Error(responseData.error || "Payment failed");
-    }
-
-    const checkoutUrl = responseData.data?.checkout_url;
-
-    if (checkoutUrl) {
-      console.log("🔗 Redirecting to:", checkoutUrl);
-      
-      sessionStorage.setItem('pendingAppointmentId', appointmentId);
-      
-      window.location.href = checkoutUrl;
-      return true;
-    } else {
-      throw new Error("No checkout URL received");
-    }
-  } catch (err) {
-    console.error("❌ Payment processing error:", err);
-    
-    const errorMessage = err instanceof Error ? err.message : 'Unknown payment error';
-    
-    try {
-      await updateDoc(doc(db, "appointments", appointmentId), {
-        status: "Payment Failed",
-        paymentError: errorMessage
-      });
-    } catch (updateError) {
-      console.error("❌ Failed to update appointment status:", updateError);
-    }
-    
-    throw new Error(errorMessage);
-  }
-};  
-
 // 🔹 Main Appointment Page Component
 const AppointmentPage: React.FC = () => {
   const router = useRouter();
   const { pets, bookedSlots, unavailableSlots, doctors, isLoading } = useAppointmentData();
   const { isDateUnavailable, getUnavailableDates } = useAvailability(unavailableSlots);
   
-  const [isClient, setIsClient] = useState(false);
   const [currentDate, setCurrentDate] = useState("");
   
   const initialState: BookingState = {
@@ -1178,9 +1375,44 @@ const AppointmentPage: React.FC = () => {
   const [showPaymentMethods, setShowPaymentMethods] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
   const [showPrintableReceipt, setShowPrintableReceipt] = useState(false);
+  const [showGCashModal, setShowGCashModal] = useState(false);
   const [completedAppointment, setCompletedAppointment] = useState<Appointment | null>(null);
+  const [pendingAppointmentInfo, setPendingAppointmentInfo] = useState<{
+    id: string;
+    amount: number;
+    type: string;
+    petName: string;
+    referenceNumber: string;
+    qrData: string;
+  } | null>(null);
 
-  // 🔹 FIXED: handlePaymentSelection function with proper state access
+  // ✅ FIXED: Proper cancel handler for GCash payments
+  const handleGCashCancel = useCallback(async (appointmentId: string) => {
+    try {
+      console.log("🗑️ Deleting cancelled GCash appointment:", appointmentId);
+      
+      // Delete the appointment from Firestore
+      await deleteDoc(doc(db, "appointments", appointmentId));
+      
+      console.log("✅ Appointment successfully deleted after cancellation");
+      
+      // Close modal and redirect
+      setShowGCashModal(false);
+      setPendingAppointmentInfo(null);
+      
+      // Show confirmation message
+      alert("Appointment has been cancelled successfully.");
+      
+      // Redirect to dashboard
+      router.push("/userdashboard");
+      
+    } catch (error) {
+      console.error("❌ Error deleting cancelled appointment:", error);
+      alert("Error cancelling appointment. Please try again.");
+    }
+  }, [router]);
+
+  // 🔹 FIXED: handlePaymentSelection function with proper flow
   const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
     setIsProcessing(true);
     setShowPaymentMethods(false);
@@ -1202,19 +1434,23 @@ const AppointmentPage: React.FC = () => {
 
       const selectedPetData = pets.find((p) => p.id === selectedPet);
       
+      if (!selectedPetData) {
+        throw new Error("Selected pet not found");
+      }
+
       // ✅ FIXED: Ensure all fields have default values to avoid undefined
       const appointmentData = {
         userId: currentUser.uid,
         clientName: currentUser.email || "Unknown Client",
         clientId: currentUser.uid,
         petId: selectedPet,
-        petName: selectedPetData?.name || "Unknown Pet",
-        petType: selectedPetData?.petType || "Unknown",
-        breed: selectedPetData?.breed || "Unknown",
-        gender: selectedPetData?.gender || "Unknown",
-        color: selectedPetData?.color || "Unknown",
-        birthday: selectedPetData?.birthday || "",
-        age: selectedPetData?.age || "", // ✅ FIXED: Set default empty string instead of undefined
+        petName: selectedPetData.name,
+        petType: selectedPetData.petType || "Unknown",
+        breed: selectedPetData.breed || "Unknown",
+        gender: selectedPetData.gender || "Unknown",
+        color: selectedPetData.color || "Unknown",
+        birthday: selectedPetData.birthday || "",
+        age: selectedPetData.age || "",
         date: selectedDate,
         timeSlot: selectedSlot,
         appointmentType: selectedAppointmentType,
@@ -1225,7 +1461,7 @@ const AppointmentPage: React.FC = () => {
         updatedAt: serverTimestamp()
       };
 
-      console.log("💾 Creating appointment:", appointmentData);
+      console.log("💾 Creating appointment in database:", appointmentData);
 
       const newDoc = await addDoc(collection(db, "appointments"), appointmentData);
 
@@ -1235,6 +1471,7 @@ const AppointmentPage: React.FC = () => {
 
       console.log("✅ Appointment created with ID:", newDoc.id);
 
+      // Send notifications to doctors
       try {
         const doctorNotifications = doctors.map(async (doctor) => {
           return addDoc(collection(db, "notifications"), {
@@ -1242,7 +1479,7 @@ const AppointmentPage: React.FC = () => {
             recipientEmail: doctor.email,
             type: "new_appointment",
             title: "New Appointment Booked",
-            message: `New appointment booked by ${currentUser.email} for ${selectedPetData?.name} (${selectedPetData?.breed}, ${selectedPetData?.age}) on ${selectedDate} at ${selectedSlot} - ₱${selectedPrice}`,
+            message: `New appointment booked by ${currentUser.email} for ${selectedPetData.name} (${selectedPetData.breed}) on ${selectedDate} at ${selectedSlot} - ₱${selectedPrice}`,
             appointmentId: newDoc.id,
             isRead: false,
             createdAt: serverTimestamp()
@@ -1252,23 +1489,26 @@ const AppointmentPage: React.FC = () => {
         await Promise.all(doctorNotifications);
         console.log("✅ Notifications sent to doctors");
       } catch (notifError) {
-        console.error("❌ Notification error:", notifError);
+        console.error("❌ Notification error (non-critical):", notifError);
+        // Don't throw error for notification failures
       }
 
+      // Handle different payment methods
       if (paymentMethod === "Cash") {
+        // For Cash payments, show receipt immediately
         const fullAppointment: Appointment = {
           id: newDoc.id,
           date: selectedDate,
           timeSlot: selectedSlot,
           status: "Confirmed",
           petId: selectedPet,
-          petName: selectedPetData?.name || "Unknown Pet",
-          petType: selectedPetData?.petType || "Unknown",
-          breed: selectedPetData?.breed || "Unknown",
-          gender: selectedPetData?.gender || "Unknown",
-          color: selectedPetData?.color || "Unknown",
-          birthday: selectedPetData?.birthday || "",
-          age: selectedPetData?.age || "", // ✅ FIXED: Set default empty string
+          petName: selectedPetData.name,
+          petType: selectedPetData.petType || "Unknown",
+          breed: selectedPetData.breed || "Unknown",
+          gender: selectedPetData.gender || "Unknown",
+          color: selectedPetData.color || "Unknown",
+          birthday: selectedPetData.birthday || "",
+          age: selectedPetData.age || "",
           clientName: currentUser.email || "Unknown Client",
           appointmentType: selectedAppointmentType,
           price: selectedPrice,
@@ -1278,31 +1518,50 @@ const AppointmentPage: React.FC = () => {
         
         setCompletedAppointment(fullAppointment);
         setShowReceipt(true);
-      } else {
+        setIsProcessing(false);
+        
+      } else if (paymentMethod === "GCash") {
+        // For GCash payments - process MANUAL QR payment
         try {
-          const isRedirecting = await processPayment(
+          console.log("🔄 Starting MANUAL GCash payment process...");
+          
+          const paymentResult = await processPayment(
             newDoc.id, 
             selectedPrice, 
             selectedAppointmentType, 
-            selectedPetData?.name || "Pet",
+            selectedPetData.name,
             paymentMethod
           );
 
-          if (!isRedirecting) {
-            alert("Appointment booked successfully!");
-            router.push("/userdashboard");
+          if (paymentResult.success) {
+            // Show manual QR modal instead of redirecting
+            setShowGCashModal(true);
+            
+            // Store appointment info for the modal
+            setPendingAppointmentInfo({
+              id: newDoc.id,
+              amount: selectedPrice,
+              type: selectedAppointmentType,
+              petName: selectedPetData.name,
+              referenceNumber: paymentResult.referenceNumber,
+              qrData: paymentResult.qrData || `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(`GCASH|09171234567|${selectedPrice}|${paymentResult.referenceNumber}|FursureCareVet`)}`
+            });
           }
+          setIsProcessing(false);
         } catch (paymentError) {
-          console.error("❌ Payment error:", paymentError);
+          console.error("❌ Manual Payment error:", paymentError);
           
           const errorMessage = paymentError instanceof Error ? paymentError.message : 'Payment processing failed';
           
+          // Update appointment status to reflect payment failure
           await updateDoc(doc(db, "appointments", newDoc.id), {
             status: "Payment Failed",
-            paymentError: errorMessage
+            paymentError: errorMessage,
+            updatedAt: serverTimestamp()
           });
           
           alert(`Appointment created but payment failed: ${errorMessage}. Please try again or pay with cash.`);
+          setIsProcessing(false);
           router.push("/userdashboard");
         }
       }
@@ -1312,92 +1571,56 @@ const AppointmentPage: React.FC = () => {
       
       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
       alert("Failed to book appointment: " + errorMessage);
-      
-    } finally {
       setIsProcessing(false);
     }
   }, [bookingState, pets, doctors, router]);
 
+  // Add this function to handle GCash payment success
+  const handleGCashSuccess = useCallback(async () => {
+    if (pendingAppointmentInfo) {
+      try {
+        // Get the reference number from the appointment
+        const appointmentDoc = await getDoc(doc(db, "appointments", pendingAppointmentInfo.id));
+        const appointmentData = appointmentDoc.data();
+        
+        const fullAppointment: Appointment = {
+          id: pendingAppointmentInfo.id,
+          date: bookingState.selectedDate,
+          timeSlot: bookingState.selectedSlot || "",
+          status: "Pending Confirmation",
+          petId: bookingState.selectedPet || "",
+          petName: pendingAppointmentInfo.petName,
+          petType: pets.find(p => p.id === bookingState.selectedPet)?.petType || "Unknown",
+          breed: pets.find(p => p.id === bookingState.selectedPet)?.breed || "Unknown",
+          gender: pets.find(p => p.id === bookingState.selectedPet)?.gender || "Unknown",
+          color: pets.find(p => p.id === bookingState.selectedPet)?.color || "Unknown",
+          birthday: pets.find(p => p.id === bookingState.selectedPet)?.birthday || "",
+          age: pets.find(p => p.id === bookingState.selectedPet)?.age || "",
+          clientName: auth.currentUser?.email || "Unknown Client",
+          appointmentType: pendingAppointmentInfo.type,
+          price: pendingAppointmentInfo.amount,
+          paymentMethod: "GCash",
+          referenceNumber: appointmentData?.referenceNumber,
+          createdAt: new Date()
+        };
+
+        setCompletedAppointment(fullAppointment);
+        setShowGCashModal(false);
+        setShowReceipt(true);
+        setPendingAppointmentInfo(null);
+        
+      } catch (error) {
+        console.error("Error getting appointment data:", error);
+        alert("Payment was successful but there was an error loading your appointment details.");
+      }
+    }
+  }, [pendingAppointmentInfo, pets, bookingState]);
+
   useEffect(() => {
-    setIsClient(true);
     const today = new Date().toISOString().split("T")[0];
     setCurrentDate(today);
     dispatch({ type: 'SET_DATE', payload: today });
   }, []);
-
-  useEffect(() => {
-    if (!isClient) return;
-    
-    const urlParams = new URLSearchParams(window.location.search);
-    const paymentSuccess = urlParams.get('payment_success');
-    const appointmentId = urlParams.get('appointment_id');
-    
-    if (paymentSuccess === 'true' && appointmentId) {
-      const fetchAppointmentDetails = async () => {
-        try {
-          const appointmentDoc = await getDoc(doc(db, "appointments", appointmentId));
-          if (appointmentDoc.exists()) {
-            const appointmentData = appointmentDoc.data();
-            
-            await updateDoc(doc(db, "appointments", appointmentId), {
-              status: "Confirmed",
-              paymentMethod: "GCash"
-            });
-
-            const petDoc = await getDoc(doc(db, "pets", appointmentData.petId));
-            let petName = "Unknown Pet";
-            let petType = "Unknown";
-            let breed = "Unknown";
-            let gender = "Unknown";
-            let color = "Unknown";
-            let birthday = "";
-            let age = "";
-            
-            if (petDoc.exists()) {
-              const petData = petDoc.data();
-              petName = petData.petName || petData.name || "Unknown Pet";
-              petType = petData.petType || "Unknown";
-              breed = petData.petBreed || petData.breed || "Unknown";
-              gender = petData.gender || "Unknown";
-              color = petData.color || "Unknown";
-              birthday = petData.birthday || "";
-              age = petData.age || "";
-            }
-
-            const fullAppointment: Appointment = {
-              id: appointmentId,
-              date: appointmentData.date,
-              timeSlot: appointmentData.timeSlot,
-              status: "Confirmed",
-              petId: appointmentData.petId,
-              petName: petName,
-              petType: petType,
-              breed: breed,
-              gender: gender,
-              color: color,
-              birthday: birthday,
-              age: age,
-              clientName: appointmentData.clientName,
-              appointmentType: appointmentData.appointmentType,
-              price: appointmentData.price,
-              paymentMethod: "GCash",
-              createdAt: appointmentData.createdAt
-            };
-
-            setCompletedAppointment(fullAppointment);
-            setShowReceipt(true);
-          }
-        } catch (error) {
-          console.error("Error fetching appointment details:", error);
-          router.push("/userdashboard");
-        }
-      };
-
-      fetchAppointmentDetails();
-      
-      window.history.replaceState({}, document.title, "/appointment");
-    }
-  }, [router, isClient]);
 
   useEffect(() => {
     if (pets.length > 0 && !bookingState.selectedPet) {
@@ -1410,8 +1633,24 @@ const AppointmentPage: React.FC = () => {
     
     const { selectedPet, selectedSlot, selectedAppointmentType, selectedDate } = bookingState;
     
-    if (!selectedPet || !selectedSlot || !selectedAppointmentType) {
-      alert("Please complete all required fields");
+    // Enhanced validation with specific error messages
+    if (!selectedPet) {
+      alert("Please select a pet");
+      return;
+    }
+
+    if (!selectedAppointmentType) {
+      alert("Please select an appointment type");
+      return;
+    }
+
+    if (!selectedDate) {
+      alert("Please select a date");
+      return;
+    }
+
+    if (!selectedSlot) {
+      alert("Please select a time slot");
       return;
     }
 
@@ -1431,8 +1670,6 @@ const AppointmentPage: React.FC = () => {
 
     setShowPaymentMethods(true);
   }, [bookingState, bookedSlots, isDateUnavailable]);
-
-  const unavailableDates = useMemo(() => getUnavailableDates(), [getUnavailableDates]);
 
   const isFormValid = useMemo(() => {
     const { selectedPet, selectedSlot, selectedAppointmentType, selectedDate } = bookingState;
@@ -1522,7 +1759,7 @@ const AppointmentPage: React.FC = () => {
                   selectedSlot={bookingState.selectedSlot}
                   bookedSlots={bookedSlots}
                   isDateUnavailable={isDateUnavailable}
-                  unavailableDates={unavailableDates}
+                  unavailableDates={getUnavailableDates()}
                   onDateChange={(date) => dispatch({ type: 'SET_DATE', payload: date })}
                   onSlotChange={(slot) => dispatch({ type: 'SET_SLOT', payload: slot })}
                 />
@@ -1584,6 +1821,18 @@ const AppointmentPage: React.FC = () => {
             </PaymentSelectionContainer>
           )}
         </Card>
+
+        {/* GCash Payment Modal - FIXED with reference number input only */}
+        {showGCashModal && pendingAppointmentInfo && (
+          <GCashPaymentModal
+            amount={pendingAppointmentInfo.amount}
+            appointmentType={pendingAppointmentInfo.type}
+            petName={pendingAppointmentInfo.petName}
+            appointmentId={pendingAppointmentInfo.id}
+            onSuccess={handleGCashSuccess}
+            onCancel={handleGCashCancel}
+          />
+        )}
       </Wrapper>
     </>
   );
@@ -1591,7 +1840,7 @@ const AppointmentPage: React.FC = () => {
 
 export default AppointmentPage;
 
-// 🔹 Styled Components with Logo Styles
+// 🔹 STYLED COMPONENTS - Improved GCash Modal Styles with Reference Input
 const GlobalStyle = createGlobalStyle`
   body {
     margin: 0;
@@ -1655,7 +1904,7 @@ const Card = styled.div`
 const Header = styled.h2`
   text-align: center;
   color: white;
-  background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
+  background: #34B89C;
   padding: 28px 0;
   margin: 0;
   font-size: 32px;
@@ -1743,32 +1992,6 @@ const PetsCount = styled.span`
   font-weight: normal;
 `;
 
-// 🔹 NEW: Logo Container and Clinic Logo Styles
-const LogoContainer = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 16px;
-`;
-
-const ClinicLogo = styled.div`
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-weight: bold;
-  font-size: 12px;
-  text-align: center;
-  line-height: 1.2;
-  padding: 8px;
-  margin: 0 auto;
-`;
-
-// 🔹 NEW: Pet Details Card Styles
 const PetDetailsCard = styled.div`
   background: #f8f9fa;
   border-radius: 12px;
@@ -2071,7 +2294,7 @@ const LoadingSpinner = styled.div`
   font-weight: 600;
 `;
 
-// 🔹 UPDATED: Receipt Screen Styled Components - Clean Design with Logo
+// 🔹 Receipt Screen Styled Components - Clean Design with Logo
 const ReceiptContainer = styled.div`
   display: flex;
   flex-direction: column;
@@ -2278,7 +2501,7 @@ const PrintIcon = styled.span`
   font-size: 16px;
 `;
 
-// 🔹 UPDATED: Printable Receipt Styled Components with Logo
+// 🔹 Printable Receipt Styled Components with Logo
 const PrintOverlay = styled.div`
   position: fixed;
   top: 0;
@@ -2310,6 +2533,38 @@ const PrintHeader = styled.div`
   margin-bottom: 24px;
   padding-bottom: 16px;
   border-bottom: 2px solid #e0e0e0;
+`;
+
+const LogoContainer = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+`;
+
+const ClinicLogo = styled.div`
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: bold;
+  font-size: 12px;
+  text-align: center;
+  line-height: 1.2;
+  padding: 8px;
+  margin: 0 auto;
+`;
+
+const LogoImage = styled.img`
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
 `;
 
 const ClinicNamePrint = styled.h1`
@@ -2461,7 +2716,375 @@ const CloseButton = styled.button`
   transition: all 0.2s ease;
   flex: 1;
   
-  &:hover {
+  &:hover { 
     background: #ffeaea;
   }
+`;
+
+// 🔹 NEW: Improved Styled Components for Enhanced GCash Modal with Reference Input
+const PaymentModalOverlay = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  padding: 20px;
+`;
+
+const PaymentModal = styled.div`
+  background: white;
+  border-radius: 16px;
+  padding: 0;
+  max-width: 600px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: ${fadeIn} 0.3s ease-out;
+  
+  &.large-modal {
+    max-width: 700px;
+  }
+`;
+
+const PaymentModalHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 24px;
+  border-bottom: 1px solid #e0e0e0;
+`;
+
+const PaymentModalTitle = styled.h2`
+  font-size: 24px;
+  font-weight: 700;
+  color: #2c3e50;
+  margin: 0;
+`;
+
+const CloseModalButton = styled.button`
+  background: none;
+  border: none;
+  font-size: 28px;
+  cursor: pointer;
+  color: #666;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  &:hover {
+    color: #e74c3c;
+  }
+`;
+
+const PaymentModalContent = styled.div`
+  padding: 24px;
+`;
+
+const PaymentSummary = styled.div`
+  background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
+  padding: 20px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  color: white;
+`;
+
+const SummaryTitle = styled.h3`
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  font-weight: 600;
+`;
+
+const SummaryGrid = styled.div`
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+`;
+
+const SummaryItem = styled.div`
+  display: flex;
+  flex-direction: row;
+  font-size: 14px;
+  gap: 8px;
+`;
+
+const SummaryLabel = styled.span`
+  font-weight: 350;
+  opacity: 0.9;
+  font-size: 14px;
+`;
+
+const SummaryValue = styled.span`
+  font-weight: 600;
+  word-break: break-word;
+  
+  &.amount {
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  &.reference {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+`;
+
+const CopyButton = styled.button`
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  
+  &:hover {
+    background: rgba(255, 255, 255, 0.3);
+  }
+`;
+
+const QRCodeSection = styled.div`
+  text-align: center;
+  margin: 24px 0;
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 12px;
+`;
+
+const QRCodeTitle = styled.h3`
+  margin: 0 0 16px 0;
+  color: #2c3e50;
+  font-size: 18px;
+  font-weight: 600;
+`;
+
+const QRCodeNote = styled.p`
+  margin: 0 0 16px 0;
+  color: #34B89C;
+  font-weight: 600;
+  font-size: 16px;
+`;
+
+const QRCodeContainer = styled.div`
+  display: flex;
+  justify-content: center;
+  margin: 20px 0;
+`;
+
+const QRCodeWrapper = styled.div`
+  position: relative;
+  display: inline-block;
+`;
+
+const QRCodeImage = styled.img`
+  width: 280px;
+  height: 280px;
+  border-radius: 12px;
+  display: block;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  
+  @media (max-width: 480px) {
+    width: 250px;
+    height: 250px;
+  }
+`;
+
+const QRCodeFallback = styled.div`
+  width: 280px;
+  height: 280px;
+  background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  
+  @media (max-width: 480px) {
+    width: 250px;
+    height: 250px;
+  }
+`;
+
+const QRCodeText = styled.div`
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 8px;
+`;
+
+const QRCodeSubtext = styled.div`
+  font-size: 14px;
+  opacity: 0.9;
+  margin-bottom: 8px;
+`;
+
+const QRCodeAmount = styled.div`
+  font-size: 16px;
+  font-weight: 700;
+  margin-top: 8px;
+  background: rgba(255, 255, 255, 0.3);
+  padding: 4px 12px;
+  border-radius: 20px;
+`;
+
+// 🔹 NEW: Reference Input Section Styles
+const ReferenceInputSection = styled.div`
+  margin: 20px 0;
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 12px;
+`;
+
+const ReferenceInputTitle = styled.h4`
+  margin: 0 0 12px 0;
+  color: #2c3e50;
+  font-size: 18px;
+  font-weight: 600;
+`;
+
+const ReferenceInputDescription = styled.p`
+  margin: 0 0 16px 0;
+  color: #666;
+  font-size: 14px;
+  line-height: 1.5;
+`;
+
+const ReferenceInputContainer = styled.div`
+  margin-bottom: 16px;
+`;
+
+const ReferenceInputLabel = styled.label`
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: #2c3e50;
+  font-size: 14px;
+`;
+
+const ReferenceInput = styled.input`
+  width: 100%;
+  padding: 12px 16px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 16px;
+  transition: all 0.2s ease;
+  
+  &:focus {
+    outline: none;
+    border-color: #34B89C;
+    box-shadow: 0 0 0 3px rgba(52, 184, 156, 0.2);
+  }
+  
+  &:disabled {
+    background-color: #f5f5f5;
+    color: #999;
+  }
+`;
+
+const ReferenceInputHint = styled.p`
+  margin: 8px 0 0 0;
+  color: #666;
+  font-size: 12px;
+  font-style: italic;
+`;
+
+const PaymentError = styled.div`
+  background: #ffeaea;
+  color: #e74c3c;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-weight: 500;
+`;
+
+const PaymentModalActions = styled.div`
+  display: flex;
+  gap: 12px;
+  
+  @media (max-width: 480px) {
+    flex-direction: column;
+  }
+`;
+
+const CancelPaymentButton = styled.button`
+  padding: 14px 24px;
+  border: 2px solid #e74c3c;
+  border-radius: 12px;
+  background: white;
+  color: #e74c3c;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex: 1;
+  
+  &:hover:not(:disabled) {
+    background: #ffeaea;
+  }
+  
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+`;
+
+const ConfirmPaymentButton = styled.button`
+  padding: 14px 24px;
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  
+  &:hover:not(:disabled) {
+    opacity: 0.9;
+    transform: translateY(-2px);
+  }
+  
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+`;
+
+const Spinner = styled.div`
+  width: 16px;
+  height: 16px;
+  border: 2px solid transparent;
+  border-top: 2px solid white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+`;
+
+const PaymentNote = styled.div`
+  text-align: center;
+  margin-top: 16px;
+  padding: 12px;
+  background: #e3f2fd;
+  border-radius: 8px;
+  color: #1565c0;
+  font-size: 14px;
+  font-weight: 500;
 `;

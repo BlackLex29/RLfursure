@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       method: "manual_qr",
-      qr_image: "/Gcashqrcode.jpg",  // Make sure this file exists in /public folder
+      qr_image: "/Gcashqrcode.jpg",  // <--- ilagay mo file mo sa /public/qrph.png
       reference_number,
       amount,
       description,
