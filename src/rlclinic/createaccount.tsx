@@ -20,7 +20,6 @@ import {
   updateProfile
 } from "firebase/auth";
 import { db, auth } from "../firebaseConfig";
-
 // Constants
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
 const PHONE_REGEX = /^09\d{9}$/;
@@ -571,6 +570,7 @@ export const Createaccount = () => {
   const router = useRouter();
   
   // State Management
+  const [otpHash, setOtpHash] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState<string>("");
   const [info, setInfo] = useState<string>("");
@@ -647,46 +647,53 @@ export const Createaccount = () => {
   };
 
   // Send Email OTP Function via API Route
-  const sendEmailOTP = async (email: string, name: string): Promise<{ success: boolean }> => {
-    try {
-      const response = await fetch('/api/send-email-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          email: email.toLowerCase(),
-          name: sanitizeInput(name)
-        })
-      });
+const sendEmailOTP = async (email: string, name: string): Promise<{ success: boolean, otpHash?: string }> => {
+  try {
+    const response = await fetch('/api/send-email-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        email: email.toLowerCase(),
+        name: sanitizeInput(name)
+      })
+    });
 
-      const responseData = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(responseData.error || `Server error: ${response.status}`);
-      }
-
-      if (responseData?.success) {
-        setInfo(`Verification OTP sent to ${email}. Please check your inbox and spam folder.`);
-        return { success: true };
-      }
-      
-      throw new Error(responseData.error || 'Failed to send OTP');
-    } catch (err: unknown) {
-      console.error('Error sending OTP:', err);
-      throw err instanceof Error ? err : new Error('Failed to send OTP');
+    const responseData = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(responseData.error || `Server error: ${response.status}`);
     }
-  };
 
-  const verifyEmailOTP = async (email: string, otp: string): Promise<{ success: boolean }> => {
-    try {
-      const response = await fetch('/api/verify-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          email: email.toLowerCase(),
-          otp
-        })
-      });
-
+    if (responseData?.success) {
+      setInfo(`Verification OTP sent to ${email}. Please check your inbox and spam folder.`);
+      if (responseData.otpHash) {
+        setOtpHash(responseData.otpHash); // Store the otpHash
+      }
+      return { success: true, otpHash: responseData.otpHash };
+    }
+    
+    throw new Error(responseData.error || 'Failed to send OTP');
+  } catch (err: unknown) {
+    console.error('Error sending OTP:', err);
+    throw err instanceof Error ? err : new Error('Failed to send OTP');
+  }
+};
+const verifyEmailOTP = async (email: string, otp: string): Promise<{ success: boolean }> => {
+  try {
+    const response = await fetch('/api/verify-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        email: email.toLowerCase(),
+        otp
+      })
+    });
+    // ...
+  } catch (err: unknown) {
+    console.error('Error verifying OTP:', err);
+    throw err instanceof Error ? err : new Error('Failed to verify OTP');
+  }
+};
       const responseData = await response.json();
       
       if (!response.ok) {
@@ -825,65 +832,64 @@ export const Createaccount = () => {
 
   // OTP Handler Functions
   const handleSendOTP = async (): Promise<void> => {
-    setError("");
-    setInfo("");
-    setLoading(true);
-    
-    try {
-      // Check if email already exists
-      const emailExists = await checkEmailExists(formData.email);
-      if (emailExists) {
-        setError("This email is already registered. Please sign in instead.");
-        return;
-      }
-
-      await sendEmailOTP(
-        formData.email, 
-        `${formData.firstname} ${formData.lastname}`
-      );
-      
-      setOtpSent(true);
-      setInfo(`📧 Verification OTP sent to ${formData.email}. Please check your inbox and spam folder.`);
-      setResendCooldown(60);
-      
-    } catch (err: unknown) {
-      console.error("Error sending OTP:", err);
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("Failed to send OTP. Please try again.");
-      }
-    } finally {
-      setLoading(false);
+  setError("");
+  setInfo("");
+  setLoading(true);
+  
+  try {
+    const emailExists = await checkEmailExists(formData.email);
+    if (emailExists) {
+      setError("This email is already registered. Please sign in instead.");
+      return;
     }
-  };
 
-  const handleResendOTP = async (): Promise<void> => {
-    if (resendCooldown > 0) return;
+    const result = await sendEmailOTP(
+      formData.email, 
+      `${formData.firstname} ${formData.lastname}`
+    );
     
-    setOtpLoading(true);
-    setError("");
-    setInfo("");
+    setOtpSent(true);
+    setInfo(`📧 Verification OTP sent to ${formData.email}. Please check your inbox and spam folder.`);
+    setResendCooldown(60);
     
-    try {
-      await sendEmailOTP(
-        formData.email, 
-        `${formData.firstname} ${formData.lastname}`
-      );
-      
-      setInfo("📧 OTP resent successfully! Please check your inbox and spam folder.");
-      setResendCooldown(60);
-    } catch (err: unknown) {
-      console.error("Resend OTP error:", err);
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("Failed to resend OTP. Please try again.");
-      }
-    } finally {
-      setOtpLoading(false);
+  } catch (err: unknown) {
+    console.error("Error sending OTP:", err);
+    if (err instanceof Error) {
+      setError(err.message);
+    } else {
+      setError("Failed to send OTP. Please try again.");
     }
-  };
+  } finally {
+    setLoading(false);
+  }
+};
+
+const handleResendOTP = async (): Promise<void> => {
+  if (resendCooldown > 0) return;
+  
+  setOtpLoading(true);
+  setError("");
+  setInfo("");
+  
+  try {
+    const result = await sendEmailOTP(
+      formData.email, 
+      `${formData.firstname} ${formData.lastname}`
+    );
+    
+    setInfo("📧 OTP resent successfully! Please check your inbox and spam folder.");
+    setResendCooldown(60);
+  } catch (err: unknown) {
+    console.error("Resend OTP error:", err);
+    if (err instanceof Error) {
+      setError(err.message);
+    } else {
+      setError("Failed to resend OTP. Please try again.");
+    }
+  } finally {
+    setOtpLoading(false);
+  }
+};
 
   const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
