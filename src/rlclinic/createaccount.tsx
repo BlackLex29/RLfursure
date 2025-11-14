@@ -685,28 +685,23 @@ const verifyEmailOTP = async (email: string, otp: string): Promise<{ success: bo
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         email: email.toLowerCase(),
-        otp
+        code: otp, // Rename otp to code
+        otpHash // Send the stored otpHash
       })
     });
-    // ...
+
+    const responseData = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(responseData.error || 'Verification failed');
+    }
+
+    return { success: responseData.success };
   } catch (err: unknown) {
     console.error('Error verifying OTP:', err);
     throw err instanceof Error ? err : new Error('Failed to verify OTP');
   }
 };
-      const responseData = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(responseData.error || 'Verification failed');
-      }
-
-      return { success: responseData.success };
-    } catch (err: unknown) {
-      console.error('Error verifying OTP:', err);
-      throw err instanceof Error ? err : new Error('Failed to verify OTP');
-    }
-  };
-
   // Database Functions
   const checkPhoneNumberExists = async (phone: string): Promise<boolean> => {
     try {
