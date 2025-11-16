@@ -52,7 +52,9 @@ interface MedicalRecord {
   existingConditions?: string;
   veterinarian?: string;
   createdAt?: Timestamp | string;
-  updateType?: string;
+  status?: string;
+  appointmentId?: string;
+  appointmentType?: string;
 }
 
 /* ===== COMPONENT ===== */
@@ -65,7 +67,7 @@ const UserMedicalRecords: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [openRecordId, setOpenRecordId] = useState<string | null>(null);
 
-  /* Fetch user records */
+  /* Fetch user records from BOTH collections */
   const fetchUserMedicalRecords = useCallback(async (userEmail?: string | null) => {
     if (!userEmail) {
       setRecords([]);
@@ -74,17 +76,35 @@ const UserMedicalRecords: React.FC = () => {
     }
 
     try {
-      const q = query(
+      console.log("Fetching medical records for:", userEmail);
+      
+      // Query 1: From medicalRecords collection (original)
+      const medicalRecordsQuery = query(
         collection(db, "medicalRecords"),
         where("ownerEmail", "==", userEmail),
+        where("status", "==", "completed"), // Only show completed records
         orderBy("date", "desc")
       );
-      const snapshot = await getDocs(q);
+
+      // Query 2: From usermedicalrecord collection (new)
+      const userMedicalRecordsQuery = query(
+        collection(db, "usermedicalrecord"),
+        where("ownerEmail", "==", userEmail),
+        where("status", "==", "completed"),
+        orderBy("date", "desc")
+      );
+
+      const [medicalRecordsSnapshot, userMedicalRecordsSnapshot] = await Promise.all([
+        getDocs(medicalRecordsQuery),
+        getDocs(userMedicalRecordsQuery)
+      ]);
+
       const userRecords: MedicalRecord[] = [];
       
-      snapshot.forEach((docSnap) => {
+      // Process medicalRecords collection
+      medicalRecordsSnapshot.forEach((docSnap) => {
         const data = docSnap.data() as Omit<MedicalRecord, "id">;
-        if (data.ownerEmail === userEmail) {
+        if (data.ownerEmail === userEmail && data.status === "completed") {
           userRecords.push({ 
             id: docSnap.id, 
             ...data,
@@ -101,31 +121,66 @@ const UserMedicalRecords: React.FC = () => {
         }
       });
       
-      setRecords(userRecords);
+      // Process usermedicalrecord collection
+      userMedicalRecordsSnapshot.forEach((docSnap) => {
+        const data = docSnap.data() as Omit<MedicalRecord, "id">;
+        if (data.ownerEmail === userEmail && data.status === "completed") {
+          userRecords.push({ 
+            id: docSnap.id, 
+            ...data,
+            birthDate: data.birthDate || "",
+            breed: data.breed || "",
+            petAge: data.petAge || "",
+            gender: data.gender || "",
+            color: data.color || "",
+            weight: data.weight || "",
+            allergies: data.allergies || "",
+            existingConditions: data.existingConditions || "",
+            veterinarian: data.veterinarian || ""
+          });
+        }
+      });
+
+      // Remove duplicates based on appointmentId or unique combination
+      const uniqueRecords = userRecords.filter((record, index, self) =>
+        index === self.findIndex(r => (
+          r.id === record.id || 
+          (r.appointmentId && r.appointmentId === record.appointmentId)
+        ))
+      );
+
+      console.log(`Found ${uniqueRecords.length} medical records for user`);
+      setRecords(uniqueRecords);
     } catch (error) {
       console.error("Error fetching user medical records:", error);
-      alert("Failed to load medical records.");
+      alert("Failed to load medical records. Please try again.");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  /* Subscribe to realtime updates */
+  /* Subscribe to realtime updates from BOTH collections */
   const subscribeToMedicalRecordUpdates = useCallback(
     (userEmail?: string | null) => {
       if (!userEmail) return;
 
-      const q = query(
+      let unsubscribe1: () => void;
+      let unsubscribe2: () => void;
+
+      // Subscribe to medicalRecords collection
+      const medicalRecordsQuery = query(
         collection(db, "medicalRecords"),
         where("ownerEmail", "==", userEmail),
+        where("status", "==", "completed"),
         orderBy("date", "desc")
       );
 
-      const unsubscribe = onSnapshot(q, (snapshot) => {
+      unsubscribe1 = onSnapshot(medicalRecordsQuery, (snapshot) => {
         const updatedRecords: MedicalRecord[] = [];
+        
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as Omit<MedicalRecord, "id">;
-          if (data.ownerEmail === userEmail) {
+          if (data.ownerEmail === userEmail && data.status === "completed") {
             updatedRecords.push({ 
               id: docSnap.id, 
               ...data,
@@ -141,11 +196,123 @@ const UserMedicalRecords: React.FC = () => {
             });
           }
         });
-        setRecords(updatedRecords);
-        setLoading(false);
+
+        // Also check usermedicalrecord collection
+        const userMedicalRecordsQuery = query(
+          collection(db, "usermedicalrecord"),
+          where("ownerEmail", "==", userEmail),
+          where("status", "==", "completed"),
+          orderBy("date", "desc")
+        );
+
+        getDocs(userMedicalRecordsQuery).then((userSnapshot) => {
+          userSnapshot.forEach((docSnap) => {
+            const data = docSnap.data() as Omit<MedicalRecord, "id">;
+            if (data.ownerEmail === userEmail && data.status === "completed") {
+              updatedRecords.push({ 
+                id: docSnap.id, 
+                ...data,
+                birthDate: data.birthDate || "",
+                breed: data.breed || "",
+                petAge: data.petAge || "",
+                gender: data.gender || "",
+                color: data.color || "",
+                weight: data.weight || "",
+                allergies: data.allergies || "",
+                existingConditions: data.existingConditions || "",
+                veterinarian: data.veterinarian || ""
+              });
+            }
+          });
+
+          // Remove duplicates
+          const uniqueRecords = updatedRecords.filter((record, index, self) =>
+            index === self.findIndex(r => (
+              r.id === record.id || 
+              (r.appointmentId && r.appointmentId === record.appointmentId)
+            ))
+          );
+
+          setRecords(uniqueRecords);
+          setLoading(false);
+        });
       });
 
-      return unsubscribe;
+      // Subscribe to usermedicalrecord collection
+      const userMedicalRecordsQuery = query(
+        collection(db, "usermedicalrecord"),
+        where("ownerEmail", "==", userEmail),
+        where("status", "==", "completed"),
+        orderBy("date", "desc")
+      );
+
+      unsubscribe2 = onSnapshot(userMedicalRecordsQuery, (snapshot) => {
+        const updatedRecords: MedicalRecord[] = [];
+        
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data() as Omit<MedicalRecord, "id">;
+          if (data.ownerEmail === userEmail && data.status === "completed") {
+            updatedRecords.push({ 
+              id: docSnap.id, 
+              ...data,
+              birthDate: data.birthDate || "",
+              breed: data.breed || "",
+              petAge: data.petAge || "",
+              gender: data.gender || "",
+              color: data.color || "",
+              weight: data.weight || "",
+              allergies: data.allergies || "",
+              existingConditions: data.existingConditions || "",
+              veterinarian: data.veterinarian || ""
+            });
+          }
+        });
+
+        // Also check medicalRecords collection
+        const medicalRecordsQuery = query(
+          collection(db, "medicalRecords"),
+          where("ownerEmail", "==", userEmail),
+          where("status", "==", "completed"),
+          orderBy("date", "desc")
+        );
+
+        getDocs(medicalRecordsQuery).then((medicalSnapshot) => {
+          medicalSnapshot.forEach((docSnap) => {
+            const data = docSnap.data() as Omit<MedicalRecord, "id">;
+            if (data.ownerEmail === userEmail && data.status === "completed") {
+              updatedRecords.push({ 
+                id: docSnap.id, 
+                ...data,
+                birthDate: data.birthDate || "",
+                breed: data.breed || "",
+                petAge: data.petAge || "",
+                gender: data.gender || "",
+                color: data.color || "",
+                weight: data.weight || "",
+                allergies: data.allergies || "",
+                existingConditions: data.existingConditions || "",
+                veterinarian: data.veterinarian || ""
+              });
+            }
+          });
+
+          // Remove duplicates
+          const uniqueRecords = updatedRecords.filter((record, index, self) =>
+            index === self.findIndex(r => (
+              r.id === record.id || 
+              (r.appointmentId && r.appointmentId === record.appointmentId)
+            ))
+          );
+
+          setRecords(uniqueRecords);
+          setLoading(false);
+        });
+      });
+
+      return () => {
+        if (unsubscribe1) unsubscribe1();
+        if (unsubscribe2) unsubscribe2();
+      };
     },
     []
   );
@@ -505,7 +672,7 @@ const UserMedicalRecords: React.FC = () => {
                 </div>
                 
                 <div class="detail-row">
-                  <span class="detail-label">Owner&apos;s Name:</span>
+                  <span class="detail-label">Owner's Name:</span>
                   <span class="detail-value">${record.ownerName}</span>
                 </div>
                 
@@ -561,7 +728,7 @@ const UserMedicalRecords: React.FC = () => {
             <div class="signature-area">
               <div>
                 <div class="signature-line"></div>
-                <div class="signature-label">Veterinarian&apos;s Signature</div>
+                <div class="signature-label">Veterinarian's Signature</div>
               </div>
               
               <div>
@@ -630,7 +797,7 @@ const UserMedicalRecords: React.FC = () => {
           </BrandSection>
           <ButtonGroup>
             <BackButton onClick={() => router.push("/userdashboard")}>
-              <Icon className="material-icons">◀</Icon>
+              <Icon>◀</Icon>
               Back
             </BackButton>
           </ButtonGroup>
@@ -642,129 +809,154 @@ const UserMedicalRecords: React.FC = () => {
           </WelcomeMessage>
 
           <SectionTitle>My Pet Medical Records</SectionTitle>
+          
           {records.length === 0 ? (
             <EmptyState>
               <EmptyIcon>📋</EmptyIcon>
               <EmptyText>No medical records found</EmptyText>
-              <EmptySubtext>You don&apos;t have any medical records yet.</EmptySubtext>
+              <EmptySubtext>
+                You don't have any completed medical records yet. 
+                Records will appear here after your veterinary appointments are completed.
+              </EmptySubtext>
             </EmptyState>
           ) : (
-            <RecordsGrid>
-              {records.map((record) => (
-                <RecordCard key={record.id}>
-                  <RecordHeader>
-                    <div>
-                      <PetName>{record.petName}</PetName>
-                      <PetInfo>
-                        <PetType $petType={record.petType}>
-                          {record.petType === "dog" ? "🐶 Dog" : "🐱 Cat"}
-                        </PetType>
-                        {record.breed && <BreedInfo>• {record.breed}</BreedInfo>}
-                      </PetInfo>
-                    </div>
-                    <RecordDate>{formatDate(record.date)}</RecordDate>
-                  </RecordHeader>
+            <>
+              <RecordsCount>
+                Showing {records.length} medical record{records.length !== 1 ? 's' : ''}
+              </RecordsCount>
+              <RecordsGrid>
+                {records.map((record) => (
+                  <RecordCard key={record.id}>
+                    <RecordHeader>
+                      <div>
+                        <PetName>{record.petName}</PetName>
+                        <PetInfo>
+                          <PetType $petType={record.petType}>
+                            {record.petType === "dog" ? "🐶 Dog" : "🐱 Cat"}
+                          </PetType>
+                          {record.breed && <BreedInfo>• {record.breed}</BreedInfo>}
+                          {record.appointmentType && (
+                            <AppointmentTypeBadge>
+                              {record.appointmentType}
+                            </AppointmentTypeBadge>
+                          )}
+                        </PetInfo>
+                      </div>
+                      <RecordDate>{formatDate(record.date)}</RecordDate>
+                    </RecordHeader>
 
-                  <ViewDetailsButton
-                    onClick={() => setOpenRecordId(openRecordId === record.id ? null : record.id)}
-                  >
-                    {openRecordId === record.id ? "Hide Details" : "View Full Details"}
-                    <Icon className="material-icons">
-                      {openRecordId === record.id ? "▲" : "▼"}
-                    </Icon>
-                  </ViewDetailsButton>
+                    <QuickInfo>
+                      <QuickInfoItem>
+                        <QuickInfoLabel>Diagnosis:</QuickInfoLabel>
+                        <QuickInfoValue>{record.diagnosis}</QuickInfoValue>
+                      </QuickInfoItem>
+                      <QuickInfoItem>
+                        <QuickInfoLabel>Treatment:</QuickInfoLabel>
+                        <QuickInfoValue>{record.treatment}</QuickInfoValue>
+                      </QuickInfoItem>
+                    </QuickInfo>
 
-                  <RecordDetails $open={openRecordId === record.id}>
-                    <DetailGrid>
-                      <DetailItem>
-                        <DetailLabel>Owner:</DetailLabel>
-                        <DetailValue>{record.ownerName}</DetailValue>
-                      </DetailItem>
-                      
-                      {record.birthDate && (
+                    <ViewDetailsButton
+                      onClick={() => setOpenRecordId(openRecordId === record.id ? null : record.id)}
+                    >
+                      {openRecordId === record.id ? "Hide Details" : "View Full Details"}
+                      <Icon>
+                        {openRecordId === record.id ? "▲" : "▼"}
+                      </Icon>
+                    </ViewDetailsButton>
+
+                    <RecordDetails $open={openRecordId === record.id}>
+                      <DetailGrid>
                         <DetailItem>
-                          <DetailLabel>Birth Date:</DetailLabel>
-                          <DetailValue>{formatDate(record.birthDate)}</DetailValue>
+                          <DetailLabel>Owner:</DetailLabel>
+                          <DetailValue>{record.ownerName}</DetailValue>
                         </DetailItem>
-                      )}
-                      
-                      {record.petAge && (
-                        <DetailItem>
-                          <DetailLabel>Age:</DetailLabel>
-                          <DetailValue>{record.petAge}</DetailValue>
-                        </DetailItem>
-                      )}
-                      
-                      {record.gender && (
-                        <DetailItem>
-                          <DetailLabel>Gender:</DetailLabel>
-                          <DetailValue>{record.gender}</DetailValue>
-                        </DetailItem>
-                      )}
-                      
-                      {record.color && (
-                        <DetailItem>
-                          <DetailLabel>Color:</DetailLabel>
-                          <DetailValue>{record.color}</DetailValue>
-                        </DetailItem>
-                      )}
-                      
-                      {record.weight && (
-                        <DetailItem>
-                          <DetailLabel>Weight:</DetailLabel>
-                          <DetailValue>{record.weight}</DetailValue>
-                        </DetailItem>
-                      )}
-                      
-                      <DetailItem>
-                        <DetailLabel>Diagnosis:</DetailLabel>
-                        <DiagnosisValue>{record.diagnosis}</DiagnosisValue>
-                      </DetailItem>
-                      
-                      <DetailItem>
-                        <DetailLabel>Treatment:</DetailLabel>
-                        <TreatmentValue>{record.treatment}</TreatmentValue>
-                      </DetailItem>
-                      
-                      {record.allergies && (
-                        <DetailItem>
-                          <DetailLabel>Allergies:</DetailLabel>
-                          <DetailValue>{record.allergies}</DetailValue>
-                        </DetailItem>
-                      )}
-                      
-                      {record.existingConditions && (
-                        <DetailItem>
-                          <DetailLabel>Existing Conditions:</DetailLabel>
-                          <DetailValue>{record.existingConditions}</DetailValue>
-                        </DetailItem>
-                      )}
-                      
-                      {record.veterinarian && (
-                        <DetailItem>
-                          <DetailLabel>Veterinarian:</DetailLabel>
-                          <DetailValue>{record.veterinarian}</DetailValue>
-                        </DetailItem>
-                      )}
-                      
-                      {record.notes && (
-                        <DetailItem $fullWidth>
-                          <DetailLabel>Notes:</DetailLabel>
-                          <DetailValue>{record.notes}</DetailValue>
-                        </DetailItem>
-                      )}
-                    </DetailGrid>
-                    
-                    <ButtonGroupHorizontal>
-                      <PrintButton onClick={() => downloadPDF(record)}>
-                        <Icon className="material-icons">Print as PDF</Icon>
                         
-                      </PrintButton>
-                    </ButtonGroupHorizontal>
-                  </RecordDetails>
-                </RecordCard>
-              ))}
-            </RecordsGrid>
+                        {record.birthDate && (
+                          <DetailItem>
+                            <DetailLabel>Birth Date:</DetailLabel>
+                            <DetailValue>{formatDate(record.birthDate)}</DetailValue>
+                          </DetailItem>
+                        )}
+                        
+                        {record.petAge && (
+                          <DetailItem>
+                            <DetailLabel>Age:</DetailLabel>
+                            <DetailValue>{record.petAge}</DetailValue>
+                          </DetailItem>
+                        )}
+                        
+                        {record.gender && (
+                          <DetailItem>
+                            <DetailLabel>Gender:</DetailLabel>
+                            <DetailValue>{record.gender}</DetailValue>
+                          </DetailItem>
+                        )}
+                        
+                        {record.color && (
+                          <DetailItem>
+                            <DetailLabel>Color:</DetailLabel>
+                            <DetailValue>{record.color}</DetailValue>
+                          </DetailItem>
+                        )}
+                        
+                        {record.weight && (
+                          <DetailItem>
+                            <DetailLabel>Weight:</DetailLabel>
+                            <DetailValue>{record.weight}</DetailValue>
+                          </DetailItem>
+                        )}
+                        
+                        <DetailItem>
+                          <DetailLabel>Diagnosis:</DetailLabel>
+                          <DiagnosisValue>{record.diagnosis}</DiagnosisValue>
+                        </DetailItem>
+                        
+                        <DetailItem>
+                          <DetailLabel>Treatment:</DetailLabel>
+                          <TreatmentValue>{record.treatment}</TreatmentValue>
+                        </DetailItem>
+                        
+                        {record.allergies && (
+                          <DetailItem $fullWidth={true}>
+                            <DetailLabel>Allergies:</DetailLabel>
+                            <DetailValue>{record.allergies}</DetailValue>
+                          </DetailItem>
+                        )}
+                        
+                        {record.existingConditions && (
+                          <DetailItem $fullWidth={true}>
+                            <DetailLabel>Existing Conditions:</DetailLabel>
+                            <DetailValue>{record.existingConditions}</DetailValue>
+                          </DetailItem>
+                        )}
+                        
+                        {record.veterinarian && (
+                          <DetailItem>
+                            <DetailLabel>Veterinarian:</DetailLabel>
+                            <DetailValue>{record.veterinarian}</DetailValue>
+                          </DetailItem>
+                        )}
+                        
+                        {record.notes && (
+                          <DetailItem $fullWidth={true}>
+                            <DetailLabel>Notes:</DetailLabel>
+                            <NotesValue>{record.notes}</NotesValue>
+                          </DetailItem>
+                        )}
+                      </DetailGrid>
+                      
+                      <ButtonGroupHorizontal>
+                        <PrintButton onClick={() => downloadPDF(record)}>
+                          <Icon>🖨️</Icon>
+                          Print as PDF
+                        </PrintButton>
+                      </ButtonGroupHorizontal>
+                    </RecordDetails>
+                  </RecordCard>
+                ))}
+              </RecordsGrid>
+            </>
           )}
         </Content>
       </PageContainer>
@@ -909,6 +1101,12 @@ const SectionTitle = styled.h3`
   }
 `;
 
+const RecordsCount = styled.div`
+  color: #64748b;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+`;
+
 const EmptyState = styled.div`
   text-align: center;
   padding: 3rem 2rem;
@@ -1020,14 +1218,52 @@ const BreedInfo = styled.span`
   font-weight: 500;
 `;
 
+const AppointmentTypeBadge = styled.span`
+  font-size: 0.85rem;
+  color: #7c3aed;
+  background: #f3e8ff;
+  padding: 0.25rem 0.5rem;
+  border-radius: 9999px;
+  font-weight: 500;
+`;
+
 const RecordDate = styled.span`
   font-size: 0.9rem;
   color: #64748b;
   font-weight: 500;
 `;
 
+const QuickInfo = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  
+  @media (max-width: 480px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const QuickInfoItem = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+`;
+
+const QuickInfoLabel = styled.span`
+  font-size: 0.8rem;
+  color: #64748b;
+  font-weight: 500;
+`;
+
+const QuickInfoValue = styled.span`
+  font-size: 0.9rem;
+  color: #1e293b;
+  font-weight: 600;
+`;
+
 const ViewDetailsButton = styled.button`
-  background:#3AAFA9;
+  background: #3AAFA9;
   color: white;
   border: none;
   padding: 0.75rem 1rem;
@@ -1065,7 +1301,6 @@ const DetailGrid = styled.div`
   gap: 0.75rem;
 `;
 
-// FIXED: Changed fullWidth to $fullWidth to avoid DOM attribute warning
 const DetailItem = styled.div<{ $fullWidth?: boolean }>`
   display: flex;
   gap: 0.75rem;
@@ -1109,6 +1344,14 @@ const TreatmentValue = styled(DetailValue)`
   background: #f0fdf4;
   padding: 2px 6px;
   border-radius: 4px;
+`;
+
+const NotesValue = styled(DetailValue)`
+  font-style: italic;
+  background: #fffbeb;
+  padding: 0.5rem;
+  border-radius: 6px;
+  border-left: 3px solid #f59e0b;
 `;
 
 const ButtonGroupHorizontal = styled.div`

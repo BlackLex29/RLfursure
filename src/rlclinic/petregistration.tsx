@@ -71,7 +71,7 @@ const catBreeds = [
 const Petregister: React.FC = () => {
   const router = useRouter();
 
-  const [petOwnerEmail, setPetOwnerEmail] = useState<string>("");
+  const [petOwnerName, setPetOwnerName] = useState<string>("");
   const [petName, setPetName] = useState("");
   const [birthday, setBirthday] = useState("");
   const [color, setColor] = useState("");
@@ -97,10 +97,13 @@ const Petregister: React.FC = () => {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user?.email) {
-        setPetOwnerEmail(user.email);
+      if (user?.displayName) {
+        setPetOwnerName(user.displayName);
+      } else if (user?.email) {
+        // Use email as fallback if display name is not available
+        setPetOwnerName(user.email.split('@')[0]);
       } else {
-        router.push("/login");
+        setPetOwnerName("");
       }
     });
     return () => unsubscribe();
@@ -114,6 +117,12 @@ const Petregister: React.FC = () => {
       return;
     }
 
+    if (!petOwnerName.trim()) {
+      setModalMessage("Please enter your name.");
+      setShowErrorModal(true);
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -122,17 +131,11 @@ const Petregister: React.FC = () => {
       // Calculate age from birthday
       const age = birthday ? calculateAge(birthday) : "";
 
-      // ✅ FIXED: Get current user
+      // Get current user
       const currentUser = auth.currentUser;
-      if (!currentUser) {
-        setModalMessage("You must be logged in to register a pet.");
-        setShowErrorModal(true);
-        setIsLoading(false);
-        return;
-      }
 
-      // Save to pets collection with PENDING status
-      await setDoc(doc(db, "pets", petId), {
+      // ✅ SIMPLIFIED: Save ONLY to pets collection
+      const petData = {
         petId,
         name: petName.trim(),
         birthday: birthday || null,
@@ -140,63 +143,33 @@ const Petregister: React.FC = () => {
         petType: petType.trim(),
         petBreed: petBreed.trim(),
         gender,
-        ownerEmail: petOwnerEmail,
-        ownerId: currentUser.uid,
-        // ADDED: New fields for admin approval
-        status: "Waiting Appointment ", // CHANGED: Now requires admin approval
-        approvedByAdmin: false, // Not yet approved
+        ownerName: petOwnerName.trim(), // ✅ CHANGED: ownerName instead of email
+        ownerId: currentUser?.uid || "guest", // Still keep ownerId for reference
+        status: "Active", // ✅ CHANGED: Directly active, no approval needed
+        age: age, // ✅ ADDED: Include calculated age
         createdAt: new Date().toISOString(),
-      });
+        updatedAt: new Date().toISOString(),
+      };
 
-      // Save to petRegistrations with PENDING status
-      await setDoc(doc(db, "petRegistrations", petId), {
-        petId,
-        petName: petName.trim(),
-        ownerEmail: petOwnerEmail,
-        ownerId: currentUser.uid,
-        petType: petType.trim(),
-        petBreed: petBreed.trim(),
-        age: age,
-        gender,
-        color: color.trim(),
-        // ADDED: New fields for admin approval
-        status: "Pending Approval", // CHANGED: Now requires admin approval
-        approvedByAdmin: false, // Not yet approved
-        createdAt: new Date().toISOString(),
-      });
+      // ✅ SAVE ONLY TO PETS COLLECTION
+      await setDoc(doc(db, "pets", petId), petData);
 
+      // ✅ REMOVED: No longer saving to petRegistrations collection
       // ✅ REMOVED: No longer creating medical record automatically
-      // Medical records will be created by admin after approval
+      // ✅ REMOVED: No longer sending notifications to admin
 
-      // Send notification to admin for approval
-      try {
-        const adminQuery = query(collection(db, "users"), where("role", "==", "admin"));
-        const adminSnapshot = await getDocs(adminQuery);
-        
-        const adminNotifications = adminSnapshot.docs.map(async (adminDoc) => {
-          const adminData = adminDoc.data();
-          return setDoc(doc(collection(db, "notifications")), {
-            recipientId: adminDoc.id,
-            recipientEmail: adminData.email,
-            type: "new_pet_registration",
-            title: "New Pet Registration Needs Approval",
-            message: `New pet registration by ${currentUser.email}: ${petName} (${petType}, ${petBreed}). Please review and approve.`,
-            petId: petId,
-            isRead: false,
-            requiresAction: true,
-            createdAt: new Date().toISOString(),
-          });
-        });
-
-        await Promise.all(adminNotifications);
-        console.log("✅ Notifications sent to admin for approval");
-      } catch (notifError) {
-        console.error("❌ Notification error:", notifError);
-        // Continue even if notification fails
-      }
-
-      setModalMessage("Pet registration submitted successfully! Your pet registration is pending admin approval. Medical records will be created after approval.");
+      setModalMessage("Pet registration completed successfully! Your pet has been registered in the system.");
       setShowSuccessModal(true);
+
+      // Reset form
+      setPetName("");
+      setBirthday("");
+      setColor("");
+      setPetType("");
+      setPetBreed("");
+      setGender("Male");
+      setPetOwnerName("");
+
     } catch (error) {
       console.error("Error saving pet:", error);
       setModalMessage("Failed to save pet registration. Please try again.");
@@ -248,10 +221,10 @@ const Petregister: React.FC = () => {
           <Card>
             <Header>
               <PetIcon>
-             <LogoImage 
-              src="RL.jpg"
-              alt="FurSureCare Logo"
-            />
+                <LogoImage 
+                  src="RL.jpg"
+                  alt="FurSureCare Logo"
+                />
               </PetIcon>
               Pet Registration
             </Header>
@@ -261,12 +234,13 @@ const Petregister: React.FC = () => {
                 <Label>
                   <Input 
                     type="text" 
-                    value={petOwnerEmail} 
-                    readOnly 
-                    disabled 
-                    className="disabled-input"
+                    value={petOwnerName} 
+                    onChange={(e) => setPetOwnerName(e.target.value)}
+                    placeholder=" "
+                    required
+                    disabled={isLoading}
                   />
-                  <Span>Pet Owner Email</Span>
+                  <Span>Owner Name *</Span>
                 </Label>
               </FormGroup>
 
@@ -379,13 +353,13 @@ const Petregister: React.FC = () => {
               </FormGroup>
 
               <ButtonGroup>
-                <Button type="submit" disabled={isLoading || !petName.trim() || !petType || !petBreed || !birthday || !color}>
+                <Button type="submit" disabled={isLoading || !petName.trim() || !petType || !petBreed || !birthday || !color || !petOwnerName.trim()}>
                   {isLoading ? (
                     <>
                       <Spinner />
-                      Submitting for Approval...
+                      Registering Pet...
                     </>
-                  ) : "Submit for Approval"}
+                  ) : "Register Pet"}
                 </Button>
                 <CancelButton 
                   type="button" 
@@ -407,7 +381,7 @@ const Petregister: React.FC = () => {
                 <ModalIcon $variant="success">
                   <i className="fas fa-check-circle"></i>
                 </ModalIcon>
-                <ModalTitle>Registration Submitted!</ModalTitle>
+                <ModalTitle>Registration Successful!</ModalTitle>
                 <ModalClose onClick={handleModalClose}>
                   <i className="fas fa-times"></i>
                 </ModalClose>
@@ -417,6 +391,9 @@ const Petregister: React.FC = () => {
                 <PetDetails>
                   <DetailItem>
                     <strong>Pet Name:</strong> {petName}
+                  </DetailItem>
+                  <DetailItem>
+                    <strong>Owner Name:</strong> {petOwnerName}
                   </DetailItem>
                   <DetailItem>
                     <strong>Type:</strong> {petType}
@@ -429,14 +406,13 @@ const Petregister: React.FC = () => {
                   </DetailItem>
                 </PetDetails>
                 <InfoBox>
-                  
                   <InfoText>
-                    <strong>What happens next?</strong>
+                    <strong>Registration Complete!</strong>
                     <ul>
-                      <li>Admin will review your pet registration</li>
-                      <li>You&aposll receive notification once your appointment has done</li>
-                      <li>Medical records will be created after approval</li>
-                      <li>You can track your pet health into your medical  record</li>
+                      <li>Your pet has been successfully registered</li>
+                      <li>All data saved to pets collection</li>
+                      <li>You can now view your pet in the dashboard</li>
+                      <li>Keep your pet's information updated</li>
                     </ul>
                   </InfoText>
                 </InfoBox>
@@ -950,7 +926,6 @@ const InfoBox = styled.div`
   align-items: flex-start;
   gap: 10px;
 `;
-
 
 const InfoText = styled.div`
   flex: 1;

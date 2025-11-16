@@ -1,4 +1,5 @@
-"use client"
+'use client';
+
 import React, { useState, useEffect, useCallback } from "react";
 import styled, { createGlobalStyle } from "styled-components";
 import { useRouter } from "next/navigation";
@@ -46,6 +47,33 @@ interface MedicalRecord {
   appointmentId?: string;
   appointmentStatus?: string;
   appointmentType?: string;
+}
+
+interface UserMedicalRecord {
+  id: string;
+  petName: string;
+  petAge: string;
+  birthDate: string;
+  breed: string;
+  weight: string;
+  gender: string;
+  color: string;
+  allergies: string;
+  existingConditions: string;
+  ownerName: string;
+  ownerEmail: string;
+  petType: string;
+  diagnosis: string;
+  treatment: string;
+  date: string;
+  notes: string;
+  veterinarian: string;
+  createdAt: Date | null;
+  status?: string;
+  petId?: string;
+  appointmentId?: string;
+  appointmentType?: string;
+  userId?: string;
 }
 
 interface Appointment {
@@ -187,6 +215,75 @@ const sendMedicalRecordNotification = async (
     console.log(`Medical record notification sent to ${ownerEmail}`);
   } catch (error) {
     console.error("Error sending medical record notification:", error);
+  }
+};
+
+// ✅ NEW: Function to save medical record to usermedicalrecord collection
+const saveToUserMedicalRecord = async (
+  medicalRecordData: MedicalRecord,
+  ownerEmail: string
+): Promise<void> => {
+  try {
+    const userId = await getUserIdByEmail(ownerEmail);
+    
+    if (!userId) {
+      console.warn(`User not found for email: ${ownerEmail}, cannot save to usermedicalrecord`);
+      return;
+    }
+
+    // Prepare data for usermedicalrecord collection
+    const userMedicalRecordData: Omit<UserMedicalRecord, 'id'> = {
+      petName: medicalRecordData.petName,
+      petAge: medicalRecordData.petAge,
+      birthDate: medicalRecordData.birthDate,
+      breed: medicalRecordData.breed,
+      weight: medicalRecordData.weight,
+      gender: medicalRecordData.gender,
+      color: medicalRecordData.color,
+      allergies: medicalRecordData.allergies,
+      existingConditions: medicalRecordData.existingConditions,
+      ownerName: medicalRecordData.ownerName,
+      ownerEmail: medicalRecordData.ownerEmail,
+      petType: medicalRecordData.petType,
+      diagnosis: medicalRecordData.diagnosis,
+      treatment: medicalRecordData.treatment,
+      date: medicalRecordData.date,
+      notes: medicalRecordData.notes,
+      veterinarian: medicalRecordData.veterinarian,
+      status: medicalRecordData.status || "completed",
+      petId: medicalRecordData.petId,
+      appointmentId: medicalRecordData.appointmentId,
+      appointmentType: medicalRecordData.appointmentType,
+      userId: userId,
+      createdAt: new Date()
+    };
+
+    // Check if record already exists in usermedicalrecord
+    const existingRecordsQuery = query(
+      collection(db, "usermedicalrecord"),
+      where("appointmentId", "==", medicalRecordData.appointmentId),
+      where("userId", "==", userId)
+    );
+    
+    const existingRecords = await getDocs(existingRecordsQuery);
+    
+    if (!existingRecords.empty) {
+      // Update existing record
+      const existingDoc = existingRecords.docs[0];
+      await updateDoc(doc(db, "usermedicalrecord", existingDoc.id), {
+        ...userMedicalRecordData,
+        updatedAt: new Date()
+      });
+      console.log(`✅ Updated existing medical record in usermedicalrecord for user ${userId}`);
+    } else {
+      // Create new record
+      await addDoc(collection(db, "usermedicalrecord"), userMedicalRecordData);
+      console.log(`✅ Created new medical record in usermedicalrecord for user ${userId}`);
+    }
+    
+  } catch (error) {
+    console.error("❌ Error saving to usermedicalrecord:", error);
+    throw new Error(`Failed to save medical record to user collection: ${error}`);
   }
 };
 
@@ -560,6 +657,7 @@ const MedicalRecord: React.FC = () => {
     setShowForm(true);
   };
 
+  // ✅ ENHANCED: Handle submit with usermedicalrecord saving
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) {
@@ -578,42 +676,54 @@ const MedicalRecord: React.FC = () => {
     });
 
     try {
+      let medicalRecordId: string;
+      
       if (editingRecord) {
+        // Update existing record
         await updateDoc(doc(db, "medicalRecords", editingRecord.id), sanitizedData);
+        medicalRecordId = editingRecord.id;
         setSuccessMessage("Medical record updated successfully!");
         
-        // Send notification if record is being marked as completed
+        // ✅ NEW: Save to usermedicalrecord when editing and completing
         if (finalStatus === "completed" && editingRecord.status !== "completed") {
-          await sendMedicalRecordNotification(
-            formData.ownerEmail,
-            formData.petName,
-            editingRecord.id,
-            formData.appointmentType
+          await saveToUserMedicalRecord(
+            { ...editingRecord, ...sanitizedData } as MedicalRecord,
+            formData.ownerEmail
           );
         }
       } else {
+        // Create new record
         const docRef = await addDoc(collection(db, "medicalRecords"), {
           ...sanitizedData,
           createdAt: new Date()
         });
+        medicalRecordId = docRef.id;
         console.log("Medical record created with ID:", docRef.id);
-        
-        // Send notification if record is completed
-        if (finalStatus === "completed") {
-          await sendMedicalRecordNotification(
-            formData.ownerEmail,
-            formData.petName,
-            docRef.id,
-            formData.appointmentType
-          );
-        }
         
         setSuccessMessage("Medical record created successfully!");
         
-        // NEW: Refresh appointments list to remove the used one
+        // ✅ NEW: Save to usermedicalrecord when creating completed record
+        if (finalStatus === "completed") {
+          await saveToUserMedicalRecord(
+            { id: medicalRecordId, ...sanitizedData } as MedicalRecord,
+            formData.ownerEmail
+          );
+        }
+        
+        // Refresh appointments list to remove the used one
         if (formData.appointmentId) {
           await fetchAppointments();
         }
+      }
+
+      // ✅ ENHANCED: Send notification if record is completed
+      if (finalStatus === "completed") {
+        await sendMedicalRecordNotification(
+          formData.ownerEmail,
+          formData.petName,
+          medicalRecordId,
+          formData.appointmentType
+        );
       }
 
       resetForm();

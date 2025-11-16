@@ -153,7 +153,179 @@ const paymentMethods = [
   { value: "GCash", label: "GCash", description: "Pay online using GCash" }
 ];
 
-// 🔹 FIXED: Enhanced Manual QR Payment Processing Function with Dynamic QR
+// 🔹 FIXED: Enhanced Appointment Creation with Complete Data - SAVES TO APPOINTMENTS COLLECTION
+const createAppointmentInFirestore = async (
+  bookingState: BookingState,
+  paymentMethod: string,
+  user: User,
+  selectedPetData: Pet
+): Promise<string> => {
+  try {
+    const { selectedPet, selectedSlot, selectedAppointmentType, selectedDate, selectedPrice } = bookingState;
+
+    if (!selectedPet || !selectedSlot || !selectedAppointmentType || !selectedDate) {
+      throw new Error("Missing required appointment data");
+    }
+
+    // ✅ FIXED: Complete appointment data for appointments collection
+    const appointmentData = {
+      // Basic appointment info
+      date: selectedDate,
+      timeSlot: selectedSlot,
+      status: paymentMethod === "Cash" ? "Confirmed" : "Pending Payment",
+      
+      // Pet information
+      petId: selectedPet,
+      petName: selectedPetData.name,
+      petType: selectedPetData.petType || "Unknown",
+      breed: selectedPetData.breed || "Unknown",
+      gender: selectedPetData.gender || "Unknown",
+      color: selectedPetData.color || "Unknown",
+      birthday: selectedPetData.birthday || "",
+      age: selectedPetData.age || "",
+      
+      // Client information
+      clientName: user.displayName || user.email || "Unknown Client",
+      clientEmail: user.email || "",
+      userId: user.uid,
+      
+      // Service information
+      appointmentType: selectedAppointmentType,
+      serviceType: selectedAppointmentType,
+      price: selectedPrice || 0,
+      
+      // Payment information
+      paymentMethod: paymentMethod,
+      paymentStatus: paymentMethod === "Cash" ? "Complete Payment" : "Pending Payment",
+      referenceNumber: "", // Will be set for GCash payments
+      
+      // System fields
+      bookedByAdmin: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      bookedBy: user.uid,
+      userEmail: user.email
+    };
+
+    console.log("💾 Creating appointment in Firestore appointments collection:", appointmentData);
+
+    // ✅ FIXED: Create the appointment document in appointments collection
+    const newDoc = await addDoc(collection(db, "appointments"), appointmentData);
+
+    // Update the document with its ID
+    await updateDoc(doc(db, "appointments", newDoc.id), {
+      id: newDoc.id
+    });
+
+    console.log("✅ Appointment successfully created in appointments collection with ID:", newDoc.id);
+    
+    return newDoc.id;
+
+  } catch (error) {
+    console.error("❌ Error creating appointment in Firestore:", error);
+    throw new Error(`Failed to create appointment: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+};
+
+// 🔹 FIXED: Enhanced Payment Processing with Firestore Updates
+const processAppointmentPayment = async (
+  appointmentId: string,
+  paymentMethod: string,
+  amount: number,
+  referenceNumber?: string
+): Promise<void> => {
+  try {
+    const appointmentRef = doc(db, "appointments", appointmentId);
+    
+    if (paymentMethod === "Cash") {
+      // For cash payments, mark as confirmed immediately
+      await updateDoc(appointmentRef, {
+        status: "Confirmed",
+        paymentStatus: "Complete Payment",
+        updatedAt: serverTimestamp()
+      });
+      console.log("✅ Cash payment confirmed for appointment:", appointmentId);
+      
+    } else if (paymentMethod === "GCash") {
+      // For GCash payments, update with reference number
+      await updateDoc(appointmentRef, {
+        status: "Pending Confirmation",
+        paymentStatus: "Pending Verification",
+        referenceNumber: referenceNumber || "",
+        updatedAt: serverTimestamp()
+      });
+      console.log("✅ GCash payment submitted for appointment:", appointmentId);
+    }
+    
+  } catch (error) {
+    console.error("❌ Error processing payment:", error);
+    throw new Error(`Payment processing failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+};
+
+// 🔹 Helper: Send notifications to doctors
+const sendDoctorNotifications = async (
+  appointmentId: string,
+  user: User,
+  petData: Pet,
+  date: string,
+  timeSlot: string,
+  price: number,
+  doctors: Doctor[]
+): Promise<void> => {
+  try {
+    const doctorNotifications = doctors.map(async (doctor) => {
+      return addDoc(collection(db, "notifications"), {
+        recipientId: doctor.id,
+        recipientEmail: doctor.email,
+        type: "new_appointment",
+        title: "New Appointment Booked",
+        message: `New appointment booked by ${user.email} for ${petData.name} (${petData.breed}) on ${date} at ${timeSlot} - ₱${price}`,
+        appointmentId: appointmentId,
+        isRead: false,
+        createdAt: serverTimestamp()
+      });
+    });
+
+    await Promise.all(doctorNotifications);
+    console.log("✅ Notifications sent to doctors");
+  } catch (notifError) {
+    console.error("❌ Notification error (non-critical):", notifError);
+    // Don't throw error for notification failures
+  }
+};
+
+// 🔹 Helper: Get appointment details from Firestore
+const getAppointmentDetails = async (appointmentId: string): Promise<Appointment> => {
+  const appointmentDoc = await getDoc(doc(db, "appointments", appointmentId));
+  if (!appointmentDoc.exists()) {
+    throw new Error("Appointment not found");
+  }
+  
+  const data = appointmentDoc.data();
+  return {
+    id: appointmentId,
+    date: data.date,
+    timeSlot: data.timeSlot,
+    status: data.status,
+    petId: data.petId,
+    petName: data.petName,
+    petType: data.petType,
+    breed: data.breed,
+    gender: data.gender,
+    color: data.color,
+    birthday: data.birthday,
+    age: data.age,
+    clientName: data.clientName,
+    appointmentType: data.appointmentType,
+    price: data.price,
+    paymentMethod: data.paymentMethod,
+    referenceNumber: data.referenceNumber,
+    createdAt: data.createdAt
+  };
+};
+
+// 🔹 FIXED: Enhanced Manual QR Payment Processing Function
 const processPayment = async (
   appointmentId: string, 
   amount: number, 
@@ -322,7 +494,7 @@ const useAppointmentData = () => {
             }
           );
 
-          // Appointments listener
+          // ✅ FIXED: Real-time appointments listener - watches appointments collection
           unsubscribeAppointments = onSnapshot(collection(db, "appointments"), 
             (snapshot) => {
               const appointmentsData: Appointment[] = [];
@@ -339,6 +511,7 @@ const useAppointmentData = () => {
                   price: data.price || 0
                 });
               });
+              console.log("🔄 Real-time appointments update, count:", appointmentsData.length);
               setBookedSlots(appointmentsData);
             },
             (error) => {
@@ -434,7 +607,7 @@ const PetSelector: React.FC<{
       <SectionTitle>
         <SectionIcon>
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-            <path fillRule="evenodd" d="M12 6.75a5.25 5.25 0 016.775-5.025.75.75 0 01.313 1.248l-3.32 3.319c.063.475.276.934.627 1.33.35.389.820.729 1.382.963.56.235 1.217.389 1.925.389a.75.75 0 010 1.5c-.898 0-1.7-.192-2.375-.509A5.221 5.221 0 0115.75 8.25c0-.65-.126-1.275-.356-1.85l-2.57 2.57a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06l2.57-2.57a5.25 5.25 0 00-1.834 2.606A5.25 5.25 0 0012 6.75z" clipRule="evenodd" />
+            <path fillRule="evenodd" d="M12 6.75a5.25 5.25 0 016.775-5.025.75.75 0 01.313 1.248l-3.32 3.319c.063.475.276.934.627 1.33.35.389.820.729 1.382.963.56.235 1.217.389 1.925.389a.75.75 0 010 1.5c-.898 0-1.7-.192-2.375-.509A5.221 5.221 0 0115.75 8.25c0-.65-.126-1.275-.356-1.85l-2.57 2.57a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06l2.57-2.57a5.25 5.25 0 00-1.834 2.606A5.25 5.25 0 0112 6.75z" clipRule="evenodd" />
           </svg>
         </SectionIcon>
         Select Your Pet
@@ -1386,6 +1559,35 @@ const AppointmentPage: React.FC = () => {
     qrData: string;
   } | null>(null);
 
+  // ✅ FIXED: Enhanced GCash Success Handler
+  const handleGCashSuccess = useCallback(async () => {
+    if (pendingAppointmentInfo) {
+      try {
+        // Update appointment status in Firestore
+        await processAppointmentPayment(
+          pendingAppointmentInfo.id, 
+          "GCash", 
+          pendingAppointmentInfo.amount, 
+          pendingAppointmentInfo.referenceNumber
+        );
+
+        // Get updated appointment details
+        const fullAppointment = await getAppointmentDetails(pendingAppointmentInfo.id);
+        
+        setCompletedAppointment(fullAppointment);
+        setShowGCashModal(false);
+        setShowReceipt(true);
+        setPendingAppointmentInfo(null);
+        
+        console.log("✅ GCash payment completed successfully");
+        
+      } catch (error) {
+        console.error("❌ Error completing GCash payment:", error);
+        alert("Payment was successful but there was an error loading your appointment details.");
+      }
+    }
+  }, [pendingAppointmentInfo]);
+
   // ✅ FIXED: Proper cancel handler for GCash payments
   const handleGCashCancel = useCallback(async (appointmentId: string) => {
     try {
@@ -1412,209 +1614,100 @@ const AppointmentPage: React.FC = () => {
     }
   }, [router]);
 
-  // 🔹 FIXED: handlePaymentSelection function with proper flow
+  // 🔹 FIXED: Enhanced Main Booking Handler - SAVES TO APPOINTMENTS COLLECTION
   const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
     setIsProcessing(true);
     setShowPaymentMethods(false);
     
     const { selectedPet, selectedSlot, selectedAppointmentType, selectedDate, selectedPrice } = bookingState;
 
-    // Check if required fields are present
-    if (!selectedPet || !selectedSlot || !selectedAppointmentType) {
-      alert("Please complete all required fields");
-      setIsProcessing(false);
-      return;
-    }
-
     try {
+      // Validate required fields
+      if (!selectedPet || !selectedSlot || !selectedAppointmentType || !selectedDate) {
+        throw new Error("Please complete all required fields");
+      }
+
       const currentUser = auth.currentUser;
       if (!currentUser) {
-        throw new Error("No authenticated user");
+        throw new Error("No authenticated user found");
       }
 
       const selectedPetData = pets.find((p) => p.id === selectedPet);
-      
       if (!selectedPetData) {
         throw new Error("Selected pet not found");
       }
 
-      // ✅ FIXED: Ensure all fields have default values to avoid undefined
-      const appointmentData = {
-        userId: currentUser.uid,
-        clientName: currentUser.email || "Unknown Client",
-        clientId: currentUser.uid,
-        petId: selectedPet,
-        petName: selectedPetData.name,
-        petType: selectedPetData.petType || "Unknown",
-        breed: selectedPetData.breed || "Unknown",
-        gender: selectedPetData.gender || "Unknown",
-        color: selectedPetData.color || "Unknown",
-        birthday: selectedPetData.birthday || "",
-        age: selectedPetData.age || "",
-        date: selectedDate,
-        timeSlot: selectedSlot,
-        appointmentType: selectedAppointmentType,
-        price: selectedPrice || 0,
-        status: paymentMethod === "Cash" ? "Confirmed" : "Pending Payment",
-        paymentMethod: paymentMethod,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      };
-
-      console.log("💾 Creating appointment in database:", appointmentData);
-
-      const newDoc = await addDoc(collection(db, "appointments"), appointmentData);
-
-      await updateDoc(doc(db, "appointments", newDoc.id), {
-        id: newDoc.id
-      });
-
-      console.log("✅ Appointment created with ID:", newDoc.id);
-
-      // Send notifications to doctors
-      try {
-        const doctorNotifications = doctors.map(async (doctor) => {
-          return addDoc(collection(db, "notifications"), {
-            recipientId: doctor.id,
-            recipientEmail: doctor.email,
-            type: "new_appointment",
-            title: "New Appointment Booked",
-            message: `New appointment booked by ${currentUser.email} for ${selectedPetData.name} (${selectedPetData.breed}) on ${selectedDate} at ${selectedSlot} - ₱${selectedPrice}`,
-            appointmentId: newDoc.id,
-            isRead: false,
-            createdAt: serverTimestamp()
-          });
-        });
-
-        await Promise.all(doctorNotifications);
-        console.log("✅ Notifications sent to doctors");
-      } catch (notifError) {
-        console.error("❌ Notification error (non-critical):", notifError);
-        // Don't throw error for notification failures
+      // Check for conflicts
+      if (isDateUnavailable(selectedDate)) {
+        throw new Error("This date is unavailable. Please select another date.");
       }
 
-      // Handle different payment methods
+      const isTaken = bookedSlots.some(
+        (s) => s.date === selectedDate && s.timeSlot === selectedSlot && s.status !== "Cancelled"
+      );
+      
+      if (isTaken) {
+        throw new Error("This time slot is already booked by another user");
+      }
+
+      // ✅ STEP 1: Create appointment in Firestore APPOINTMENTS COLLECTION
+      const appointmentId = await createAppointmentInFirestore(
+        bookingState,
+        paymentMethod,
+        currentUser,
+        selectedPetData
+      );
+
+      // ✅ STEP 2: Send notifications to doctors
+      await sendDoctorNotifications(
+        appointmentId, 
+        currentUser, 
+        selectedPetData, 
+        selectedDate, 
+        selectedSlot, 
+        selectedPrice,
+        doctors
+      );
+
+      // ✅ STEP 3: Handle payment method specific flows
       if (paymentMethod === "Cash") {
-        // For Cash payments, show receipt immediately
-        const fullAppointment: Appointment = {
-          id: newDoc.id,
-          date: selectedDate,
-          timeSlot: selectedSlot,
-          status: "Confirmed",
-          petId: selectedPet,
-          petName: selectedPetData.name,
-          petType: selectedPetData.petType || "Unknown",
-          breed: selectedPetData.breed || "Unknown",
-          gender: selectedPetData.gender || "Unknown",
-          color: selectedPetData.color || "Unknown",
-          birthday: selectedPetData.birthday || "",
-          age: selectedPetData.age || "",
-          clientName: currentUser.email || "Unknown Client",
-          appointmentType: selectedAppointmentType,
-          price: selectedPrice,
-          paymentMethod: "Cash",
-          createdAt: new Date()
-        };
+        // For cash payments, show receipt immediately
+        await processAppointmentPayment(appointmentId, "Cash", selectedPrice);
         
+        const fullAppointment = await getAppointmentDetails(appointmentId);
         setCompletedAppointment(fullAppointment);
         setShowReceipt(true);
-        setIsProcessing(false);
         
       } else if (paymentMethod === "GCash") {
-        // For GCash payments - process MANUAL QR payment
-        try {
-          console.log("🔄 Starting MANUAL GCash payment process...");
-          
-          const paymentResult = await processPayment(
-            newDoc.id, 
-            selectedPrice, 
-            selectedAppointmentType, 
-            selectedPetData.name,
-            paymentMethod
-          );
+        // For GCash payments, show payment modal
+        const paymentResult = await processPayment(
+          appointmentId, 
+          selectedPrice, 
+          selectedAppointmentType, 
+          selectedPetData.name,
+          paymentMethod
+        );
 
-          if (paymentResult.success) {
-            // Show manual QR modal instead of redirecting
-            setShowGCashModal(true);
-            
-            // Store appointment info for the modal
-            setPendingAppointmentInfo({
-              id: newDoc.id,
-              amount: selectedPrice,
-              type: selectedAppointmentType,
-              petName: selectedPetData.name,
-              referenceNumber: paymentResult.referenceNumber,
-              qrData: paymentResult.qrData || `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(`GCASH|09171234567|${selectedPrice}|${paymentResult.referenceNumber}|FursureCareVet`)}`
-            });
-          }
-          setIsProcessing(false);
-        } catch (paymentError) {
-          console.error("❌ Manual Payment error:", paymentError);
-          
-          const errorMessage = paymentError instanceof Error ? paymentError.message : 'Payment processing failed';
-          
-          // Update appointment status to reflect payment failure
-          await updateDoc(doc(db, "appointments", newDoc.id), {
-            status: "Payment Failed",
-            paymentError: errorMessage,
-            updatedAt: serverTimestamp()
+        if (paymentResult.success) {
+          setShowGCashModal(true);
+          setPendingAppointmentInfo({
+            id: appointmentId,
+            amount: selectedPrice,
+            type: selectedAppointmentType,
+            petName: selectedPetData.name,
+            referenceNumber: paymentResult.referenceNumber,
+            qrData: paymentResult.qrData || `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(`GCASH|09171234567|${selectedPrice}|${paymentResult.referenceNumber}|FursureCareVet`)}`
           });
-          
-          alert(`Appointment created but payment failed: ${errorMessage}. Please try again or pay with cash.`);
-          setIsProcessing(false);
-          router.push("/userdashboard");
         }
       }
-      
-    } catch (err) {
-      console.error("❌ Appointment creation error:", err);
-      
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
-      alert("Failed to book appointment: " + errorMessage);
+
+    } catch (error) {
+      console.error("❌ Appointment booking error:", error);
+      alert(`Failed to book appointment: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
       setIsProcessing(false);
     }
-  }, [bookingState, pets, doctors, router]);
-
-  // Add this function to handle GCash payment success
-  const handleGCashSuccess = useCallback(async () => {
-    if (pendingAppointmentInfo) {
-      try {
-        // Get the reference number from the appointment
-        const appointmentDoc = await getDoc(doc(db, "appointments", pendingAppointmentInfo.id));
-        const appointmentData = appointmentDoc.data();
-        
-        const fullAppointment: Appointment = {
-          id: pendingAppointmentInfo.id,
-          date: bookingState.selectedDate,
-          timeSlot: bookingState.selectedSlot || "",
-          status: "Pending Confirmation",
-          petId: bookingState.selectedPet || "",
-          petName: pendingAppointmentInfo.petName,
-          petType: pets.find(p => p.id === bookingState.selectedPet)?.petType || "Unknown",
-          breed: pets.find(p => p.id === bookingState.selectedPet)?.breed || "Unknown",
-          gender: pets.find(p => p.id === bookingState.selectedPet)?.gender || "Unknown",
-          color: pets.find(p => p.id === bookingState.selectedPet)?.color || "Unknown",
-          birthday: pets.find(p => p.id === bookingState.selectedPet)?.birthday || "",
-          age: pets.find(p => p.id === bookingState.selectedPet)?.age || "",
-          clientName: auth.currentUser?.email || "Unknown Client",
-          appointmentType: pendingAppointmentInfo.type,
-          price: pendingAppointmentInfo.amount,
-          paymentMethod: "GCash",
-          referenceNumber: appointmentData?.referenceNumber,
-          createdAt: new Date()
-        };
-
-        setCompletedAppointment(fullAppointment);
-        setShowGCashModal(false);
-        setShowReceipt(true);
-        setPendingAppointmentInfo(null);
-        
-      } catch (error) {
-        console.error("Error getting appointment data:", error);
-        alert("Payment was successful but there was an error loading your appointment details.");
-      }
-    }
-  }, [pendingAppointmentInfo, pets, bookingState]);
+  }, [bookingState, pets, bookedSlots, isDateUnavailable, doctors]);
 
   useEffect(() => {
     const today = new Date().toISOString().split("T")[0];

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import styled, { createGlobalStyle } from "styled-components";
-import { signInWithEmailAndPassword, sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup, } from "firebase/auth";
+import { signInWithEmailAndPassword, sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup, getMultiFactorResolver, TotpMultiFactorGenerator } from "firebase/auth";
 import { doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 import { auth, db } from "../firebaseConfig";
 import { useRouter } from "next/navigation";
@@ -52,19 +52,21 @@ const Login: React.FC = () => {
   const [resetEmail, setResetEmail] = useState("");
   const [resetLoading, setResetLoading] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
-  const [googleUserData, setGoogleUserData] = useState<{uid: string; email: string; role: string} | null>(null);
+  const [googleUserData, setGoogleUserData] = useState<{ uid: string; email: string; role: string } | null>(null);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
+  const [totpRequired, setTotpRequired] = useState(false);
+  const [totpCode, setTotpCode] = useState("");
+  const [mfaResolver, setMfaResolver] = useState<any>(null);
   const router = useRouter();
 
-  // IDAGDAG: Check kung may reset password action sa URL
+  // Check for reset password action in URL
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const mode = urlParams.get('mode');
     const oobCode = urlParams.get('oobCode');
-    
+
     if (mode === 'resetPassword' && oobCode) {
-      // I-redirect sa reset password page
       router.push(`/reset-password?oobCode=${oobCode}`);
     }
   }, [router]);
@@ -73,7 +75,7 @@ const Login: React.FC = () => {
     return Math.floor(100000 + Math.random() * 900000).toString();
   };
 
-  // Helper function para i-debug ang API responses
+  // Helper function to debug API responses
   const debugAPIResponse = async (response: Response) => {
     const text = await response.text();
     console.log("🔍 Raw API response:", text);
@@ -87,82 +89,66 @@ const Login: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    
+
     if (showForgotPassword) {
       return;
     }
-    
-    // IDAGDAG: Check kung na-accept na ang terms and conditions
+
     if (!termsAccepted) {
       setError("Please accept the Terms and Conditions to continue.");
       return;
     }
-    
+
     setLoading(true);
     setError("");
     setOtpRequired(false);
+    setTotpRequired(false);
 
     try {
       console.log("🔄 Attempting login with:", email);
-      
+
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       console.log("✅ Firebase auth success, user ID:", user.uid);
-      
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      console.log("📄 Attempting to fetch user document...");
-      const userDocRef = doc(db, "users", user.uid);
-      const userDoc = await getDoc(userDocRef);
-      
-      console.log("✅ User document fetched successfully");
-      console.log("📄 User document exists:", userDoc.exists());
+
+      // Get user data from Firestore
+      const userDoc = await getDoc(doc(db, "users", user.uid));
       
       if (!userDoc.exists()) {
-        console.log("❌ No user document found for UID:", user.uid);
-        setError("User profile not found. Please contact administrator.");
-        await auth.signOut();
-        return;
+        throw new Error("User data not found. Please contact support.");
       }
 
       const userData = userDoc.data() as UserRole;
-      console.log("👤 User data:", userData);
-      console.log("🔐 2FA enabled:", userData.twoFactorEnabled);
-      console.log("🎯 User role:", userData.role);
-      
+      console.log("👤 User role:", userData.role);
+
+      // Check if 2FA is enabled
       if (userData.twoFactorEnabled) {
-        console.log("🔐 2FA required, proceeding with OTP flow...");
-        setUserId(user.uid);
-        setUserRole(userData.role);
-        setOtpRequired(true);
+        console.log("🔐 2FA enabled, generating OTP...");
         
+        // Generate and send OTP
         const otp = generateOTP();
         const expiresAt = Date.now() + 10 * 60 * 1000;
-        
+
         const userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || userData.email;
-        console.log("📧 Sending OTP to:", userData.email);
         
-        // ✅ FIXED: Changed 'otp' to 'code' to match API
+        console.log("✉️ Sending OTP to:", userData.email);
         const emailResponse = await fetch('/api/send-email-otp', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             email: userData.email,
-            code: otp, // ✅ CHANGED: 'otp' → 'code'
+            code: otp,
             name: userName
           }),
         });
 
         const emailData = await debugAPIResponse(emailResponse);
-        console.log("📨 Email API response:", emailData);
         
         if (!emailResponse.ok) {
-          throw new Error(emailData.error || "Failed to send verification code. Please try again.");
+          throw new Error(emailData.error || "Failed to send verification code.");
         }
 
-        console.log("💾 Storing verification code in Firestore...");
+        // Store OTP in Firestore
         await setDoc(doc(db, "verificationCodes", user.uid), {
           code: otp,
           otpHash: emailData.otpHash,
@@ -172,49 +158,128 @@ const Login: React.FC = () => {
           verified: false
         });
 
-        console.log("🚪 Signing out for OTP verification...");
+        // Sign out and require OTP verification
         await auth.signOut();
         
-        setError("✅ A verification code has been sent to your email.");
+        setUserId(user.uid);
+        setUserRole(userData.role);
+        setOtpRequired(true);
+        setError("✅ Verification code sent to your email.");
       } else {
-        console.log("🎯 No 2FA required, navigating to:", userData.role);
+        // No 2FA required, navigate directly
+        console.log(" No 2FA required, navigating to:", userData.role);
         navigateBasedOnRole(userData.role);
       }
+
+    } catch (err: any) {
+      console.error("❌ Login error:", err);
       
-    } catch (err) {
-      const firebaseError = err as FirebaseError;
-      console.error("❌ Login error:", firebaseError);
-      
-      if (firebaseError?.code === "permission-denied") {
-        setError("Database access denied. Please check Firestore rules or contact support.");
-      } else if (firebaseError?.code === "auth/invalid-credential") {
+      // Handle specific Firebase auth errors
+      if (err.code === "auth/multi-factor-auth-required") {
+        console.log("🔐 GMAIL MFA required");
+        const resolver = getMultiFactorResolver(auth, err);
+        setMfaResolver(resolver);
+        setTotpRequired(true);
+        setError("✅ Please enter your Gmail code");
+      } else if (err.code === "auth/invalid-credential") {
         setError("Invalid email or password.");
-      } else if (firebaseError?.code === "auth/user-not-found") {
+      } else if (err.code === "auth/user-not-found") {
         setError("No account found with this email.");
+      } else if (err.code === "auth/wrong-password") {
+        setError("Invalid password.");
+      } else if (err.code === "auth/too-many-requests") {
+        setError("Too many failed attempts. Please try again later.");
+      } else if (err.code === "permission-denied") {
+        setError("Database access denied. Please contact support.");
       } else {
-        setError(firebaseError?.message || "An error occurred during authentication.");
+        setError(err.message || "An error occurred during login.");
       }
       
-      await auth.signOut();
+      // Sign out on error
+      try {
+        await auth.signOut();
+      } catch (signOutError) {
+        console.log("Sign out error:", signOutError);
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const navigateBasedOnRole = (role: string) => {
-    console.log("Navigating based on role:", role);
-    switch (role) {
-      case 'admin':
-        router.push("/admindashboard");
-        break;
-      case 'veterinarian':
-        router.push("/vetdashboard");
-        break;
-      case 'user':
-      default:
-        router.push("/userdashboard");  
-        break;
+  const handleTOTPVerification = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!totpCode || totpCode.length !== 6) {
+      setError("Please enter a valid 6-digit code.");
+      return;
     }
+
+    setOtpLoading(true);
+    setError("");
+
+    try {
+      console.log("🔐 Verifying TOTP code...");
+
+      if (!mfaResolver) {
+        throw new Error("MFA resolver not found");
+      }
+
+      // Find TOTP hint
+      const totpHint = mfaResolver.hints.find(
+        (hint: any) => hint.factorId === TotpMultiFactorGenerator.FACTOR_ID
+      );
+
+      if (!totpHint) {
+        throw new Error("TOTP factor not found");
+      }
+
+      // Create assertion
+      const multiFactorAssertion = TotpMultiFactorGenerator.assertionForSignIn(
+        totpHint.uid,
+        totpCode
+      );
+
+      // Resolve sign-in
+      const userCredential = await mfaResolver.resolveSignIn(multiFactorAssertion);
+      const user = userCredential.user;
+
+      console.log("✅ TOTP verification successful");
+
+      // Get user role and navigate
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+      if (userDoc.exists()) {
+        const userData = userDoc.data() as UserRole;
+        navigateBasedOnRole(userData.role);
+      } else {
+        throw new Error("User data not found");
+      }
+    } catch (error: any) {
+      console.error("❌ TOTP verification error:", error);
+      setError("Invalid authenticator code. Please try again.");
+      setTotpCode("");
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const navigateBasedOnRole = (role: string) => {
+    console.log("🧭 Navigating based on role:", role);
+    
+    // Add small delay to ensure smooth transition
+    setTimeout(() => {
+      switch (role) {
+        case 'admin':
+          router.push("/admindashboard");
+          break;
+        case 'veterinarian':
+          router.push("/vetdashboard");
+          break;
+        case 'user':
+        default:
+          router.push("/userdashboard");
+          break;
+      }
+    }, 100);
   };
 
   const togglePasswordVisibility = () => {
@@ -223,7 +288,7 @@ const Login: React.FC = () => {
 
   const handleOTPVerification = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!otpCode || otpCode.length !== 6) {
       setError("Please enter a valid 6-digit code.");
       return;
@@ -234,49 +299,44 @@ const Login: React.FC = () => {
 
     try {
       console.log("🔐 Verifying OTP for user:", userId);
-      
+
+      // Get OTP document
       const otpDoc = await getDoc(doc(db, "verificationCodes", userId));
-      console.log("📄 OTP document exists:", otpDoc.exists());
       
       if (!otpDoc.exists()) {
-        throw new Error("Verification code has expired. Please login again.");
+        throw new Error("Verification code expired. Please login again.");
       }
 
       const otpData = otpDoc.data();
 
+      // Check expiration
       if (Date.now() > otpData.expiresAt) {
         await deleteDoc(doc(db, "verificationCodes", userId));
-        throw new Error("Verification code has expired. Please request a new one.");
+        throw new Error("Verification code expired. Please request a new one.");
       }
 
       let verificationSuccessful = false;
 
+      // Try direct code verification first
       if (otpData.code && otpData.code === otpCode) {
         console.log("✅ OTP verification successful via direct code");
         verificationSuccessful = true;
-      }
+      } 
+      // Try API verification
       else if (otpData.otpHash) {
         console.log("🌐 Attempting API verification...");
         
-        // ✅ FIXED: Changed field names to match API
-        const requestBody = {
-          email: email.toLowerCase(),
-          code: otpCode, // ✅ CHANGED: 'otp' → 'code'
-          otpHash: otpData.otpHash
-        };
-        
-        console.log("📨 Sending OTP verification request:", requestBody);
-        
         const response = await fetch('/api/verify-otp', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: email.toLowerCase(),
+            code: otpCode,
+            otpHash: otpData.otpHash
+          }),
         });
 
         const data = await debugAPIResponse(response);
-        console.log("📨 OTP verification API response:", data);
         
         if (response.ok && data.success) {
           console.log("✅ OTP verification successful via API");
@@ -289,29 +349,31 @@ const Login: React.FC = () => {
       }
 
       if (verificationSuccessful) {
-        console.log("✅ OTP verification successful, cleaning up...");
+        console.log("✅ OTP verification successful");
+        
+        // Clean up OTP
         await deleteDoc(doc(db, "verificationCodes", userId));
         
+        // Re-authenticate
         console.log("🔑 Re-authenticating user...");
         await signInWithEmailAndPassword(auth, email, password);
         
-        console.log("🧭 Navigation to:", userRole);
+        console.log("🧭 Navigating to:", userRole);
         navigateBasedOnRole(userRole);
       }
-    } catch (err) {
-      const firebaseError = err as FirebaseError;
-      console.error("❌ OTP verification error:", firebaseError);
-      setError(firebaseError?.message || "Verification failed. Please try again.");
+
+    } catch (err: any) {
+      console.error("❌ OTP verification error:", err);
+      setError(err.message || "Verification failed. Please try again.");
       setOtpCode("");
     } finally {
       setOtpLoading(false);
     }
-  };  
+  };
 
-  // BAGONG: Handle Google OTP Verification
   const handleGoogleOTPVerification = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!otpCode || otpCode.length !== 6) {
       setError("Please enter a valid 6-digit code.");
       return;
@@ -326,19 +388,18 @@ const Login: React.FC = () => {
       }
 
       console.log("🔐 Verifying Google OTP for user:", googleUserData.uid);
-      
+
       const otpDoc = await getDoc(doc(db, "verificationCodes", googleUserData.uid));
-      console.log("📄 OTP document exists:", otpDoc.exists());
       
       if (!otpDoc.exists()) {
-        throw new Error("Verification code has expired. Please login again.");
+        throw new Error("Verification code expired. Please login again.");
       }
 
       const otpData = otpDoc.data();
 
       if (Date.now() > otpData.expiresAt) {
         await deleteDoc(doc(db, "verificationCodes", googleUserData.uid));
-        throw new Error("Verification code has expired. Please request a new one.");
+        throw new Error("Verification code expired. Please request a new one.");
       }
 
       let verificationSuccessful = false;
@@ -346,26 +407,21 @@ const Login: React.FC = () => {
       if (otpData.code && otpData.code === otpCode) {
         console.log("✅ Google OTP verification successful via direct code");
         verificationSuccessful = true;
-      }
-      else if (otpData.otpHash) {
+      } else if (otpData.otpHash) {
         console.log("🌐 Attempting API verification for Google...");
-        
-        // ✅ FIXED: Changed field names to match API
+
         const response = await fetch('/api/verify-otp', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             email: googleUserData.email.toLowerCase(),
-            code: otpCode, // ✅ CHANGED: 'otp' → 'code'
+            code: otpCode,
             otpHash: otpData.otpHash
           }),
         });
 
         const data = await debugAPIResponse(response);
-        console.log("📨 Google OTP verification API response:", data);
-        
+
         if (response.ok && data.success) {
           console.log("✅ Google OTP verification successful via API");
           verificationSuccessful = true;
@@ -379,31 +435,29 @@ const Login: React.FC = () => {
       if (verificationSuccessful) {
         console.log("✅ Google OTP verification successful, cleaning up...");
         await deleteDoc(doc(db, "verificationCodes", googleUserData.uid));
-        
+
         console.log("🔑 Re-authenticating Google user...");
         const provider = new GoogleAuthProvider();
-        provider.setCustomParameters({
-          prompt: 'select_account'
-        });
-        
+        provider.setCustomParameters({ prompt: 'select_account' });
+
+        await signInWithPopup(auth, provider);
         console.log("✅ Google re-authentication successful");
-        
+
         console.log("🧭 Navigation to:", googleUserData.role);
         navigateBasedOnRole(googleUserData.role);
-        
+
         // Clean up
         setGoogleUserData(null);
       }
-    } catch (err) {
-      const firebaseError = err as FirebaseError;
-      console.error("❌ Google OTP verification error:", firebaseError);
-      
-      if (firebaseError?.code === "auth/popup-closed-by-user") {
+    } catch (err: any) {
+      console.error("❌ Google OTP verification error:", err);
+
+      if (err.code === "auth/popup-closed-by-user") {
         setError("Sign-in cancelled. Please try again.");
-      } else if (firebaseError?.code === "auth/popup-blocked") {
+      } else if (err.code === "auth/popup-blocked") {
         setError("Pop-up was blocked. Please allow pop-ups for this site.");
       } else {
-        setError(firebaseError?.message || "Verification failed. Please try again.");
+        setError(err.message || "Verification failed. Please try again.");
       }
       setOtpCode("");
     } finally {
@@ -416,7 +470,7 @@ const Login: React.FC = () => {
 
     console.log("Resending OTP for user:", userId);
     setResendCooldown(60);
-    
+
     const interval = setInterval(() => {
       setResendCooldown((prev) => {
         if (prev <= 1) {
@@ -430,30 +484,27 @@ const Login: React.FC = () => {
     try {
       const userEmail = googleUserData ? googleUserData.email : email;
       const userUid = googleUserData ? googleUserData.uid : userId;
-      
+
       const userDoc = await getDoc(doc(db, "users", userUid));
-      
+
       if (!userDoc.exists()) {
         throw new Error("User data not found. Please login again.");
       }
 
       const userData = userDoc.data() as UserRole;
       const userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || userEmail;
-      
+
       const newOtp = generateOTP();
       const expiresAt = Date.now() + 10 * 60 * 1000;
 
       console.log("Sending new OTP to:", userEmail);
-      
-      // ✅ FIXED: Changed 'otp' to 'code' to match API
+
       const response = await fetch('/api/send-email-otp', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: userEmail,
-          code: newOtp, // ✅ CHANGED: 'otp' → 'code'
+          code: newOtp,
           name: userName
         }),
       });
@@ -471,7 +522,7 @@ const Login: React.FC = () => {
       } catch {
         console.log("No existing OTP to delete");
       }
-      
+
       await setDoc(doc(db, "verificationCodes", userUid), {
         code: newOtp,
         otpHash: data.otpHash,
@@ -480,22 +531,20 @@ const Login: React.FC = () => {
         expiresAt: expiresAt,
         verified: false
       });
-      
+
       console.log("New OTP stored successfully");
       setError("✅ A new verification code has been sent to your email.");
       setOtpCode("");
-    } catch (error) {
-      const firebaseError = error as FirebaseError;
-      console.error("❌ Resend OTP error:", firebaseError);
+    } catch (error: any) {
+      console.error("❌ Resend OTP error:", error);
       setError("❌ Failed to resend code. Please try again.");
       setResendCooldown(0);
     }
-  };  
+  };
 
-  // BAGONG FORGOT PASSWORD HANDLER
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!resetEmail) {
       setError("Please enter your email address.");
       return;
@@ -513,39 +562,37 @@ const Login: React.FC = () => {
 
     try {
       console.log("Processing forgot password for:", resetEmail);
-      
-      // IDAGDAG: Action code settings para sa tamang redirect
+
       const actionCodeSettings = {
-        url: "https://r-lfursure-niln.vercel.app/reset-password", // ✅ direct link sa reset page
-        handleCodeInApp: true, // tells Firebase to use your app's page
+        url: `${window.location.origin}/reset-password`,
+        handleCodeInApp: true,
       };
- 
+
       console.log("Sending password reset email...");
       await sendPasswordResetEmail(auth, resetEmail, actionCodeSettings);
 
       console.log("✅ Password reset email sent successfully");
       setResetSuccess(true);
       setError("✅ Password reset link has been sent to your email!");
-      
+
       setTimeout(() => {
         setShowForgotPassword(false);
         setResetEmail("");
         setResetSuccess(false);
         setError("");
       }, 5000);
-      
-    } catch (err) {
-      const firebaseError = err as FirebaseError;
-      console.error("❌ Forgot password error:", firebaseError);
-      
-      if (firebaseError?.code === "auth/user-not-found") {
+
+    } catch (err: any) {
+      console.error("❌ Forgot password error:", err);
+
+      if (err.code === "auth/user-not-found") {
         setError("No account found with this email.");
-      } else if (firebaseError?.code === "auth/invalid-email") {
+      } else if (err.code === "auth/invalid-email") {
         setError("Invalid email address.");
-      } else if (firebaseError?.code === "auth/too-many-requests") {
+      } else if (err.code === "auth/too-many-requests") {
         setError("Too many attempts. Please try again later.");
       } else {
-        setError(firebaseError?.message || "Failed to send reset email. Please try again.");
+        setError(err.message || "Failed to send reset email. Please try again.");
       }
     } finally {
       setResetLoading(false);
@@ -581,7 +628,6 @@ const Login: React.FC = () => {
   };
 
   const handleGoogleLogin = async () => {
-    // IDAGDAG: Check kung na-accept na ang terms and conditions
     if (!termsAccepted) {
       setError("Please accept the Terms and Conditions to continue.");
       return;
@@ -593,45 +639,40 @@ const Login: React.FC = () => {
 
     try {
       const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({
-        prompt: 'select_account'
-      });
-      
+      provider.setCustomParameters({ prompt: 'select_account' });
+
       console.log("🌐 Initiating Google sign-in...");
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
       console.log("✅ Google sign-in successful, user ID:", user.uid);
-      
+
       const userDoc = await getDoc(doc(db, "users", user.uid));
-      
+
       if (userDoc.exists()) {
         const userData = userDoc.data() as UserRole;
         console.log("👤 Existing user data:", userData);
-        
+
         if (userData.twoFactorEnabled) {
           console.log("🔐 2FA required for Google user, generating OTP...");
           const otp = generateOTP();
           const expiresAt = Date.now() + 10 * 60 * 1000;
-          
+
           const userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || userData.email;
           console.log("✉️ Sending OTP to:", userData.email);
-          
-          // ✅ FIXED: Changed 'otp' to 'code' to match API
+
           const emailResponse = await fetch('/api/send-email-otp', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               email: userData.email,
-              code: otp, // ✅ CHANGED: 'otp' → 'code'
+              code: otp,
               name: userName
             }),
           });
 
           const emailData = await debugAPIResponse(emailResponse);
           console.log("📩 Email API response:", emailData);
-          
+
           if (!emailResponse.ok) {
             throw new Error(emailData.error || "Failed to send verification code. Please try again.");
           }
@@ -648,14 +689,14 @@ const Login: React.FC = () => {
 
           console.log("🚪 Signing out for OTP verification...");
           await auth.signOut();
-        
+
           // Store Google user data for OTP verification
           setGoogleUserData({
             uid: user.uid,
             email: userData.email,
             role: userData.role
           });
-        
+
           setOtpRequired(true);
           setError("✅ A verification code has been sent to your email.");
         } else {
@@ -671,23 +712,22 @@ const Login: React.FC = () => {
           email: user.email || '',
           twoFactorEnabled: false
         };
-      
+
         await setDoc(doc(db, "users", user.uid), newUserData);
         console.log("✅ User document created, navigating to user dashboard");
         navigateBasedOnRole('user');
       }
-    } catch (err) {
-      const firebaseError = err as FirebaseError;
-      console.error("❌ Google login error:", firebaseError);
-    
-      if (firebaseError?.code === "auth/popup-closed-by-user") {
+    } catch (err: any) {
+      console.error("❌ Google login error:", err);
+
+      if (err.code === "auth/popup-closed-by-user") {
         setError("Sign-in cancelled. Please try again.");
-      } else if (firebaseError?.code === "auth/popup-blocked") {
+      } else if (err.code === "auth/popup-blocked") {
         setError("Pop-up was blocked. Please allow pop-ups for this site.");
       } else {
-        setError(firebaseError?.message || "Failed to sign in with Google. Please try again.");
+        setError(err.message || "Failed to sign in with Google. Please try again.");
       }
-    
+
       try {
         await auth.signOut();
       } catch (signOutError) {
@@ -698,12 +738,10 @@ const Login: React.FC = () => {
     }
   };
 
-  // IDAGDAG: Function para i-open ang terms modal
   const handleShowTermsModal = () => {
     setShowTermsModal(true);
   };
 
-  // IDAGDAG: Function para i-close ang terms modal
   const handleCloseTermsModal = () => {
     setShowTermsModal(false);
   };
@@ -716,14 +754,14 @@ const Login: React.FC = () => {
       <GlobalStyle />
       <LoginContainer>
         <LeftPanel>
-          <PetBackground 
-            src="https://images.unsplash.com/photo-1509205477838-a534e43a849f?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NHx8ZG9nJTIwYW5kJTIwY2F0JTIwYmFja2dyb3VuZHxlbnwwfHwwfHx8MA%3D%3D" 
+          <PetBackground
+            src="https://images.unsplash.com/photo-1509205477838-a534e43a849f?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NHx8ZG9nJTIwYW5kJTIwY2F0JTIwYmFja2dyb3VuZHxlbnwwfHwwfHx8MA%3D%3D"
             alt="Dog and cat together"
           />
           <PanelOverlay />
-          
+
           <CenteredLogoSection>
-            <LogoImage 
+            <LogoImage
               src="/RL.jpg"
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
@@ -741,19 +779,21 @@ const Login: React.FC = () => {
           <FormContainer>
             <FormHeader>
               <FormTitle>
-                {showForgotPassword ? "Reset Password" : !otpRequired ? "Welcome" : "Email Verification"}
+                {showForgotPassword ? "Reset Password" : !otpRequired && !totpRequired ? "Welcome" : "Verification"}
               </FormTitle>
               <FormSubtitle>
-                {showForgotPassword 
+                {showForgotPassword
                   ? "Enter your email to receive a password reset link"
-                  : !otpRequired 
+                  : !otpRequired && !totpRequired
                     ? "Sign in to your account"
-                    : "Enter the code sent to your email"
+                    : totpRequired
+                      ? "Enter your authenticator app code"
+                      : "Enter the code sent to your email"
                 }
               </FormSubtitle>
             </FormHeader>
 
-            {!otpRequired ? (
+            {!otpRequired && !totpRequired ? (
               showForgotPassword ? (
                 <ForgotPasswordForm onSubmit={handleForgotPassword}>
                   <ResetDescription>
@@ -783,15 +823,15 @@ const Login: React.FC = () => {
                   )}
 
                   <ButtonRow>
-                    <CancelButton 
-                      type="button" 
-                      onClick={handleCancelReset} 
+                    <CancelButton
+                      type="button"
+                      onClick={handleCancelReset}
                       disabled={resetLoading}
                     >
                       ⮜ Back to Login
                     </CancelButton>
-                    <VerifyButton 
-                      type="submit" 
+                    <VerifyButton
+                      type="submit"
                       disabled={resetLoading || resetSuccess}
                     >
                       {resetLoading ? "Sending..." : resetSuccess ? "Sent!" : "Send Reset Link"}
@@ -811,7 +851,7 @@ const Login: React.FC = () => {
                       disabled={loading}
                     />
                   </InputGroup>
-                  
+
                   <InputGroup>
                     <InputLabel>Password</InputLabel>
                     <PasswordContainer>
@@ -823,11 +863,11 @@ const Login: React.FC = () => {
                         required
                         disabled={loading}
                       />
-                      <PasswordToggle 
-                        type="button" 
+                      <PasswordToggle
+                        type="button"
                         onClick={togglePasswordVisibility}
                       >
-                        {showPassword ?  "🔓":"🔒"}
+                        {showPassword ? "🔓" : "🔒"}
                       </PasswordToggle>
                     </PasswordContainer>
                   </InputGroup>
@@ -836,7 +876,6 @@ const Login: React.FC = () => {
                     Forgot password?
                   </ForgotPasswordLink>
 
-                  {/* IDAGDAG: Terms and Conditions Checkbox */}
                   <TermsContainer>
                     <TermsCheckbox
                       type="checkbox"
@@ -864,29 +903,75 @@ const Login: React.FC = () => {
                     <DividerLine />
                   </Divider>
 
-                  <GoogleLoginButton 
-                    type="button" 
-                    onClick={handleGoogleLogin} 
+                  <GoogleLoginButton
+                    type="button"
+                    onClick={handleGoogleLogin}
                     disabled={loading || !termsAccepted}
                   >
                     <GoogleIcon>
                       <svg width="18" height="18" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
-                        <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"/>
-                        <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"/>
-                        <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"/>
-                        <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"/>
+                        <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z" />
+                        <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z" />
+                        <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z" />
+                        <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z" />
                       </svg>
                     </GoogleIcon>
                     Continue with Google
                   </GoogleLoginButton>
                 </LoginForm>
               )
+            ) : totpRequired ? (
+              <OTPForm onSubmit={handleTOTPVerification}>
+                <OTPDescription>
+                  <EmailIcon>🔐</EmailIcon>
+                  <OTPText>
+                    Enter the 6-digit code from your <strong>authenticator app</strong>
+                  </OTPText>
+                </OTPDescription>
+
+                <InputGroup>
+                  <OTPInput
+                    type="text"
+                    inputMode="numeric"
+                    value={totpCode}
+                    onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="000000"
+                    maxLength={6}
+                    required
+                    disabled={otpLoading}
+                    autoFocus
+                  />
+                </InputGroup>
+
+                {error && <ErrorMessage>{error}</ErrorMessage>}
+
+                <ButtonRow>
+                  <CancelButton
+                    type="button"
+                    onClick={() => {
+                      setTotpRequired(false);
+                      setTotpCode("");
+                      setMfaResolver(null);
+                      setError("");
+                    }}
+                    disabled={otpLoading}
+                  >
+                    Cancel
+                  </CancelButton>
+                  <VerifyButton
+                    type="submit"
+                    disabled={otpLoading || totpCode.length !== 6}
+                  >
+                    {otpLoading ? "Verifying..." : "Verify Code"}
+                  </VerifyButton>
+                </ButtonRow>
+              </OTPForm>
             ) : (
               <OTPForm onSubmit={isGoogleOTPFlow ? handleGoogleOTPVerification : handleOTPVerification}>
                 <OTPDescription>
                   <EmailIcon>📧</EmailIcon>
                   <OTPText>
-                    We&apos;ve sent a 6-digit verification code to <strong>{isGoogleOTPFlow ? googleUserData.email : email}</strong>
+                    We&apos;ve sent a 6-digit verification code to <strong>{isGoogleOTPFlow ? googleUserData?.email : email}</strong>
                   </OTPText>
                 </OTPDescription>
 
@@ -919,8 +1004,8 @@ const Login: React.FC = () => {
                   <CancelButton type="button" onClick={handleCancelOTP} disabled={otpLoading}>
                     Cancel
                   </CancelButton>
-                  <VerifyButton 
-                    type="submit" 
+                  <VerifyButton
+                    type="submit"
                     disabled={otpLoading || otpCode.length !== 6}
                   >
                     {otpLoading ? "Verifying..." : "Verify"}
@@ -931,7 +1016,7 @@ const Login: React.FC = () => {
               </OTPForm>
             )}
 
-            {!otpRequired && !showForgotPassword && (
+            {!otpRequired && !totpRequired && !showForgotPassword && (
               <ToggleForm>
                 Don&apos;t have an account?{" "}
                 <ToggleLink onClick={handleSignUpRedirect}>
@@ -943,7 +1028,6 @@ const Login: React.FC = () => {
         </RightPanel>
       </LoginContainer>
 
-      {/* IDAGDAG: Terms and Conditions Modal */}
       {showTermsModal && (
         <ModalOverlay onClick={handleCloseTermsModal}>
           <ModalContent onClick={(e) => e.stopPropagation()}>
@@ -955,37 +1039,37 @@ const Login: React.FC = () => {
               <TermsSection>
                 <SectionTitle>1. Acceptance of Terms</SectionTitle>
                 <SectionText>
-                 By accessing and using FurSureCare, you acknowledge that you have read, understood, and agreed to be bound by these Terms and Conditions. These terms govern your use of all services, features, and content provided by FurSureCare. If you do not agree to these terms, you must discontinue using the platform immediately. We reserve the right to update, modify, or revise these terms at any time, and such changes will be effective upon posting on our website or application. It is your responsibility to regularly review these terms to stay informed of any updates.
+                  By accessing and using FurSureCare, you acknowledge that you have read, understood, and agreed to be bound by these Terms and Conditions.
                 </SectionText>
 
                 <SectionTitle>2. Use License</SectionTitle>
                 <SectionText>
-                  Permission is granted to temporarily download or access one copy of FurSureCare materials for personal, non-commercial, and transitory viewing purposes only. This license does not grant ownership and does not allow you to modify, reproduce, distribute, or publicly display any materials for commercial purposes. Any unauthorized use may result in termination of your access and possible legal action. FurSureCare retains full ownership of all intellectual property, including software, content, and visual materials provided on the platform.
+                  Permission is granted to temporarily access FurSureCare for personal, non-commercial use only.
                 </SectionText>
 
                 <SectionTitle>3. User Account</SectionTitle>
                 <SectionText>
-                  When you create an account on FurSureCare, you agree to provide accurate and complete information. You are solely responsible for safeguarding your account credentials and for any activities conducted under your account. If you suspect unauthorized access or a security breach, you must notify us immediately. FurSureCare shall not be held liable for any damages or losses arising from your failure to maintain the confidentiality of your login information. We reserve the right to suspend or terminate your account for any violation of these Terms and Conditions.
+                  You are responsible for maintaining the confidentiality of your account credentials and for all activities under your account.
                 </SectionText>
 
                 <SectionTitle>4. Privacy Policy</SectionTitle>
                 <SectionText>
-                  Your privacy is important to us. All information collected through the FurSureCare platform is handled in accordance with our Privacy Policy. We collect and process personal information such as your name, contact details, and usage data to improve our services and provide a personalized experience. By using FurSureCare, you consent to the collection and processing of your data as described in the Privacy Policy. We implement industry-standard security measures to protect your data, but we cannot guarantee absolute security due to the nature of online transmissions.
+                  Your privacy is important to us. Please refer to our Privacy Policy for information about how we collect and use your data.
                 </SectionText>
 
                 <SectionTitle>5. Service Modifications</SectionTitle>
                 <SectionText>
-                  FurSureCare reserves the right to modify, suspend, or discontinue any part of its services, either temporarily or permanently, with or without notice. This includes changes to features, pricing, content, or availability. We are not liable for any inconvenience, data loss, or damages resulting from such modifications. Continued use of the service after changes are made constitutes your acceptance of the modified terms.
+                  FurSureCare reserves the right to modify or discontinue any part of its services with or without notice.
                 </SectionText>
 
                 <SectionTitle>6. Limitation of Liability</SectionTitle>
                 <SectionText>
-                  FurSureCare shall not be liable for any indirect, incidental, special, consequential or punitive damages.In no event shall FurSureCare or its affiliates be held liable for any indirect, incidental, special, or consequential damages arising from the use or inability to use our services. This includes, but is not limited to, loss of data, profit, or business opportunities. We provide the platform and its contents “as is,” without any warranties, express or implied. Users assume full responsibility for any risks associated with using the platform. Some jurisdictions do not allow limitations on implied warranties, so these limitations may not fully apply to you.
+                  FurSureCare shall not be liable for any indirect, incidental, special, or consequential damages arising from your use of the service.
                 </SectionText>
 
                 <SectionTitle>7. Governing Law</SectionTitle>
                 <SectionText>
-                  These Terms and Conditions shall be governed by and interpreted in accordance with the laws of the Republic of the Philippines. Any disputes arising under or in connection with these terms shall be subject to the exclusive jurisdiction of the appropriate courts in the Philippines. You agree to comply with all applicable laws and regulations regarding your use of FurSureCare.
+                  These Terms shall be governed by and interpreted in accordance with the laws of the Republic of the Philippines.
                 </SectionText>
               </TermsSection>
             </ModalBody>
@@ -1003,8 +1087,7 @@ const Login: React.FC = () => {
 
 export default Login;
 
-// IDAGDAG: Bagong Styled Components para sa Terms and Conditions at Modal
-
+// Styled Components
 const TermsContainer = styled.div`
   display: flex;
   align-items: flex-start;
@@ -1146,7 +1229,6 @@ const AcceptButton = styled.button`
   }
 `;
 
-// EXISTING STYLED COMPONENTS (SAME AS BEFORE)
 const LoginForm = styled.form`
   display: flex;
   flex-direction: column;
@@ -1490,7 +1572,6 @@ const ToggleLink = styled.button`
   }
 `;
 
-// OTP Verification Styles
 const OTPDescription = styled.div`
   display: flex;
   align-items: flex-start;
@@ -1593,7 +1674,6 @@ const OTPExpiryNote = styled.p`
   margin: -0.5rem 0 0 0;
 `;
 
-// Forgot Password Styles
 const ResetDescription = styled(OTPDescription)`
   margin-bottom: 1rem;
 `;

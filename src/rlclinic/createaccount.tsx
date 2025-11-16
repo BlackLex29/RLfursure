@@ -585,6 +585,7 @@ export const Createaccount = () => {
   const [phoneError, setPhoneError] = useState<string>("");
   const [rememberMe, setRememberMe] = useState<boolean>(false);
   const [showPasswordRules, setShowPasswordRules] = useState<boolean>(false);
+  const [currentOtpHash, setCurrentOtpHash] = useState<string>("");
   
   // Refs for OTP storage
   const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -647,7 +648,7 @@ export const Createaccount = () => {
   };
 
   // Send Email OTP Function via API Route
-  const sendEmailOTP = async (email: string, name: string): Promise<{ success: boolean }> => {
+  const sendEmailOTP = async (email: string, name: string): Promise<{ success: boolean; otpHash?: string }> => {
     try {
       const response = await fetch('/api/send-email-otp', {
         method: 'POST',
@@ -666,7 +667,10 @@ export const Createaccount = () => {
 
       if (responseData?.success) {
         setInfo(`Verification OTP sent to ${email}. Please check your inbox and spam folder.`);
-        return { success: true };
+        return { 
+          success: true, 
+          otpHash: responseData.otpHash 
+        };
       }
       
       throw new Error(responseData.error || 'Failed to send OTP');
@@ -675,15 +679,17 @@ export const Createaccount = () => {
       throw err instanceof Error ? err : new Error('Failed to send OTP');
     }
   };
+  
 
-  const verifyEmailOTP = async (email: string, otp: string): Promise<{ success: boolean }> => {
+  const verifyEmailOTP = async (email: string, otp: string, otpHash: string): Promise<{ success: boolean }> => {
     try {
       const response = await fetch('/api/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           email: email.toLowerCase(),
-          otp
+          code: otp,
+          otpHash: otpHash
         })
       });
 
@@ -731,58 +737,75 @@ export const Createaccount = () => {
     }
   };
 
-  const completeAccountCreation = useCallback(async (userData: {
-    uid: string;
-    email: string;
-    firstname: string;
-    lastname: string;
-    phone: string;
-  }) => {
-    try {
-      console.log('Creating user document in Firestore...');
-      
-      const userDocData = {
-        firstname: sanitizeInput(userData.firstname),
-        lastname: sanitizeInput(userData.lastname),
-        name: `${sanitizeInput(userData.firstname)} ${sanitizeInput(userData.lastname)}`,
-        email: userData.email.toLowerCase(),
-        phone: userData.phone,
-        role: "user",
-        createdAt: new Date().toISOString(),
-        provider: "email",
-        lastLogin: new Date().toISOString(),
-        emailVerified: true,
-      };
-      
-      await setDoc(doc(db, "users", userData.uid), userDocData);
-      
-      console.log('Account creation completed successfully');
-      
-      setSuccess("✅ Account created successfully! Redirecting to login...");
-      setError("");
-      setInfo("");
-      setOtpSent(false);
-      
-      // Clear form data for security
-      setFormData({
-        firstname: "",
-        lastname: "",
-        email: "",
-        phone: "",
-        password: "",
-        confirmPassword: "",
-      });
-      
-      setTimeout(() => {
-        router.push("/login");
-      }, 2000);
-      
-    } catch (err) {
-      console.error("Error completing account creation:", err);
+const completeAccountCreation = useCallback(async (userData: {
+  uid: string;
+  email: string;
+  firstname: string;
+  lastname: string;
+  phone: string;
+}) => {
+  try {
+    console.log('Creating user document in Firestore...');
+    
+    const userDocData = {
+      firstname: sanitizeInput(userData.firstname),
+      lastname: sanitizeInput(userData.lastname),
+      name: `${sanitizeInput(userData.firstname)} ${sanitizeInput(userData.lastname)}`,
+      email: userData.email.toLowerCase(),
+      phone: userData.phone,
+      role: "user",
+      createdAt: new Date().toISOString(),
+      provider: "email",
+      lastLogin: new Date().toISOString(),
+      emailVerified: true,
+    };
+    
+    console.log('User data to save:', userDocData);
+    
+    // Use batch write for better reliability
+    await setDoc(doc(db, "users", userData.uid), userDocData, { merge: false });
+    
+    console.log('Account creation completed successfully');
+    
+    setSuccess("✅ Account created successfully! Redirecting to login...");
+    setError("");
+    setInfo("");
+    setOtpSent(false);
+    
+    // Clear form data for security
+    setFormData({
+      firstname: "",
+      lastname: "",
+      email: "",
+      phone: "",
+      password: "",
+      confirmPassword: "",
+    });
+    
+    setTimeout(() => {
+      router.push("/login");
+    }, 2000);
+    
+  } catch (err: unknown) {
+    console.error("Error completing account creation:", err);
+    
+    if (err instanceof Error) {
+      // More specific error messages
+      if (err.message.includes('permission-denied')) {
+        setError("Database permission denied. Please check Firestore security rules.");
+      } else if (err.message.includes('not-found')) {
+        setError("Database not found. Please check your Firestore configuration.");
+      } else {
+        setError(`Database error: ${err.message}`);
+      }
+    } else {
       setError("Failed to complete account creation. Please try again.");
     }
-  }, [router]);
-
+    
+    // Don't clear OTP state on failure so user can retry
+    setOtpSent(true);
+  }
+}, [router]);
   // Validation Functions
   const validatePassword = (password: string): boolean => {
     const errors: PasswordErrors = {
@@ -837,14 +860,17 @@ export const Createaccount = () => {
         return;
       }
 
-      await sendEmailOTP(
+      const result = await sendEmailOTP(
         formData.email, 
         `${formData.firstname} ${formData.lastname}`
       );
       
-      setOtpSent(true);
-      setInfo(`📧 Verification OTP sent to ${formData.email}. Please check your inbox and spam folder.`);
-      setResendCooldown(60);
+      if (result.success && result.otpHash) {
+        setCurrentOtpHash(result.otpHash);
+        setOtpSent(true);
+        setInfo(`📧 Verification OTP sent to ${formData.email}. Please check your inbox and spam folder.`);
+        setResendCooldown(60);
+      }
       
     } catch (err: unknown) {
       console.error("Error sending OTP:", err);
@@ -866,13 +892,16 @@ export const Createaccount = () => {
     setInfo("");
     
     try {
-      await sendEmailOTP(
+      const result = await sendEmailOTP(
         formData.email, 
         `${formData.firstname} ${formData.lastname}`
       );
       
-      setInfo("📧 OTP resent successfully! Please check your inbox and spam folder.");
-      setResendCooldown(60);
+      if (result.success && result.otpHash) {
+        setCurrentOtpHash(result.otpHash);
+        setInfo("📧 OTP resent successfully! Please check your inbox and spam folder.");
+        setResendCooldown(60);
+      }
     } catch (err: unknown) {
       console.error("Resend OTP error:", err);
       if (err instanceof Error) {
@@ -885,77 +914,80 @@ export const Createaccount = () => {
     }
   };
 
-  const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
-    e.preventDefault();
-    setError("");
-    setInfo("");
-    setOtpLoading(true);
+const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
+  e.preventDefault();
+  setError("");
+  setInfo("");
+  setOtpLoading(true);
+  
+  try {
+    // Verify OTP using API
+    const verificationResult = await verifyEmailOTP(formData.email, otp, currentOtpHash);
     
-    try {
-      // Verify OTP using API
-      const verificationResult = await verifyEmailOTP(formData.email, otp);
-      
-      if (!verificationResult.success) {
-        setError("Invalid OTP. Please check and try again.");
-        return;
-      }
-      
-      console.log('✅ OTP verified, creating user...');
-      
-      const userCredential = await createUserWithEmailAndPassword(
-        auth, 
-        formData.email.toLowerCase(), 
-        formData.password
-      );
-      
-      const user = userCredential.user;
-      console.log('User created:', user.uid);
-      
-      await updateProfile(user, {
-        displayName: `${sanitizeInput(formData.firstname)} ${sanitizeInput(formData.lastname)}`
-      });
-      
-      await completeAccountCreation({
-        uid: user.uid,
-        email: formData.email.toLowerCase(),
-        firstname: formData.firstname,
-        lastname: formData.lastname,
-        phone: formData.phone
-      });
-      
-    } catch (err: unknown) {
-      console.error("OTP verification error:", err);
-      
-      if (isAuthError(err)) {
-        switch (err.code) {
-          case 'auth/email-already-in-use':
-            setError("This email is already registered. Please sign in instead.");
-            break;
-          case 'auth/invalid-email':
-            setError("Invalid email address format.");
-            break;
-          case 'auth/weak-password':
-            setError("Password is too weak. Please choose a stronger password.");
-            break;
-          case 'auth/network-request-failed':
-            setError("Network error. Please check your internet connection.");
-            break;
-          default:
-            setError(err.message || "Failed to create account. Please try again.");
-        }
-      } else if (err instanceof Error) {
-        setError(err.message || "Failed to create account. Please try again.");
-      } else {
-        setError("An unexpected error occurred. Please try again.");
-      }
-    } finally {
-      setOtpLoading(false);
+    if (!verificationResult.success) {
+      setError("Invalid OTP. Please check and try again.");
+      return;
     }
-  };  
-
+    
+    console.log('✅ OTP verified, creating user...');
+    
+    const userCredential = await createUserWithEmailAndPassword(
+      auth, 
+      formData.email.toLowerCase(), 
+      formData.password
+    );
+    
+    const user = userCredential.user;
+    console.log('User created:', user.uid);
+    
+    await updateProfile(user, {
+      displayName: `${sanitizeInput(formData.firstname)} ${sanitizeInput(formData.lastname)}`
+    });
+    
+    // Add a small delay to ensure Firebase Auth is fully initialized
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    await completeAccountCreation({
+      uid: user.uid,
+      email: formData.email.toLowerCase(),
+      firstname: formData.firstname,
+      lastname: formData.lastname,
+      phone: formData.phone
+    });
+    
+  } catch (err: unknown) {
+    console.error("OTP verification error:", err);
+    
+    if (isAuthError(err)) {
+      switch (err.code) {
+        case 'auth/email-already-in-use':
+          setError("This email is already registered. Please sign in instead.");
+          break;
+        case 'auth/invalid-email':
+          setError("Invalid email address format.");
+          break;
+        case 'auth/weak-password':
+          setError("Password is too weak. Please choose a stronger password.");
+          break;
+        case 'auth/network-request-failed':
+          setError("Network error. Please check your internet connection.");
+          break;
+        default:
+          setError(`Authentication error: ${err.message}`);
+      }
+    } else if (err instanceof Error) {
+      setError(err.message || "Failed to create account. Please try again.");
+    } else {
+      setError("An unexpected error occurred. Please try again.");
+    }
+  } finally {
+    setOtpLoading(false);
+  }
+};
   const handleCancelOTP = (): void => {
     setOtpSent(false);
     setOtp("");
+    setCurrentOtpHash("");
     setError("");
     setInfo("");
     cleanup();
@@ -998,20 +1030,24 @@ export const Createaccount = () => {
       const firstname = nameParts[0] || "";
       const lastname = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "";
 
-      await sendEmailOTP(user.email || "", displayName);
+      const otpResult = await sendEmailOTP(user.email || "", displayName);
       
-      // Store Google user data temporarily for OTP verification
-      localStorage.setItem('googleUserData', JSON.stringify({
-        uid: user.uid,
-        email: user.email,
-        firstname,
-        lastname,
-        displayName
-      }));
+      if (otpResult.success && otpResult.otpHash) {
+        // Store Google user data and OTP hash temporarily for OTP verification
+        localStorage.setItem('googleUserData', JSON.stringify({
+          uid: user.uid,
+          email: user.email,
+          firstname,
+          lastname,
+          displayName,
+          otpHash: otpResult.otpHash
+        }));
 
-      setOtpSent(true);
-      setInfo(`📧 Verification OTP sent to ${user.email}. Please check your inbox and spam folder.`);
-      setResendCooldown(60);
+        setCurrentOtpHash(otpResult.otpHash);
+        setOtpSent(true);
+        setInfo(`📧 Verification OTP sent to ${user.email}. Please check your inbox and spam folder.`);
+        setResendCooldown(60);
+      }
       
     } catch (err: unknown) {
       console.error("Google sign up error:", err);
@@ -1059,8 +1095,16 @@ export const Createaccount = () => {
 
       const googleUserData = JSON.parse(googleUserDataStr);
       
+      // Use the stored OTP hash from Google sign-up
+      const otpHashToUse = googleUserData.otpHash || currentOtpHash;
+      
+      if (!otpHashToUse) {
+        setError("OTP verification data missing. Please try again.");
+        return;
+      }
+
       // Verify OTP using API
-      const verificationResult = await verifyEmailOTP(googleUserData.email, otp);
+      const verificationResult = await verifyEmailOTP(googleUserData.email, otp, otpHashToUse);
       
       if (!verificationResult.success) {
         setError("Invalid OTP. Please check and try again.");
