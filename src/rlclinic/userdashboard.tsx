@@ -1,4 +1,4 @@
-'use client'
+'use client';
 
 import type React from "react"
 import { useEffect, useState } from "react"
@@ -125,6 +125,13 @@ interface AppointmentType {
   notes?: string
   veterinarian?: string
   paymentCompleted?: boolean
+  // ADDED: Fields to match appointment data structure
+  userId?: string
+  petId?: string
+  clientEmail?: string
+  price?: number
+  referenceNumber?: string
+  paymentStatus?: string
 }
 
 interface UserProfile {
@@ -333,7 +340,7 @@ const UserDashboard: React.FC = () => {
 
     fetchUserProfile();
 
-    // Fetch pets for the current user
+    // FIXED: Fetch pets for the current user
     const petsQuery = query(collection(db, "pets"), where("ownerId", "==", userId))
 
     const unsubscribePets = onSnapshot(petsQuery, (snapshot) => {
@@ -350,29 +357,45 @@ const UserDashboard: React.FC = () => {
       setPets(petsData)
     })
 
-    const activeQuery = query(collection(db, "appointments"), where("clientName", "==", userEmail))
+    // FIXED: Query appointments by userId instead of clientName
+    const activeQuery = query(
+      collection(db, "appointments"), 
+      where("userId", "==", userId), // Use userId instead of clientName
+      where("status", "in", ["Confirmed", "Pending Payment", "Pending Confirmation", "Scheduled"])
+    )
 
     const activeUnsub = onSnapshot(activeQuery, (snapshot) => {
       const data: AppointmentType[] = []
       snapshot.forEach((doc) => {
-        const appointmentData = { id: doc.id, ...(doc.data() as Omit<AppointmentType, "id">) }
+        const appointmentData = { 
+          id: doc.id, 
+          ...(doc.data() as Omit<AppointmentType, "id">) 
+        }
+        // Only include active appointments
         if (!["Completed", "Not Attend", "Cancelled"].includes(appointmentData.status || "")) {
           data.push(appointmentData)
         }
       })
       data.sort((a, b) => a.date.localeCompare(b.date))
       setAppointments(data)
+      console.log("📅 Active appointments loaded:", data.length, data)
     })
 
-    const completedQuery = query(collection(db, "appointments"), where("clientName", "==", userEmail))
+    // FIXED: Completed appointments query
+    const completedQuery = query(
+      collection(db, "appointments"), 
+      where("userId", "==", userId), // Use userId instead of clientName
+      where("status", "in", ["Completed", "Not Attend", "Cancelled"])
+    )
 
     const completedUnsub = onSnapshot(completedQuery, (snapshot) => {
       const data: AppointmentType[] = []
       snapshot.forEach((doc) => {
-        const appointmentData = { id: doc.id, ...(doc.data() as Omit<AppointmentType, "id">) }
-        if (["Completed", "Not Attend", "Cancelled"].includes(appointmentData.status || "")) {
-          data.push(appointmentData)
+        const appointmentData = { 
+          id: doc.id, 
+          ...(doc.data() as Omit<AppointmentType, "id">) 
         }
+        data.push(appointmentData)
       })
       data.sort((a, b) => {
         const dateA = a.completedAt || a.date
@@ -380,6 +403,7 @@ const UserDashboard: React.FC = () => {
         return new Date(dateB).getTime() - new Date(dateA).getTime()
       })
       setCompletedAppointments(data)
+      console.log("✅ Completed appointments loaded:", data.length)
     })
 
     return () => {
@@ -388,6 +412,14 @@ const UserDashboard: React.FC = () => {
       completedUnsub()
     }
   }, [userEmail, userId])
+
+  // Debug effect to see appointments data
+  useEffect(() => {
+    console.log("🐕 Pets data:", pets)
+    console.log("📅 Active appointments:", appointments)
+    console.log("✅ Completed appointments:", completedAppointments)
+    console.log("👤 Current user:", { userId, userEmail })
+  }, [pets, appointments, completedAppointments, userId, userEmail])
 
   // Fetch refund requests
   useEffect(() => {
@@ -942,12 +974,18 @@ const UserDashboard: React.FC = () => {
                               <AppointmentValue>{appt.timeSlot}</AppointmentValue>
                             </AppointmentInfo>
                             <AppointmentInfo>
-                              <AppointmentLabel>Payment:</AppointmentLabel>
-                              <AppointmentValue>{appt.paymentMethod || "Not specified"}</AppointmentValue>
+                              <AppointmentLabel>Status:</AppointmentLabel>
+                              <AppointmentValue>{appt.status || "Scheduled"}</AppointmentValue>
                             </AppointmentInfo>
+                            {appt.paymentMethod && (
+                              <AppointmentInfo>
+                                <AppointmentLabel>Payment:</AppointmentLabel>
+                                <AppointmentValue>{appt.paymentMethod}</AppointmentValue>
+                              </AppointmentInfo>
+                            )}
                           </AppointmentLeftSide>
-                          <StatusBadge status={appt.status || "Pending Payment"}>
-                            {appt.status || "Pending Payment"}
+                          <StatusBadge status={appt.status || "Scheduled"}>
+                            {appt.status || "Scheduled"}
                           </StatusBadge>
                         </AppointmentHeader>
 
@@ -1145,7 +1183,7 @@ const UserDashboard: React.FC = () => {
                           {formatDate(appt.date)} • {appt.timeSlot}
                         </ActivityDate>
                       </ActivityContent>
-                      <ActivityStatus status={appt.status || "Pending Payment"}>{appt.status || "Pending Payment"}</ActivityStatus>
+                      <ActivityStatus status={appt.status || "Scheduled"}>{appt.status || "Scheduled"}</ActivityStatus>
                     </ActivityItem>
                   ))}
                 </ActivityList>
@@ -1797,7 +1835,7 @@ const UserDashboard: React.FC = () => {
                       <InfoItem>
                         <InfoLabel>Processed At:</InfoLabel>
                         <InfoValue>{formatDate(selectedRefund.processedAt)}</InfoValue>
-                      </InfoItem>
+                    </InfoItem>
                     )}
                     {selectedRefund.refundAmount && (
                       <InfoItem>

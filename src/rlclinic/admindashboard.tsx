@@ -198,8 +198,6 @@ interface UserType {
   phoneNumber?: string;
 }
 
-
-
 // OTP Verification Interface
 interface OTPVerification {
   email: string;
@@ -1081,7 +1079,8 @@ const handleEnable2FA = async () => {
       alert("Logout failed: " + (error as Error).message);
     }
   };
-// Replace your fetchAppointments function with this:
+
+  // FIXED: Enhanced fetchAppointments function
 const fetchAppointments = useCallback(() => {
   const appointmentsRef = collection(db, "appointments");
   
@@ -1113,23 +1112,47 @@ const fetchAppointments = useCallback(() => {
       });
     });
     
-    // Sort appointments
+    // Sort appointments by date
     const sortedData = data.sort((a, b) => a.date.localeCompare(b.date));
     setAppointments(sortedData);
     
-    // Filter today's appointments
-    const today = new Date().toISOString().split("T")[0];
-    const todayAppts = sortedData.filter((appt) => appt.date === today);
+    // FIXED: Better today's date filtering
+    const today = new Date();
+    const todayString = today.toISOString().split("T")[0];
+    
+    const todayAppts = sortedData.filter((appt) => {
+      // Handle different date formats
+      if (!appt.date) return false;
+      
+      // If date is in YYYY-MM-DD format
+      if (appt.date.includes('-')) {
+        return appt.date === todayString;
+      }
+      
+      // If date is in a different format, try to parse it
+      try {
+        const appointmentDate = new Date(appt.date);
+        const appointmentDateString = appointmentDate.toISOString().split("T")[0];
+        return appointmentDateString === todayString;
+      } catch (error) {
+        console.error("Error parsing appointment date:", appt.date, error);
+        return false;
+      }
+    });
+    
     setTodaysAppointments(todayAppts);
     
-    console.log("📅 Today's date:", today);
-    console.log("📊 Today's appointments:", todayAppts);
+    console.log("📅 Today's date:", todayString);
+    console.log("📊 All appointments:", sortedData.length);
+    console.log("📊 Today's appointments:", todayAppts.length);
+    console.log("📊 Today's appointment details:", todayAppts);
   }, (error) => {
     console.error("Error fetching appointments:", error);
   });
   
   return unsubscribe;
 }, []);
+
   const fetchUnavailableSlots = async () => {
     try {
       const snapshot = await getDocs(collection(db, "unavailableSlots"));
@@ -2838,139 +2861,183 @@ useEffect(() => {
                   </ControlsContainer>
                 </SectionHeader>
               
-                <SectionSubtitle>Confirmed Appointments</SectionSubtitle>
-                {filteredAppointments.filter(appt => appt.status === "Pending").length === 0 ? (
+                {/* Show ALL appointments first for debugging */}
+                <SectionSubtitle>All Appointments ({filteredAppointments.length})</SectionSubtitle>
+                
+                {filteredAppointments.length === 0 ? (
                   <NoAppointments>
-                    No confirmed appointments found.
+                    No appointments found.
                   </NoAppointments>
                 ) : (
-                  <AppointmentsGrid>
-                    {filteredAppointments
-                      .filter(appt => appt.status === "Pending")
-                      .map((appointment, index) => {
-                        const borderColor = statusColor(appointment.status);
+                  <>
+                    {/* Show Confirmed Appointments */}
+                    <SectionSubtitle style={{ marginTop: '2rem' }}>
+                      Confirmed Appointments ({filteredAppointments.filter(appt => appt.status === "Confirmed").length})
+                    </SectionSubtitle>
                     
-                        return (
-                          <AppointmentCard
-                            key={appointment.id}
-                            $delay={index * 0.1}
-                            $borderLeftColor={borderColor}
-                          >
-                            <AppointmentHeader>
-                              <AppointmentTime>{appointment.timeSlot}</AppointmentTime>
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                                <StatusBadge $status={appointment.status} style={{ backgroundColor: borderColor }}>
-                                  {appointment.status}
-                                </StatusBadge>
-                                {appointment.referenceNumber && (
-                                  <ReferenceBadge>
-                                    Ref: {appointment.referenceNumber}
-                                  </ReferenceBadge>
-                                )}
-                              </div>
-                            </AppointmentHeader>
-                            <AppointmentDetails>
-                              <DetailRow>
-                                <DetailLabel>Client:</DetailLabel>
-                                <DetailValue>{appointment.clientName}</DetailValue>
-                              </DetailRow>
-                              <DetailRow>
-                                <DetailLabel>Pet:</DetailLabel>
-                                <DetailValue>{appointment.petName || "-"}</DetailValue>
-                              </DetailRow>
-                              <DetailRow>
-                                <DetailLabel>Type:</DetailLabel>
-                                <DetailValue>{appointment.petType || "-"}</DetailValue>
-                              </DetailRow>
-                              <DetailRow>
-                                <DetailLabel>Breed:</DetailLabel>
-                                <DetailValue>
-                                  {appointment.petBreed || "Not specified"}
-                                </DetailValue>
-                              </DetailRow>
-                              <DetailRow>
-                                <DetailLabel>Date:</DetailLabel>
-                                <DetailValue>{appointment.date}</DetailValue>
-                              </DetailRow>
-                              <DetailRow>
-                                <DetailLabel>Service:</DetailLabel>
-                                <DetailValue>{appointment.serviceType || "Check Up"}</DetailValue>
-                              </DetailRow>
-                            </AppointmentDetails>
-                            <AppointmentActions>
-                              <ActionButton
-                                $variant="primary"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openAppointmentDetails(appointment);
-                                }}
+                    {filteredAppointments.filter(appt => appt.status === "Confirmed").length === 0 ? (
+                      <NoAppointments>
+                        No confirmed appointments found.
+                      </NoAppointments>
+                    ) : (
+                      <AppointmentsGrid>
+                        {filteredAppointments
+                          .filter(appt => appt.status === "Confirmed")
+                          .map((appointment, index) => {
+                            const borderColor = statusColor(appointment.status);
+                            return (
+                              <AppointmentCard
+                                key={appointment.id}
+                                $delay={index * 0.1}
+                                $borderLeftColor={borderColor}
                               >
-                                👁 View
-                              </ActionButton>
-                              <ActionButton
-                                $variant="success"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openMedicalRecordsModal(appointment);
-                                }}
+                                <AppointmentHeader>
+                                  <AppointmentDate>{appointment.date}</AppointmentDate>
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                                    <StatusBadge $status={appointment.status} style={{ backgroundColor: borderColor }}>
+                                      {appointment.status}
+                                    </StatusBadge>
+                                    {appointment.referenceNumber && (
+                                      <ReferenceBadge>
+                                        Ref: {appointment.referenceNumber}
+                                      </ReferenceBadge>
+                                    )}
+                                  </div>
+                                </AppointmentHeader>
+                                <AppointmentTime>{appointment.timeSlot}</AppointmentTime>
+                                <AppointmentDetails>
+                                  <DetailRow>
+                                    <DetailLabel>Client:</DetailLabel>
+                                    <DetailValue>{appointment.clientName}</DetailValue>
+                                  </DetailRow>
+                                  <DetailRow>
+                                    <DetailLabel>Pet:</DetailLabel>
+                                    <DetailValue>{appointment.petName || "-"}</DetailValue>
+                                  </DetailRow>
+                                  <DetailRow>
+                                    <DetailLabel>Type:</DetailLabel>
+                                    <DetailValue>{appointment.petType || "-"}</DetailValue>
+                                  </DetailRow>
+                                  <DetailRow>
+                                    <DetailLabel>Breed:</DetailLabel>
+                                    <DetailValue>
+                                      {appointment.petBreed || "Not specified"}
+                                    </DetailValue>
+                                  </DetailRow>
+                                  <DetailRow>
+                                    <DetailLabel>Date:</DetailLabel>
+                                    <DetailValue>{appointment.date}</DetailValue>
+                                  </DetailRow>
+                                  <DetailRow>
+                                    <DetailLabel>Service:</DetailLabel>
+                                    <DetailValue>{appointment.serviceType || "Check Up"}</DetailValue>
+                                  </DetailRow>
+                                </AppointmentDetails>
+                                <AppointmentActions>
+                                  <ActionButton
+                                    $variant="primary"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openAppointmentDetails(appointment);
+                                    }}
+                                  >
+                                    👁 View
+                                  </ActionButton>
+                                  <ActionButton
+                                    $variant="success"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openMedicalRecordsModal(appointment);
+                                    }}
+                                  >
+                                    ✓ Done
+                                  </ActionButton>
+                                  <ActionButton
+                                    $variant="warning"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openStatusModal(appointment.id, appointment.status || "Pending");
+                                    }}
+                                  >
+                                    ✕ Cancel
+                                  </ActionButton>
+                                </AppointmentActions>
+                              </AppointmentCard>
+                            );
+                          })}
+                      </AppointmentsGrid>
+                    )}
+
+                    {/* Show Pending Appointments */}
+                    <SectionSubtitle style={{ marginTop: '2rem' }}>
+                      Pending Appointments ({filteredAppointments.filter(appt => appt.status === "Pending").length})
+                    </SectionSubtitle>
+                    
+                    {filteredAppointments.filter(appt => appt.status === "Pending").length === 0 ? (
+                      <NoAppointments>
+                        No pending appointments found.
+                      </NoAppointments>
+                    ) : (
+                      <AppointmentsGrid>
+                        {filteredAppointments
+                          .filter(appt => appt.status === "Pending")
+                          .map((appointment, index) => {
+                            const borderColor = statusColor(appointment.status);
+                            return (
+                              <AppointmentCard
+                                key={appointment.id}
+                                $delay={index * 0.1}
+                                $borderLeftColor={borderColor}
                               >
-                                ✓ Done
-                              </ActionButton>
-                              <ActionButton
-                                $variant="warning"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openStatusModal(appointment.id, appointment.status || "Pending");
-                                }}
-                              >
-                                ✕ Cancel
-                              </ActionButton>
-                            </AppointmentActions>
-                          </AppointmentCard>
-                        );
-                      })}
-                  </AppointmentsGrid>
-                )}
-              
-                <SectionSubtitle style={{ marginTop: '3rem', color: '#007bff' }}>
-                  Completed Appointments ({filteredAppointments.filter(appt => appt.status === "Done").length})
-                </SectionSubtitle>
-                {filteredAppointments.filter(appt => appt.status === "Done").length === 0 ? (
-                  <NoAppointments>
-                    No completed appointments found.
-                  </NoAppointments>
-                ) : (
-                  <AppointmentsGrid>
-                    {filteredAppointments
-                      .filter(appt => appt.status === "Done")
-                      .map((appointment, index) => {
-                        const borderColor = statusColor(appointment.status);
-                        return (
-                          <AppointmentCard key={appointment.id} $delay={index * 0.1} $borderLeftColor={borderColor}>
-                            <AppointmentHeader>
-                              <AppointmentDate>{appointment.date}</AppointmentDate>
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                                <StatusBadge $status={appointment.status} style={{ backgroundColor: borderColor }}>
-                                  {appointment.status} ✅
-                                </StatusBadge>
-                                {appointment.referenceNumber && (
-                                  <ReferenceBadge>
-                                    Ref: {appointment.referenceNumber}
-                                  </ReferenceBadge>
-                                )}
-                              </div>
-                            </AppointmentHeader>
-                            <AppointmentTime>{appointment.timeSlot}</AppointmentTime>
-                            <AppointmentDetails>
-                              <DetailRow>
-                                <DetailLabel>Client:</DetailLabel>
-                                <DetailValue>{appointment.clientName}</DetailValue>
-                              </DetailRow>
-                            </AppointmentDetails>
-                          </AppointmentCard>
-                        );
-                      })}
-                  </AppointmentsGrid>
+                                {/* Same card structure as above */}
+                                <AppointmentHeader>
+                                  <AppointmentDate>{appointment.date}</AppointmentDate>
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                                    <StatusBadge $status={appointment.status} style={{ backgroundColor: borderColor }}>
+                                      {appointment.status}
+                                    </StatusBadge>
+                                  </div>
+                                </AppointmentHeader>
+                                <AppointmentDetails>
+                                  <DetailRow>
+                                    <DetailLabel>Client:</DetailLabel>
+                                    <DetailValue>{appointment.clientName}</DetailValue>
+                                  </DetailRow>
+                                  <DetailRow>
+                                    <DetailLabel>Pet:</DetailLabel>
+                                    <DetailValue>{appointment.petName || "-"}</DetailValue>
+                                  </DetailRow>
+                                  <DetailRow>
+                                    <DetailLabel>Date:</DetailLabel>
+                                    <DetailValue>{appointment.date}</DetailValue>
+                                  </DetailRow>
+                                </AppointmentDetails>
+                                <AppointmentActions>
+                                  <ActionButton
+                                    $variant="primary"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openAppointmentDetails(appointment);
+                                    }}
+                                  >
+                                    👁 View
+                                  </ActionButton>
+                                  <ActionButton
+                                    $variant="success"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openStatusModal(appointment.id, appointment.status || "Pending");
+                                    }}
+                                  >
+                                    ✓ Confirm
+                                  </ActionButton>
+                                </AppointmentActions>
+                              </AppointmentCard>
+                            );
+                          })}
+                      </AppointmentsGrid>
+                    )}
+                  </>
                 )}
               </AppointmentsSection>
             )}
@@ -4229,6 +4296,11 @@ const SummaryNumber = styled.div`
   margin-bottom: 0.5rem;
 `;
 
+const SummaryLabel = styled.div`
+  font-size: 0.875rem;
+  color: #7f8c8d;
+`;
+
 const UsersTable = styled.div`
   margin-top: 1rem;
 `;
@@ -4271,6 +4343,14 @@ const TwoFABadge = styled.span<{ $enabled: boolean }>`
   font-weight: 500;
   background: ${props => props.$enabled ? "#e8f5e8" : "#ffebee"};
   color: ${props => props.$enabled ? "#2e7d32" : "#c62828"};
+`;
+
+const StatusBadge = styled.span<{ $status?: string }>`
+  padding: 0.25rem 0.75rem;
+  border-radius: 15px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: white;
 `;
 
 const UserActions = styled.div`
@@ -4855,13 +4935,7 @@ const SummaryGrid = styled.div`
 const SummaryItem = styled.div`
   text-align: center;
 `;
-
-const SummaryLabel = styled.div`
-  font-size: 0.875rem;
-  color: #7f8c8d;
-  margin-bottom: 0.5rem;
-`;
-
+ 
 const SummaryValue = styled.div<{ $positive?: boolean }>`
   font-size: 1.25rem;
   font-weight: 600;
@@ -5024,14 +5098,6 @@ const AppointmentTime = styled.span`
   color: #7f8c8d;
   margin-bottom: 1rem;
   display: block;
-`;
-
-const StatusBadge = styled.span<{ $status?: string }>`
-  padding: 0.25rem 0.75rem;
-  border-radius: 15px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: white;
 `;
 
 const AppointmentDetails = styled.div`

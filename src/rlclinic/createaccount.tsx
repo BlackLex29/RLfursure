@@ -335,12 +335,14 @@ const RuleItem = styled.p<{ valid: string }>`
 // Checkbox Styles
 const CheckboxContainer = styled.div`
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  gap: 0.75rem;
   margin: 10px 0;
 `;
 
 const Checkbox = styled.input`
-  margin-right: 8px;
+  margin-top: 0.25rem;
+  transform: scale(1.1);
   cursor: pointer;
 `;
 
@@ -348,6 +350,21 @@ const CheckboxLabel = styled.label`
   color: #4A5568;
   font-size: 14px;
   cursor: pointer;
+  line-height: 1.4;
+`;
+
+const TermsLink = styled.button`
+  background: none;
+  border: none;
+  color: #4ecdc4;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  
+  &:hover {
+    color: #3db8af;
+  }
 `;
 
 // Message Styles
@@ -566,6 +583,115 @@ const LoginLink = styled.span`
   }
 `;
 
+// Modal Styles for Terms and Conditions
+const ModalOverlay = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+`;
+
+const ModalContent = styled.div`
+  background: white;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 600px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+`;
+
+const ModalHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid #e1e5e9;
+`;
+
+const ModalTitle = styled.h2`
+  margin: 0;
+  color: #1a1a1a;
+  font-size: 1.5rem;
+  font-weight: 700;
+`;
+
+const CloseButton = styled.button`
+  background: none;
+  border: none;
+  font-size: 2rem;
+  cursor: pointer;
+  color: #666;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  &:hover {
+    color: #333;
+  }
+`;
+
+const ModalBody = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: 2rem;
+`;
+
+const ModalFooter = styled.div`
+  padding: 1.5rem 2rem;
+  border-top: 1px solid #e1e5e9;
+  display: flex;
+  justify-content: flex-end;
+`;
+
+const TermsSection = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+`;
+
+const SectionTitle = styled.h3`
+  margin: 0 0 0.5rem 0;
+  color: #1a1a1a;
+  font-size: 1.1rem;
+  font-weight: 600;
+`;
+
+const SectionText = styled.p`
+  margin: 0;
+  color: #333;
+  line-height: 1.6;
+  font-size: 0.95rem;
+`;
+
+const AcceptButton = styled.button`
+  padding: 0.875rem 2rem;
+  background: linear-gradient(135deg, #4ecdc4 0%, #44a08d 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
+  }
+`;
+
 // Main Component
 export const Createaccount = () => {
   const router = useRouter();
@@ -586,6 +712,8 @@ export const Createaccount = () => {
   const [rememberMe, setRememberMe] = useState<boolean>(false);
   const [showPasswordRules, setShowPasswordRules] = useState<boolean>(false);
   const [currentOtpHash, setCurrentOtpHash] = useState<string>("");
+  const [termsAccepted, setTermsAccepted] = useState<boolean>(false);
+  const [showTermsModal, setShowTermsModal] = useState<boolean>(false);
   
   // Refs for OTP storage
   const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -995,6 +1123,11 @@ const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
 
   // Google Sign Up with OTP Handler
   const handleGoogleSignUp = async (): Promise<void> => {
+    if (!termsAccepted) {
+      setError("Please accept the Terms and Conditions to continue.");
+      return;
+    }
+
     setError("");
     setSuccess("");
     setInfo("");
@@ -1222,6 +1355,20 @@ const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
     setShowConfirmPassword(!showConfirmPassword);
   };
 
+  // Terms and Conditions Modal Functions
+  const handleShowTermsModal = (): void => {
+    setShowTermsModal(true);
+  };
+
+  const handleCloseTermsModal = (): void => {
+    setShowTermsModal(false);
+  };
+
+  const handleAcceptTerms = (): void => {
+    setTermsAccepted(true);
+    setShowTermsModal(false);
+  };
+
   // Form Submit Handler
   const handleFormSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
@@ -1272,6 +1419,11 @@ const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
     
     if (formData.firstname.length < 2 || formData.lastname.length < 2) {
       setError("First name and last name must be at least 2 characters long");
+      return;
+    }
+    
+    if (!termsAccepted) {
+      setError("Please accept the Terms and Conditions to continue.");
       return;
     }
     
@@ -1488,8 +1640,23 @@ const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
                     Remember me on this device
                   </CheckboxLabel>
                 </CheckboxContainer>
+
+                <CheckboxContainer>
+                  <Checkbox
+                    id="terms"
+                    type="checkbox"
+                    checked={termsAccepted}
+                    onChange={(e) => setTermsAccepted(e.target.checked)}
+                  />
+                  <CheckboxLabel htmlFor="terms">
+                    I have read and agree to the{" "}
+                    <TermsLink onClick={handleShowTermsModal}>
+                      Terms and Conditions
+                    </TermsLink>
+                  </CheckboxLabel>
+                </CheckboxContainer>
                 
-                <Button type="submit" disabled={loading}>
+                <Button type="submit" disabled={loading || !termsAccepted}>
                   {loading ? "Sending OTP..." : "Create Account"}
                 </Button>
               </Form>
@@ -1561,7 +1728,7 @@ const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
                 <GoogleButton 
                   type="button" 
                   onClick={handleGoogleSignUp}
-                  disabled={loading}
+                  disabled={loading || !termsAccepted}
                 >
                   <GoogleIcon>
                     <svg width="18" height="18" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
@@ -1585,6 +1752,61 @@ const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
           </FormContainer>
         </RightPanel>
       </Container>
+
+      {/* Terms and Conditions Modal */}
+      {showTermsModal && (
+        <ModalOverlay onClick={handleCloseTermsModal}>
+          <ModalContent onClick={(e) => e.stopPropagation()}>
+            <ModalHeader>
+              <ModalTitle>Terms and Conditions</ModalTitle>
+              <CloseButton onClick={handleCloseTermsModal}>×</CloseButton>
+            </ModalHeader>
+            <ModalBody>
+              <TermsSection>
+                <SectionTitle>1. Acceptance of Terms</SectionTitle>
+                <SectionText>
+                  By accessing and using FurSureCare, you acknowledge that you have read, understood, and agreed to be bound by these Terms and Conditions.
+                </SectionText>
+
+                <SectionTitle>2. Use License</SectionTitle>
+                <SectionText>
+                  Permission is granted to temporarily access FurSureCare for personal, non-commercial use only.
+                </SectionText>
+
+                <SectionTitle>3. User Account</SectionTitle>
+                <SectionText>
+                  You are responsible for maintaining the confidentiality of your account credentials and for all activities under your account.
+                </SectionText>
+
+                <SectionTitle>4. Privacy Policy</SectionTitle>
+                <SectionText>
+                  Your privacy is important to us. Please refer to our Privacy Policy for information about how we collect and use your data.
+                </SectionText>
+
+                <SectionTitle>5. Service Modifications</SectionTitle>
+                <SectionText>
+                  FurSureCare reserves the right to modify or discontinue any part of its services with or without notice.
+                </SectionText>
+
+                <SectionTitle>6. Limitation of Liability</SectionTitle>
+                <SectionText>
+                  FurSureCare shall not be liable for any indirect, incidental, special, or consequential damages arising from your use of the service.
+                </SectionText>
+
+                <SectionTitle>7. Governing Law</SectionTitle>
+                <SectionText>
+                  These Terms shall be governed by and interpreted in accordance with the laws of the Republic of the Philippines.
+                </SectionText>
+              </TermsSection>
+            </ModalBody>
+            <ModalFooter>
+              <AcceptButton onClick={handleAcceptTerms}>
+                I Accept Terms and Conditions
+              </AcceptButton>
+            </ModalFooter>
+          </ModalContent>
+        </ModalOverlay>
+      )}
     </>
   );
 };

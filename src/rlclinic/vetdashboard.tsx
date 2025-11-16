@@ -69,6 +69,10 @@ interface UnavailableSlot {
   isAllDay: boolean;
   startTime?: string;
   endTime?: string;
+  reason?: string;
+  leaveDays?: number;
+  endDate?: string;
+  isMultipleDays?: boolean;
 }
 
 interface SidebarProps {
@@ -109,14 +113,17 @@ const VetDashboard: React.FC = () => {
     date: new Date().toISOString().split('T')[0],
     isAllDay: true,
     startTime: "08:00",
-    endTime: "09:00"
+    endTime: "09:00",
+    reason: "",
+    leaveDays: 1,
+    isMultipleDays: false
   });
   const [showAppointmentDetails, setShowAppointmentDetails] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<AppointmentType | null>(null);
   const [showUnavailableDetails, setShowUnavailableDetails] = useState(false);
   const [selectedUnavailable, setSelectedUnavailable] = useState<UnavailableSlot | null>(null);
 
-  // Settings States - UPDATED: Same as Admin
+  // Settings States
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
   const [showOTPSetup, setShowOTPSetup] = useState(false);
   const [verificationCode, setVerificationCode] = useState("");
@@ -129,7 +136,7 @@ const VetDashboard: React.FC = () => {
     "July", "August", "September", "October", "November", "December"
   ];
 
-  // UPDATED: Initialize 2FA state from Firestore - Same as Admin
+  // Initialize 2FA state from Firestore
   useEffect(() => {
     const initialize2FAState = async () => {
       setIsMounted(true);
@@ -137,7 +144,6 @@ const VetDashboard: React.FC = () => {
       const currentUser = auth.currentUser;
       if (currentUser) {
         try {
-          // Check Firestore for actual 2FA setting
           const userDocRef = doc(db, "users", currentUser.uid);
           const userDoc = await getDoc(userDocRef);
           
@@ -148,7 +154,6 @@ const VetDashboard: React.FC = () => {
             setTwoFactorEnabled(is2FAEnabled);
             localStorage.setItem('twoFactorEnabled', is2FAEnabled.toString());
           } else {
-            // Fallback to localStorage if user doc doesn't exist
             const saved2FA = localStorage.getItem('twoFactorEnabled');
             if (saved2FA === 'true') {
               setTwoFactorEnabled(true);
@@ -160,7 +165,6 @@ const VetDashboard: React.FC = () => {
           }
         } catch (error) {
           console.error("Error fetching user data:", error);
-          // Fallback to localStorage
           const saved2FA = localStorage.getItem('twoFactorEnabled');
           if (saved2FA === 'true') {
             setTwoFactorEnabled(true);
@@ -172,7 +176,7 @@ const VetDashboard: React.FC = () => {
     initialize2FAState();
   }, []);
 
-  // UPDATED: Save 2FA state to localStorage whenever it changes
+  // Save 2FA state to localStorage whenever it changes
   useEffect(() => {
     if (isMounted) {
       localStorage.setItem('twoFactorEnabled', twoFactorEnabled.toString());
@@ -232,6 +236,10 @@ const VetDashboard: React.FC = () => {
           isAllDay: docData.isAllDay || true,
           startTime: docData.startTime || "",
           endTime: docData.endTime || "",
+          reason: docData.reason || "",
+          leaveDays: docData.leaveDays || 1,
+          endDate: docData.endDate || "",
+          isMultipleDays: docData.isMultipleDays || false
         });
       });
       setUnavailableSlots(data.sort((a, b) => a.date.localeCompare(b.date)));
@@ -281,6 +289,10 @@ const VetDashboard: React.FC = () => {
           isAllDay: docData.isAllDay || true,
           startTime: docData.startTime || "",
           endTime: docData.endTime || "",
+          reason: docData.reason || "",
+          leaveDays: docData.leaveDays || 1,
+          endDate: docData.endDate || "",
+          isMultipleDays: docData.isMultipleDays || false
         });
       });
       setUnavailableSlots(data.sort((a, b) => a.date.localeCompare(b.date)));
@@ -298,6 +310,11 @@ const VetDashboard: React.FC = () => {
       return;
     }
 
+    if (!newUnavailable.reason.trim()) {
+      alert("Please provide a reason for your unavailability.");
+      return;
+    }
+
     setIsLoading(true);
     try {
       const currentUser = auth.currentUser;
@@ -305,21 +322,59 @@ const VetDashboard: React.FC = () => {
       const userData = userDoc?.exists() ? userDoc.data() : null;
       const vetName = userData?.name || "Veterinarian";
 
-      await addDoc(collection(db, "unavailableSlots"), {
-        date: newUnavailable.date,
-        veterinarian: vetName,
-        isAllDay: newUnavailable.isAllDay,
-        startTime: newUnavailable.isAllDay ? "" : newUnavailable.startTime,
-        endTime: newUnavailable.isAllDay ? "" : newUnavailable.endTime,
-        createdAt: new Date().toISOString(),
-      });
-      alert("Unavailable time marked successfully!");
+      if (newUnavailable.isMultipleDays && newUnavailable.leaveDays > 1) {
+        // Handle multiple days leave
+        const startDate = new Date(newUnavailable.date);
+        const unavailablePromises = [];
+
+        for (let i = 0; i < newUnavailable.leaveDays; i++) {
+          const currentDate = new Date(startDate);
+          currentDate.setDate(startDate.getDate() + i);
+          const dateString = currentDate.toISOString().split('T')[0];
+
+          unavailablePromises.push(
+            addDoc(collection(db, "unavailableSlots"), {
+              date: dateString,
+              veterinarian: vetName,
+              isAllDay: newUnavailable.isAllDay,
+              startTime: newUnavailable.isAllDay ? "" : newUnavailable.startTime,
+              endTime: newUnavailable.isAllDay ? "" : newUnavailable.endTime,
+              reason: newUnavailable.reason,
+              leaveDays: newUnavailable.leaveDays,
+              endDate: new Date(startDate.getTime() + (newUnavailable.leaveDays - 1) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+              isMultipleDays: true,
+              createdAt: new Date().toISOString(),
+            })
+          );
+        }
+
+        await Promise.all(unavailablePromises);
+        alert(`Unavailable time marked successfully for ${newUnavailable.leaveDays} days!`);
+      } else {
+        // Single day leave
+        await addDoc(collection(db, "unavailableSlots"), {
+          date: newUnavailable.date,
+          veterinarian: vetName,
+          isAllDay: newUnavailable.isAllDay,
+          startTime: newUnavailable.isAllDay ? "" : newUnavailable.startTime,
+          endTime: newUnavailable.isAllDay ? "" : newUnavailable.endTime,
+          reason: newUnavailable.reason,
+          leaveDays: 1,
+          isMultipleDays: false,
+          createdAt: new Date().toISOString(),
+        });
+        alert("Unavailable time marked successfully!");
+      }
+
       setShowUnavailableModal(false);
       setNewUnavailable({
         date: new Date().toISOString().split('T')[0],
         isAllDay: true,
         startTime: "08:00",
-        endTime: "09:00"
+        endTime: "09:00",
+        reason: "",
+        leaveDays: 1,
+        isMultipleDays: false
       });
     } catch (error) {
       console.error("Error marking unavailable:", error);
@@ -357,7 +412,7 @@ const VetDashboard: React.FC = () => {
     }
   };
 
-  // UPDATED: OTP 2FA Functions - Same as Admin
+  // OTP 2FA Functions
   const handleSendOTP = async () => {
     if (!otpEmail) {
       alert("Please enter your email address");
@@ -366,7 +421,6 @@ const VetDashboard: React.FC = () => {
 
     setIsSendingOTP(true);
     try {
-      // Simulate OTP sending - replace with your actual OTP service
       await new Promise((resolve) => setTimeout(resolve, 2000));
       
       setOtpSent(true);
@@ -379,7 +433,6 @@ const VetDashboard: React.FC = () => {
     }
   };
 
-  // UPDATED: Properly enable 2FA with Firestore sync - Same as Admin
   const handleVerifyOTP = async () => {
     if (verificationCode.length !== 6) {
       alert("Please enter a valid 6-digit OTP");
@@ -393,16 +446,13 @@ const VetDashboard: React.FC = () => {
         return;
       }
 
-      // Simulate OTP verification
       await new Promise((resolve) => setTimeout(resolve, 1000));
       
-      // Update Firestore user document
       const userDocRef = doc(db, "users", currentUser.uid);
       await updateDoc(userDocRef, {
         twoFactorEnabled: true
       });
       
-      // Update local state
       setTwoFactorEnabled(true);
       localStorage.setItem('twoFactorEnabled', 'true');
       
@@ -416,7 +466,6 @@ const VetDashboard: React.FC = () => {
     }
   };
 
-  // UPDATED: Properly disable 2FA with Firestore sync - Same as Admin
   const handleDisable2FA = async () => {
     if (confirm("Are you sure you want to disable Two-Factor Authentication?")) {
       try {
@@ -426,13 +475,11 @@ const VetDashboard: React.FC = () => {
           return;
         }
 
-        // Update Firestore user document
         const userDocRef = doc(db, "users", currentUser.uid);
         await updateDoc(userDocRef, {
           twoFactorEnabled: false
         });
 
-        // Update local state
         setTwoFactorEnabled(false);
         localStorage.setItem('twoFactorEnabled', 'false');
         
@@ -730,13 +777,7 @@ const VetDashboard: React.FC = () => {
                                 >
                                   👁 View
                                 </ActionButton>
-                                <ActionButton
-                                  $variant="success"
-                                  onClick={() => handleUpdateAppointmentStatus(appointment.id, "Done")}
-                                  disabled={appointment.status === "Done" || appointment.status === "Cancelled"}
-                                >
-                                  ✓ Done
-                                </ActionButton>
+                                {/* REMOVED THE "DONE" BUTTON FROM DASHBOARD VIEW */}
                               </AppointmentActions>
                             </AppointmentCard>
                           );
@@ -845,13 +886,7 @@ const VetDashboard: React.FC = () => {
                               >
                                 👁 View
                               </ActionButton>
-                              <ActionButton
-                                $variant="success"
-                                onClick={() => handleUpdateAppointmentStatus(appt.id, "Done")}
-                                disabled={appt.status === "Done" || appt.status === "Cancelled"}
-                              >
-                                ✓ Done
-                              </ActionButton>
+                              {/* REMOVED THE "DONE" BUTTON FROM TODAY'S APPOINTMENTS VIEW */}
                             </AppointmentActions>
                           </AppointmentCard>
                         );
@@ -934,13 +969,7 @@ const VetDashboard: React.FC = () => {
                               >
                                 👁 View
                               </ActionButton>
-                              <ActionButton
-                                $variant="success"
-                                onClick={() => handleUpdateAppointmentStatus(appointment.id, "Done")}
-                                disabled={appointment.status === "Done" || appointment.status === "Cancelled"}
-                              >
-                                ✓ Done
-                              </ActionButton>
+                              {/* REMOVED THE "DONE" BUTTON FROM ALL APPOINTMENTS VIEW */}
                             </AppointmentActions>
                           </AppointmentCard>
                         );
@@ -1058,6 +1087,10 @@ const VetDashboard: React.FC = () => {
                           <UnavailableTime>
                             {slot.isAllDay ? "All Day" : `${slot.startTime} - ${slot.endTime}`}
                           </UnavailableTime>
+                          <UnavailableReason>{slot.reason || "No reason provided"}</UnavailableReason>
+                          {slot.leaveDays && slot.leaveDays > 1 && (
+                            <UnavailableDuration>{slot.leaveDays} day(s) leave</UnavailableDuration>
+                          )}
                           <UnavailableStatus>Unavailable</UnavailableStatus>
                         </UnavailableInfo>
                         <UnavailableActions>
@@ -1082,7 +1115,7 @@ const VetDashboard: React.FC = () => {
               </AppointmentsSection>
             )}
 
-            {/* SETTINGS VIEW - UPDATED: Same as Admin */}
+            {/* SETTINGS VIEW */}
             {viewMode === "settings" && (
               <>
                 <DashboardHeader style={{ textAlign: "center" }}>
@@ -1211,7 +1244,25 @@ const VetDashboard: React.FC = () => {
                     <FormColumns>
                       <FormColumn>
                         <FormGroup>
-                          <Label>Date *</Label>
+                          <Label>Leave Duration</Label>
+                          <DurationToggle>
+                            <ToggleOption 
+                              $active={!newUnavailable.isMultipleDays} 
+                              onClick={() => setNewUnavailable({...newUnavailable, isMultipleDays: false, leaveDays: 1})}
+                            >
+                              Single Day
+                            </ToggleOption>
+                            <ToggleOption 
+                              $active={newUnavailable.isMultipleDays} 
+                              onClick={() => setNewUnavailable({...newUnavailable, isMultipleDays: true})}
+                            >
+                              Multiple Days
+                            </ToggleOption>
+                          </DurationToggle>
+                        </FormGroup>
+
+                        <FormGroup>
+                          <Label>Start Date *</Label>
                           <Input
                             type="date"
                             value={newUnavailable.date}
@@ -1223,6 +1274,25 @@ const VetDashboard: React.FC = () => {
                             disabled={isLoading}
                           />
                         </FormGroup>
+
+                        {newUnavailable.isMultipleDays && (
+                          <FormGroup>
+                            <Label>Number of Days *</Label>
+                            <Input
+                              type="number"
+                              min="1"
+                              max="30"
+                              value={newUnavailable.leaveDays}
+                              onChange={(e) => setNewUnavailable({
+                                ...newUnavailable,
+                                leaveDays: parseInt(e.target.value) || 1
+                              })}
+                              required
+                              disabled={isLoading}
+                            />
+                            <HelpText>Maximum 30 days</HelpText>
+                          </FormGroup>
+                        )}
 
                         <FormGroup>
                           <Label className="checkbox-label">
@@ -1272,6 +1342,21 @@ const VetDashboard: React.FC = () => {
                             </FormGroup>
                           </>
                         )}
+
+                        <FormGroup>
+                          <Label>Reason for Unavailability *</Label>
+                          <TextArea
+                            value={newUnavailable.reason}
+                            onChange={(e) => setNewUnavailable({
+                              ...newUnavailable,
+                              reason: e.target.value
+                            })}
+                            placeholder="Please specify the reason for your unavailability (e.g., vacation, sick leave, training, etc.)"
+                            required
+                            disabled={isLoading}
+                            rows={4}
+                          />
+                        </FormGroup>
                       </FormColumn>
                     </FormColumns>
 
@@ -1281,7 +1366,7 @@ const VetDashboard: React.FC = () => {
                       </CancelButton>
                       <SubmitButton
                         type="submit"
-                        disabled={isLoading || !newUnavailable.date}
+                        disabled={isLoading || !newUnavailable.date || !newUnavailable.reason.trim()}
                       >
                         {isLoading ? "Marking..." : "Mark Unavailable"}
                       </SubmitButton>
@@ -1377,6 +1462,18 @@ const VetDashboard: React.FC = () => {
                         <DetailLabelLarge>Date:</DetailLabelLarge>
                         <DetailValueLarge>{formatDate(selectedUnavailable.date)}</DetailValueLarge>
                       </DetailItem>
+                      {selectedUnavailable.endDate && (
+                        <DetailItem>
+                          <DetailLabelLarge>End Date:</DetailLabelLarge>
+                          <DetailValueLarge>{formatDate(selectedUnavailable.endDate)}</DetailValueLarge>
+                        </DetailItem>
+                      )}
+                      {selectedUnavailable.leaveDays && selectedUnavailable.leaveDays > 1 && (
+                        <DetailItem>
+                          <DetailLabelLarge>Duration:</DetailLabelLarge>
+                          <DetailValueLarge>{selectedUnavailable.leaveDays} days</DetailValueLarge>
+                        </DetailItem>
+                      )}
                       <DetailItem>
                         <DetailLabelLarge>Veterinarian:</DetailLabelLarge>
                         <DetailValueLarge>{selectedUnavailable.veterinarian}</DetailValueLarge>
@@ -1385,6 +1482,12 @@ const VetDashboard: React.FC = () => {
                         <DetailLabelLarge>Duration:</DetailLabelLarge>
                         <DetailValueLarge>
                           {selectedUnavailable.isAllDay ? "All Day" : `${selectedUnavailable.startTime} - ${selectedUnavailable.endTime}`}
+                        </DetailValueLarge>
+                      </DetailItem>
+                      <DetailItem>
+                        <DetailLabelLarge>Reason:</DetailLabelLarge>
+                        <DetailValueLarge>
+                          {selectedUnavailable.reason || "No reason provided"}
                         </DetailValueLarge>
                       </DetailItem>
                       <DetailItem>
@@ -1403,7 +1506,7 @@ const VetDashboard: React.FC = () => {
   );
 };
 
-// Styled Components - SAME AS BEFORE
+// Styled Components (same as before)
 const PageContainer = styled.div`
   min-height: 100vh;
   background-color: #f8fafc;
@@ -1984,6 +2087,20 @@ const UnavailableTime = styled.p`
   color: #7f8c8d;
 `;
 
+const UnavailableReason = styled.p`
+  margin: 0.25rem 0;
+  font-size: 0.875rem;
+  color: #2c3e50;
+  font-style: italic;
+`;
+
+const UnavailableDuration = styled.p`
+  margin: 0.25rem 0;
+  font-size: 0.75rem;
+  color: #3498db;
+  font-weight: 600;
+`;
+
 const UnavailableStatus = styled.span`
   color: #e74c3c;
   font-weight: 600;
@@ -2340,6 +2457,58 @@ const Input = styled.input`
     background: #f8f9fa;
     cursor: not-allowed;
   }
+`;
+
+const DurationToggle = styled.div`
+  display: flex;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+`;
+
+const ToggleOption = styled.div<{ $active: boolean }>`
+  flex: 1;
+  padding: 0.75rem;
+  text-align: center;
+  cursor: pointer;
+  background: ${props => props.$active ? '#3498db' : 'white'};
+  color: ${props => props.$active ? 'white' : '#2c3e50'};
+  font-weight: ${props => props.$active ? '600' : '400'};
+  transition: all 0.2s;
+
+  &:hover {
+    background: ${props => props.$active ? '#3498db' : '#f8f9fa'};
+  }
+`;
+
+const TextArea = styled.textarea`
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  transition: border-color 0.2s;
+  resize: vertical;
+  min-height: 80px;
+  font-family: inherit;
+
+  &:focus {
+    outline: none;
+    border-color: #3498db;
+  }
+
+  &:disabled {
+    background: #f8f9fa;
+    cursor: not-allowed;
+  }
+`;
+
+const HelpText = styled.span`
+  font-size: 0.75rem;
+  color: #7f8c8d;
+  margin-top: 0.25rem;
+  display: block;
 `;
 
 const ButtonGroup = styled.div`

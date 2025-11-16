@@ -404,6 +404,7 @@ const MedicalRecord: React.FC = () => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false); // ✅ NEW: Prevent double submission
 
   const [formData, setFormData] = useState({
     petName: "",
@@ -657,13 +658,22 @@ const MedicalRecord: React.FC = () => {
     setShowForm(true);
   };
 
-  // ✅ ENHANCED: Handle submit with usermedicalrecord saving
+  // ✅ ENHANCED: Handle submit with usermedicalrecord saving and double-click prevention
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // ✅ PREVENT DOUBLE SUBMISSION
+    if (isSubmitting) {
+      console.log('Submission already in progress...');
+      return;
+    }
+
     if (!currentUser) {
       alert("Please login first!");
       return;
     }
+
+    setIsSubmitting(true); // ✅ Set submitting state to true
 
     const finalStatus = formData.diagnosis && formData.treatment && formData.veterinarian 
       ? "completed" 
@@ -682,7 +692,7 @@ const MedicalRecord: React.FC = () => {
         // Update existing record
         await updateDoc(doc(db, "medicalRecords", editingRecord.id), sanitizedData);
         medicalRecordId = editingRecord.id;
-        setSuccessMessage("Medical record updated successfully!");
+        setSuccessMessage("✅ Medical record updated successfully!");
         
         // ✅ NEW: Save to usermedicalrecord when editing and completing
         if (finalStatus === "completed" && editingRecord.status !== "completed") {
@@ -700,7 +710,7 @@ const MedicalRecord: React.FC = () => {
         medicalRecordId = docRef.id;
         console.log("Medical record created with ID:", docRef.id);
         
-        setSuccessMessage("Medical record created successfully!");
+        setSuccessMessage("✅ Medical record created successfully!");
         
         // ✅ NEW: Save to usermedicalrecord when creating completed record
         if (finalStatus === "completed") {
@@ -728,10 +738,22 @@ const MedicalRecord: React.FC = () => {
 
       resetForm();
       
-      setTimeout(() => setSuccessMessage(null), 3000);
+      // ✅ Auto-hide success message after 3 seconds
+      setTimeout(() => {
+        setSuccessMessage(null);
+      }, 3000);
+
     } catch (error) {
       console.error("Error saving medical record:", error);
-      alert("Failed to save medical record. Please try again.");
+      setErrorMessage("❌ Failed to save medical record. Please try again.");
+      
+      // ✅ Auto-hide error message after 5 seconds
+      setTimeout(() => {
+        setErrorMessage(null);
+      }, 5000);
+    } finally {
+      // ✅ Reset submitting state whether success or error
+      setIsSubmitting(false);
     }
   };
 
@@ -783,6 +805,7 @@ const MedicalRecord: React.FC = () => {
     }
   };
 
+  // ✅ FIXED: Separate functions for reset form and add new record
   const resetForm = () => {
     setFormData({
       petName: "",
@@ -809,6 +832,37 @@ const MedicalRecord: React.FC = () => {
     setIsFromAppointment(false);
     setEditingRecord(null);
     setShowForm(false);
+    setIsSubmitting(false); // ✅ Reset submitting state
+  };
+
+  // ✅ NEW: Function specifically for adding new record
+  const handleAddRecord = () => {
+    setFormData({
+      petName: "",
+      petAge: "",
+      birthDate: "",
+      breed: "",
+      weight: "",
+      gender: "",
+      color: "",
+      allergies: "",
+      existingConditions: "",
+      ownerName: "",
+      ownerEmail: "",
+      petType: "dog",
+      diagnosis: "",
+      treatment: "",
+      date: new Date().toISOString().split('T')[0],
+      notes: "",
+      veterinarian: currentUser?.email?.split('@')[0] || "Dr. Veterinarian", // ✅ Auto-fill veterinarian
+      appointmentId: "",
+      appointmentType: "",
+      status: "pending_completion"
+    });
+    setIsFromAppointment(false);
+    setEditingRecord(null);
+    setShowForm(true); // ✅ IMPORTANT: Set showForm to TRUE
+    window.scrollTo(0, 0);
   };
 
   // FIXED: Enhanced filtering logic
@@ -878,7 +932,8 @@ const MedicalRecord: React.FC = () => {
                 📅 From Appointment ({availableAppointments.length})
               </CreateButton>
             )}
-            <AddButton onClick={resetForm}>
+            {/* ✅ FIXED: Changed from resetForm to handleAddRecord */}
+            <AddButton onClick={handleAddRecord}>
               + Add Record
             </AddButton>
           </ButtonGroup>
@@ -886,7 +941,7 @@ const MedicalRecord: React.FC = () => {
 
         {successMessage && (
           <SuccessMessage>
-            ✓ {successMessage}
+            {successMessage}
             <br />
             <small>List will update automatically...</small>
           </SuccessMessage>
@@ -894,7 +949,7 @@ const MedicalRecord: React.FC = () => {
 
         {errorMessage && (
           <ErrorMessage>
-            ⚠️ {errorMessage}
+            {errorMessage}
             <br />
             <small>Please check your permissions or try refreshing the page.</small>
           </ErrorMessage>
@@ -910,7 +965,11 @@ const MedicalRecord: React.FC = () => {
                     🎯 AUTO-FILLED FROM APPOINTMENT
                   </AutoFillBadge>
                 )}
-                <FormHelpText>All pet information is auto-filled from appointment data</FormHelpText>
+                <FormHelpText>
+                  {isFromAppointment 
+                    ? "All pet information is auto-filled from appointment data" 
+                    : "Fill in all required fields to create a new medical record"}
+                </FormHelpText>
                 <FormStatusInfo />
               </Title>
               
@@ -922,51 +981,191 @@ const MedicalRecord: React.FC = () => {
                     {isFromAppointment && <AutoFillIndicator>✅ Auto-filled</AutoFillIndicator>}
                   </SectionTitle>
                   
-                  <EditableSection>
+                  {isFromAppointment ? (
+                    <EditableSection>
+                      <EditableGrid>
+                        {/* Read-only fields for appointment-based records */}
+                        <ReadOnlyField>
+                          <ReadOnlyLabel>Pet Name</ReadOnlyLabel>
+                          <ReadOnlyValue>{formData.petName || 'Not specified'}</ReadOnlyValue>
+                        </ReadOnlyField>
+                        <ReadOnlyField>
+                          <ReadOnlyLabel>Owner Name</ReadOnlyLabel>
+                          <ReadOnlyValue>{formData.ownerName || 'Not specified'}</ReadOnlyValue>
+                        </ReadOnlyField>
+                        <ReadOnlyField>
+                          <ReadOnlyLabel>Owner Email</ReadOnlyLabel>
+                          <ReadOnlyValue>{formData.ownerEmail || 'Not specified'}</ReadOnlyValue>
+                        </ReadOnlyField>
+                        <ReadOnlyField>
+                          <ReadOnlyLabel>Pet Type</ReadOnlyLabel>
+                          <ReadOnlyValue>
+                            {formData.petType === 'dog' ? '🐶 Dog' : formData.petType === 'cat' ? '🐱 Cat' : formData.petType || 'Not specified'}
+                          </ReadOnlyValue>
+                        </ReadOnlyField>
+                        <ReadOnlyField>
+                          <ReadOnlyLabel>Breed</ReadOnlyLabel>
+                          <ReadOnlyValue>{formData.breed || 'Not specified'}</ReadOnlyValue>
+                        </ReadOnlyField>
+                        <ReadOnlyField>
+                          <ReadOnlyLabel>Age</ReadOnlyLabel>
+                          <ReadOnlyValue>{formData.petAge || 'Not specified'}</ReadOnlyValue>
+                        </ReadOnlyField>
+                        <ReadOnlyField>
+                          <ReadOnlyLabel>Birth Date</ReadOnlyLabel>
+                          <ReadOnlyValue>{formatDateDisplay(formData.birthDate) || 'Not specified'}</ReadOnlyValue>
+                        </ReadOnlyField>
+                        <ReadOnlyField>
+                          <ReadOnlyLabel>Gender</ReadOnlyLabel>
+                          <ReadOnlyValue>{formData.gender || 'Not specified'}</ReadOnlyValue>
+                        </ReadOnlyField>
+                        <ReadOnlyField>
+                          <ReadOnlyLabel>Color</ReadOnlyLabel>
+                          <ReadOnlyValue>{formData.color || 'Not specified'}</ReadOnlyValue>
+                        </ReadOnlyField>
+                        
+                        {/* Editable fields - Admin can modify these */}
+                        <FormGroup>
+                          <Label>Weight <OptionalText>(optional)</OptionalText></Label>
+                          <Input 
+                            type="text" 
+                            name="weight" 
+                            value={formData.weight} 
+                            onChange={handleChange} 
+                            placeholder="e.g., 5 kg, 12 lbs"
+                          />
+                          <FieldHelp>Enter weight with unit (kg/lbs)</FieldHelp>
+                        </FormGroup>
+                        
+                        <FormGroup>
+                          <Label>Allergies <OptionalText>(optional)</OptionalText></Label>
+                          <TextArea 
+                            name="allergies" 
+                            value={formData.allergies} 
+                            onChange={handleChange} 
+                            placeholder="List any known allergies"
+                            rows={2}
+                          />
+                          <FieldHelp>Separate multiple allergies with commas</FieldHelp>
+                        </FormGroup>
+                        
+                        <FormGroup>
+                          <Label>Existing Conditions <OptionalText>(optional)</OptionalText></Label>
+                          <TextArea 
+                            name="existingConditions" 
+                            value={formData.existingConditions} 
+                            onChange={handleChange} 
+                            placeholder="List any pre-existing medical conditions"
+                            rows={2}
+                          />
+                          <FieldHelp>Chronic conditions or previous health issues</FieldHelp>
+                        </FormGroup>
+                      </EditableGrid>
+                    </EditableSection>
+                  ) : (
+                    // ✅ NEW: Editable fields for manual record creation
                     <EditableGrid>
-                      {/* Read-only fields */}
-                      <ReadOnlyField>
-                        <ReadOnlyLabel>Pet Name</ReadOnlyLabel>
-                        <ReadOnlyValue>{formData.petName || 'Not specified'}</ReadOnlyValue>
-                      </ReadOnlyField>
-                      <ReadOnlyField>
-                        <ReadOnlyLabel>Owner Name</ReadOnlyLabel>
-                        <ReadOnlyValue>{formData.ownerName || 'Not specified'}</ReadOnlyValue>
-                      </ReadOnlyField>
-                      <ReadOnlyField>
-                        <ReadOnlyLabel>Owner Email</ReadOnlyLabel>
-                        <ReadOnlyValue>{formData.ownerEmail || 'Not specified'}</ReadOnlyValue>
-                      </ReadOnlyField>
-                      <ReadOnlyField>
-                        <ReadOnlyLabel>Pet Type</ReadOnlyLabel>
-                        <ReadOnlyValue>
-                          {formData.petType === 'dog' ? '🐶 Dog' : formData.petType === 'cat' ? '🐱 Cat' : formData.petType || 'Not specified'}
-                        </ReadOnlyValue>
-                      </ReadOnlyField>
-                      <ReadOnlyField>
-                        <ReadOnlyLabel>Breed</ReadOnlyLabel>
-                        <ReadOnlyValue>{formData.breed || 'Not specified'}</ReadOnlyValue>
-                      </ReadOnlyField>
-                      <ReadOnlyField>
-                        <ReadOnlyLabel>Age</ReadOnlyLabel>
-                        <ReadOnlyValue>{formData.petAge || 'Not specified'}</ReadOnlyValue>
-                      </ReadOnlyField>
-                      <ReadOnlyField>
-                        <ReadOnlyLabel>Birth Date</ReadOnlyLabel>
-                        <ReadOnlyValue>{formatDateDisplay(formData.birthDate) || 'Not specified'}</ReadOnlyValue>
-                      </ReadOnlyField>
-                      <ReadOnlyField>
-                        <ReadOnlyLabel>Gender</ReadOnlyLabel>
-                        <ReadOnlyValue>{formData.gender || 'Not specified'}</ReadOnlyValue>
-                      </ReadOnlyField>
-                      <ReadOnlyField>
-                        <ReadOnlyLabel>Color</ReadOnlyLabel>
-                        <ReadOnlyValue>{formData.color || 'Not specified'}</ReadOnlyValue>
-                      </ReadOnlyField>
-                      
-                      {/* Editable fields - Admin can modify these */}
                       <FormGroup>
-                        <Label>Weight <OptionalText>(optional)</OptionalText></Label>
+                        <Label>Pet Name *</Label>
+                        <Input 
+                          type="text" 
+                          name="petName" 
+                          value={formData.petName} 
+                          onChange={handleChange} 
+                          placeholder="Enter pet name"
+                          required
+                        />
+                      </FormGroup>
+                      <FormGroup>
+                        <Label>Owner Name *</Label>
+                        <Input 
+                          type="text" 
+                          name="ownerName" 
+                          value={formData.ownerName} 
+                          onChange={handleChange} 
+                          placeholder="Enter owner name"
+                          required
+                        />
+                      </FormGroup>
+                      <FormGroup>
+                        <Label>Owner Email *</Label>
+                        <Input 
+                          type="email" 
+                          name="ownerEmail" 
+                          value={formData.ownerEmail} 
+                          onChange={handleChange} 
+                          placeholder="Enter owner email"
+                          required
+                        />
+                      </FormGroup>
+                      <FormGroup>
+                        <Label>Pet Type *</Label>
+                        <Select 
+                          name="petType" 
+                          value={formData.petType} 
+                          onChange={handleChange} 
+                          required
+                        >
+                          <option value="dog">🐶 Dog</option>
+                          <option value="cat">🐱 Cat</option>
+                        </Select>
+                      </FormGroup>
+                      <FormGroup>
+                        <Label>Breed</Label>
+                        <Select 
+                          name="breed" 
+                          value={formData.breed} 
+                          onChange={handleChange}
+                        >
+                          <option value="">Select Breed</option>
+                          {(PET_BREEDS[formData.petType as keyof typeof PET_BREEDS] || []).map(breed => (
+                            <option key={breed} value={breed}>{breed}</option>
+                          ))}
+                        </Select>
+                      </FormGroup>
+                      <FormGroup>
+                        <Label>Age</Label>
+                        <Input 
+                          type="text" 
+                          name="petAge" 
+                          value={formData.petAge} 
+                          onChange={handleChange} 
+                          placeholder="e.g., 2 years, 6 months"
+                        />
+                      </FormGroup>
+                      <FormGroup>
+                        <Label>Birth Date</Label>
+                        <Input 
+                          type="date" 
+                          name="birthDate" 
+                          value={formData.birthDate} 
+                          onChange={handleChange} 
+                        />
+                      </FormGroup>
+                      <FormGroup>
+                        <Label>Gender</Label>
+                        <Select 
+                          name="gender" 
+                          value={formData.gender} 
+                          onChange={handleChange}
+                        >
+                          <option value="">Select Gender</option>
+                          <option value="Male">Male</option>
+                          <option value="Female">Female</option>
+                        </Select>
+                      </FormGroup>
+                      <FormGroup>
+                        <Label>Color</Label>
+                        <Input 
+                          type="text" 
+                          name="color" 
+                          value={formData.color} 
+                          onChange={handleChange} 
+                          placeholder="e.g., Brown, Black, White"
+                        />
+                      </FormGroup>
+                      <FormGroup>
+                        <Label>Weight</Label>
                         <Input 
                           type="text" 
                           name="weight" 
@@ -974,11 +1173,9 @@ const MedicalRecord: React.FC = () => {
                           onChange={handleChange} 
                           placeholder="e.g., 5 kg, 12 lbs"
                         />
-                        <FieldHelp>Enter weight with unit (kg/lbs)</FieldHelp>
                       </FormGroup>
-                      
                       <FormGroup>
-                        <Label>Allergies <OptionalText>(optional)</OptionalText></Label>
+                        <Label>Allergies</Label>
                         <TextArea 
                           name="allergies" 
                           value={formData.allergies} 
@@ -986,11 +1183,9 @@ const MedicalRecord: React.FC = () => {
                           placeholder="List any known allergies"
                           rows={2}
                         />
-                        <FieldHelp>Separate multiple allergies with commas</FieldHelp>
                       </FormGroup>
-                      
                       <FormGroup>
-                        <Label>Existing Conditions <OptionalText>(optional)</OptionalText></Label>
+                        <Label>Existing Conditions</Label>
                         <TextArea 
                           name="existingConditions" 
                           value={formData.existingConditions} 
@@ -998,10 +1193,9 @@ const MedicalRecord: React.FC = () => {
                           placeholder="List any pre-existing medical conditions"
                           rows={2}
                         />
-                        <FieldHelp>Chronic conditions or previous health issues</FieldHelp>
                       </FormGroup>
                     </EditableGrid>
-                  </EditableSection>
+                  )}
                 </FormSection>
 
                 {/* Medical Information Section - REQUIRED and EDITABLE */}
@@ -1022,7 +1216,9 @@ const MedicalRecord: React.FC = () => {
                         ))}
                         <option value="Other">Other (Specify in notes)</option>
                       </Select>
-                      <FieldHelp>Based on appointment: {formData.appointmentType}</FieldHelp>
+                      {formData.appointmentType && (
+                        <FieldHelp>Based on appointment: {formData.appointmentType}</FieldHelp>
+                      )}
                     </FormGroup>
                     <FormGroup>
                       <Label>Treatment *</Label>
@@ -1038,7 +1234,9 @@ const MedicalRecord: React.FC = () => {
                         ))}
                         <option value="Other">Other (Specify in notes)</option>
                       </Select>
-                      <FieldHelp>Based on appointment: {formData.appointmentType}</FieldHelp>
+                      {formData.appointmentType && (
+                        <FieldHelp>Based on appointment: {formData.appointmentType}</FieldHelp>
+                      )}
                     </FormGroup>
                   </FormRow>
                   
@@ -1053,7 +1251,9 @@ const MedicalRecord: React.FC = () => {
                         required
                         readOnly={isFromAppointment}
                       />
-                      <FieldHelp>Auto-filled from appointment</FieldHelp>
+                      {isFromAppointment && (
+                        <FieldHelp>Auto-filled from appointment</FieldHelp>
+                      )}
                     </FormGroup>
                     <FormGroup>
                       <Label>Veterinarian *</Label>
@@ -1076,7 +1276,9 @@ const MedicalRecord: React.FC = () => {
                       placeholder="Additional notes about the treatment, condition, or any special instructions" 
                       rows={4}
                     />
-                    <FieldHelp>Auto-filled with appointment details. Add any additional information here.</FieldHelp>
+                    {isFromAppointment && (
+                      <FieldHelp>Auto-filled with appointment details. Add any additional information here.</FieldHelp>
+                    )}
                   </FormGroup>
 
                   {isFromAppointment && (
@@ -1105,10 +1307,11 @@ const MedicalRecord: React.FC = () => {
                 </FormSection>
                 
                 <ButtonGroupForm>
-                  <SaveButton type="submit">
-                    {editingRecord ? "Update Record" : "💾 Save Medical Record"}
+                  {/* ✅ UPDATED: Disable button when submitting */}
+                  <SaveButton type="submit" disabled={isSubmitting}>
+                    {isSubmitting ? "⏳ Saving..." : (editingRecord ? "Update Record" : "💾 Save Medical Record")}
                   </SaveButton>
-                  <CancelButton type="button" onClick={resetForm}>
+                  <CancelButton type="button" onClick={resetForm} disabled={isSubmitting}>
                     Cancel
                   </CancelButton>
                 </ButtonGroupForm>
@@ -1219,15 +1422,18 @@ const MedicalRecord: React.FC = () => {
                         </CardContent>
                         
                         <CardActions>
+                          {/* ✅ UPDATED: Add loading state to buttons */}
                           <CompleteButton 
                             onClick={(e) => handleEdit(record, e)}
+                            disabled={isSubmitting}
                           >
-                            ✓ Complete Record
+                            {isSubmitting ? "⏳ Loading..." : "✓ Complete Record"}
                           </CompleteButton>
                           <EditButton 
                             onClick={(e) => handleEdit(record, e)}
+                            disabled={isSubmitting}
                           >
-                            ✏️ Edit
+                            {isSubmitting ? "⏳" : "✏️ Edit"}
                           </EditButton>
                         </CardActions>
                       </RecordCard>
@@ -1321,8 +1527,9 @@ const MedicalRecord: React.FC = () => {
                           <CardActions>
                             <EditButton 
                               onClick={(e) => handleEdit(record, e)}
+                              disabled={isSubmitting}
                             >
-                              ✏️ Edit
+                              {isSubmitting ? "⏳" : "✏️ Edit"}
                             </EditButton>
                           </CardActions>
                         </RecordCard>
@@ -1439,6 +1646,9 @@ const MedicalRecord: React.FC = () => {
 };
 
 export default MedicalRecord;
+
+// Styled Components (same as before)
+// ... (keep all the styled components the same)
 
 // Styled Components (same as before)
 const LoadingContainer = styled.div`
@@ -1812,8 +2022,14 @@ const SaveButton = styled.button`
   font-weight: 500;
   transition: all 0.2s;
 
-  &:hover {
+  &:hover:not(:disabled) {
     background: #2a947c;
+  }
+
+  &:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+    opacity: 0.7;
   }
 `;
 
@@ -1827,8 +2043,14 @@ const CancelButton = styled.button`
   font-weight: 500;
   transition: all 0.2s;
 
-  &:hover {
+  &:hover:not(:disabled) {
     background: #4b5563;
+  }
+
+  &:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+    opacity: 0.7;
   }
 `;
 
@@ -2129,13 +2351,19 @@ const EditButton = styled.button`
   position: relative;
   z-index: 10;
 
-  &:hover {
+  &:hover:not(:disabled) {
     background: #59a7c5;
     transform: translateY(-1px);
   }
 
   &:active {
     transform: translateY(0);
+  }
+
+  &:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+    opacity: 0.7;
   }
 `;
 
@@ -2153,13 +2381,19 @@ const CompleteButton = styled.button`
   position: relative;
   z-index: 10;
 
-  &:hover {
+  &:hover:not(:disabled) {
     background: #d97706;
     transform: translateY(-1px);
   }
 
   &:active {
     transform: translateY(0);
+  }
+
+  &:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+    opacity: 0.7;
   }
 `;
 
