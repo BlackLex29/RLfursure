@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import styled, { createGlobalStyle } from "styled-components";
-import { signInWithEmailAndPassword, sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup, getMultiFactorResolver, TotpMultiFactorGenerator } from "firebase/auth";
+import { signInWithEmailAndPassword, sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup, getMultiFactorResolver, TotpMultiFactorGenerator, MultiFactorResolver, MultiFactorError } from "firebase/auth";
 import { doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 import { auth, db } from "../firebaseConfig";
 import { useRouter } from "next/navigation";
@@ -31,9 +31,11 @@ interface UserRole {
   twoFactorEnabled?: boolean;
 }
 
-interface FirebaseError {
-  code?: string;
-  message?: string;
+interface APIResponse {
+  success?: boolean;
+  error?: string;
+  otpHash?: string;
+  [key: string]: unknown;
 }
 
 const Login: React.FC = () => {
@@ -57,7 +59,7 @@ const Login: React.FC = () => {
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [totpRequired, setTotpRequired] = useState(false);
   const [totpCode, setTotpCode] = useState("");
-  const [mfaResolver, setMfaResolver] = useState<any>(null);
+  const [mfaResolver, setMfaResolver] = useState<MultiFactorResolver | null>(null);
   const router = useRouter();
 
   // Check for reset password action in URL
@@ -76,7 +78,7 @@ const Login: React.FC = () => {
   };
 
   // Helper function to debug API responses
-  const debugAPIResponse = async (response: Response) => {
+  const debugAPIResponse = async (response: Response): Promise<APIResponse> => {
     const text = await response.text();
     console.log("🔍 Raw API response:", text);
     try {
@@ -171,28 +173,30 @@ const Login: React.FC = () => {
         navigateBasedOnRole(userData.role);
       }
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("❌ Login error:", err);
       
       // Handle specific Firebase auth errors
-      if (err.code === "auth/multi-factor-auth-required") {
+      const firebaseError = err as { code?: string; message?: string };
+      
+      if (firebaseError.code === "auth/multi-factor-auth-required") {
         console.log("🔐 GMAIL MFA required");
-        const resolver = getMultiFactorResolver(auth, err);
+        const resolver = getMultiFactorResolver(auth, err as MultiFactorError);
         setMfaResolver(resolver);
         setTotpRequired(true);
         setError("✅ Please enter your Gmail code");
-      } else if (err.code === "auth/invalid-credential") {
+      } else if (firebaseError.code === "auth/invalid-credential") {
         setError("Invalid email or password.");
-      } else if (err.code === "auth/user-not-found") {
+      } else if (firebaseError.code === "auth/user-not-found") {
         setError("No account found with this email.");
-      } else if (err.code === "auth/wrong-password") {
+      } else if (firebaseError.code === "auth/wrong-password") {
         setError("Invalid password.");
-      } else if (err.code === "auth/too-many-requests") {
+      } else if (firebaseError.code === "auth/too-many-requests") {
         setError("Too many failed attempts. Please try again later.");
-      } else if (err.code === "permission-denied") {
+      } else if (firebaseError.code === "permission-denied") {
         setError("Database access denied. Please contact support.");
       } else {
-        setError(err.message || "An error occurred during login.");
+        setError(firebaseError.message || "An error occurred during login.");
       }
       
       // Sign out on error
@@ -226,7 +230,7 @@ const Login: React.FC = () => {
 
       // Find TOTP hint
       const totpHint = mfaResolver.hints.find(
-        (hint: any) => hint.factorId === TotpMultiFactorGenerator.FACTOR_ID
+        (hint) => hint.factorId === TotpMultiFactorGenerator.FACTOR_ID
       );
 
       if (!totpHint) {
@@ -253,7 +257,7 @@ const Login: React.FC = () => {
       } else {
         throw new Error("User data not found");
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("❌ TOTP verification error:", error);
       setError("Invalid authenticator code. Please try again.");
       setTotpCode("");
@@ -362,8 +366,9 @@ const Login: React.FC = () => {
         navigateBasedOnRole(userRole);
       }
 
-    } catch (err: any) {
-      console.error("❌ OTP verification error:", err);
+    } catch (error: unknown) {
+      console.error("❌ OTP verification error:", error);
+      const err = error as { message?: string };
       setError(err.message || "Verification failed. Please try again.");
       setOtpCode("");
     } finally {
@@ -449,9 +454,11 @@ const Login: React.FC = () => {
         // Clean up
         setGoogleUserData(null);
       }
-    } catch (err: any) {
-      console.error("❌ Google OTP verification error:", err);
+    } catch (error: unknown) {
+      console.error("❌ Google OTP verification error:", error);
 
+      const err = error as { code?: string; message?: string };
+      
       if (err.code === "auth/popup-closed-by-user") {
         setError("Sign-in cancelled. Please try again.");
       } else if (err.code === "auth/popup-blocked") {
@@ -535,7 +542,7 @@ const Login: React.FC = () => {
       console.log("New OTP stored successfully");
       setError("✅ A new verification code has been sent to your email.");
       setOtpCode("");
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("❌ Resend OTP error:", error);
       setError("❌ Failed to resend code. Please try again.");
       setResendCooldown(0);
@@ -582,17 +589,19 @@ const Login: React.FC = () => {
         setError("");
       }, 5000);
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("❌ Forgot password error:", err);
 
-      if (err.code === "auth/user-not-found") {
+      const error = err as { code?: string; message?: string };
+      
+      if (error.code === "auth/user-not-found") {
         setError("No account found with this email.");
-      } else if (err.code === "auth/invalid-email") {
+      } else if (error.code === "auth/invalid-email") {
         setError("Invalid email address.");
-      } else if (err.code === "auth/too-many-requests") {
+      } else if (error.code === "auth/too-many-requests") {
         setError("Too many attempts. Please try again later.");
       } else {
-        setError(err.message || "Failed to send reset email. Please try again.");
+        setError(error.message || "Failed to send reset email. Please try again.");
       }
     } finally {
       setResetLoading(false);
@@ -717,15 +726,17 @@ const Login: React.FC = () => {
         console.log("✅ User document created, navigating to user dashboard");
         navigateBasedOnRole('user');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("❌ Google login error:", err);
 
-      if (err.code === "auth/popup-closed-by-user") {
+      const error = err as { code?: string; message?: string };
+      
+      if (error.code === "auth/popup-closed-by-user") {
         setError("Sign-in cancelled. Please try again.");
-      } else if (err.code === "auth/popup-blocked") {
+      } else if (error.code === "auth/popup-blocked") {
         setError("Pop-up was blocked. Please allow pop-ups for this site.");
       } else {
-        setError(err.message || "Failed to sign in with Google. Please try again.");
+        setError(error.message || "Failed to sign in with Google. Please try again.");
       }
 
       try {
@@ -1086,6 +1097,9 @@ const Login: React.FC = () => {
 };
 
 export default Login;
+
+// Styled Components (same as before)
+// ... (all the styled components remain unchanged)
 
 // Styled Components
 const TermsContainer = styled.div`

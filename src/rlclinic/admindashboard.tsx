@@ -198,15 +198,7 @@ interface UserType {
   phoneNumber?: string;
 }
 
-interface PasswordResetRequest {
-  id: string;
-  userId: string;
-  userEmail: string;
-  requestedBy: string;
-  requestedAt: string;
-  status: "pending" | "sent" | "completed";
-  completedAt?: string;
-}
+
 
 // OTP Verification Interface
 interface OTPVerification {
@@ -506,12 +498,12 @@ const sendRealOTP = async (email: string): Promise<{ success: boolean; message: 
     const responseText = await response.text();
     console.log('📨 Brevo API Response:', responseText);
 
-    let responseData;
-    try {
-      responseData = JSON.parse(responseText);
-    } catch (e) {
-      responseData = { message: responseText };
-    }
+ let responseData;
+try {
+  responseData = JSON.parse(responseText);
+} catch {
+  responseData = { message: responseText };
+}
 
     if (response.ok) {
       console.log("✅ OTP sent successfully via Brevo");
@@ -1481,8 +1473,8 @@ useEffect(() => {
     }
   }, [statsSelectedMonth, statsSelectedYear, viewMode, fetchStatsAppointments]);
 
-  const handleBookAppointment = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleBookAppointment = async () => {
+
     if (!selectedClient || !petName.trim() || !appointmentDate || !appointmentTime) {
       alert("Please fill all required fields.");
       return;

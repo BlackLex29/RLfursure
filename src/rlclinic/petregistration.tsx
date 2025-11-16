@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import styled, { createGlobalStyle, keyframes } from "styled-components";
 import { useRouter } from "next/navigation";
 import { db, auth } from "../firebaseConfig";
-import { collection, doc, setDoc, getDocs, query, where } from "firebase/firestore";
+import { collection, doc, setDoc} from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
 const GlobalStyle = createGlobalStyle`
@@ -412,7 +412,7 @@ const Petregister: React.FC = () => {
                       <li>Your pet has been successfully registered</li>
                       <li>All data saved to pets collection</li>
                       <li>You can now view your pet in the dashboard</li>
-                      <li>Keep your pet's information updated</li>
+                      <li>Keep your pet&apos information updated</li>
                     </ul>
                   </InfoText>
                 </InfoBox>

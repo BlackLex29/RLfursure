@@ -159,86 +159,42 @@ const UserMedicalRecords: React.FC = () => {
     }
   }, []);
 
-  /* Subscribe to realtime updates from BOTH collections */
-  const subscribeToMedicalRecordUpdates = useCallback(
-    (userEmail?: string | null) => {
-      if (!userEmail) return;
+const subscribeToMedicalRecordUpdates = useCallback(
+  (userEmail?: string | null) => {
+    if (!userEmail) return;
 
-      let unsubscribe1: () => void;
-      let unsubscribe2: () => void;
+    // Subscribe to medicalRecords collection
+    const medicalRecordsQuery = query(
+      collection(db, "medicalRecords"),
+      where("ownerEmail", "==", userEmail),
+      where("status", "==", "completed"),
+      orderBy("date", "desc")
+    );
 
-      // Subscribe to medicalRecords collection
-      const medicalRecordsQuery = query(
-        collection(db, "medicalRecords"),
-        where("ownerEmail", "==", userEmail),
-        where("status", "==", "completed"),
-        orderBy("date", "desc")
-      );
-
-      unsubscribe1 = onSnapshot(medicalRecordsQuery, (snapshot) => {
-        const updatedRecords: MedicalRecord[] = [];
-        
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data() as Omit<MedicalRecord, "id">;
-          if (data.ownerEmail === userEmail && data.status === "completed") {
-            updatedRecords.push({ 
-              id: docSnap.id, 
-              ...data,
-              birthDate: data.birthDate || "",
-              breed: data.breed || "",
-              petAge: data.petAge || "",
-              gender: data.gender || "",
-              color: data.color || "",
-              weight: data.weight || "",
-              allergies: data.allergies || "",
-              existingConditions: data.existingConditions || "",
-              veterinarian: data.veterinarian || ""
-            });
-          }
-        });
-
-        // Also check usermedicalrecord collection
-        const userMedicalRecordsQuery = query(
-          collection(db, "usermedicalrecord"),
-          where("ownerEmail", "==", userEmail),
-          where("status", "==", "completed"),
-          orderBy("date", "desc")
-        );
-
-        getDocs(userMedicalRecordsQuery).then((userSnapshot) => {
-          userSnapshot.forEach((docSnap) => {
-            const data = docSnap.data() as Omit<MedicalRecord, "id">;
-            if (data.ownerEmail === userEmail && data.status === "completed") {
-              updatedRecords.push({ 
-                id: docSnap.id, 
-                ...data,
-                birthDate: data.birthDate || "",
-                breed: data.breed || "",
-                petAge: data.petAge || "",
-                gender: data.gender || "",
-                color: data.color || "",
-                weight: data.weight || "",
-                allergies: data.allergies || "",
-                existingConditions: data.existingConditions || "",
-                veterinarian: data.veterinarian || ""
-              });
-            }
+    // ✅ Fixed: Use const instead of let
+    const unsubscribe1 = onSnapshot(medicalRecordsQuery, (snapshot) => {
+      const updatedRecords: MedicalRecord[] = [];
+      
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as Omit<MedicalRecord, "id">;
+        if (data.ownerEmail === userEmail && data.status === "completed") {
+          updatedRecords.push({ 
+            id: docSnap.id, 
+            ...data,
+            birthDate: data.birthDate || "",
+            breed: data.breed || "",
+            petAge: data.petAge || "",
+            gender: data.gender || "",
+            color: data.color || "",
+            weight: data.weight || "",
+            allergies: data.allergies || "",
+            existingConditions: data.existingConditions || "",
+            veterinarian: data.veterinarian || ""
           });
-
-          // Remove duplicates
-          const uniqueRecords = updatedRecords.filter((record, index, self) =>
-            index === self.findIndex(r => (
-              r.id === record.id || 
-              (r.appointmentId && r.appointmentId === record.appointmentId)
-            ))
-          );
-
-          setRecords(uniqueRecords);
-          setLoading(false);
-        });
+        }
       });
 
-      // Subscribe to usermedicalrecord collection
+      // Also check usermedicalrecord collection
       const userMedicalRecordsQuery = query(
         collection(db, "usermedicalrecord"),
         where("ownerEmail", "==", userEmail),
@@ -246,10 +202,8 @@ const UserMedicalRecords: React.FC = () => {
         orderBy("date", "desc")
       );
 
-      unsubscribe2 = onSnapshot(userMedicalRecordsQuery, (snapshot) => {
-        const updatedRecords: MedicalRecord[] = [];
-        
-        snapshot.forEach((docSnap) => {
+      getDocs(userMedicalRecordsQuery).then((userSnapshot) => {
+        userSnapshot.forEach((docSnap) => {
           const data = docSnap.data() as Omit<MedicalRecord, "id">;
           if (data.ownerEmail === userEmail && data.status === "completed") {
             updatedRecords.push({ 
@@ -268,55 +222,99 @@ const UserMedicalRecords: React.FC = () => {
           }
         });
 
-        // Also check medicalRecords collection
-        const medicalRecordsQuery = query(
-          collection(db, "medicalRecords"),
-          where("ownerEmail", "==", userEmail),
-          where("status", "==", "completed"),
-          orderBy("date", "desc")
+        // Remove duplicates
+        const uniqueRecords = updatedRecords.filter((record, index, self) =>
+          index === self.findIndex(r => (
+            r.id === record.id || 
+            (r.appointmentId && r.appointmentId === record.appointmentId)
+          ))
         );
 
-        getDocs(medicalRecordsQuery).then((medicalSnapshot) => {
-          medicalSnapshot.forEach((docSnap) => {
-            const data = docSnap.data() as Omit<MedicalRecord, "id">;
-            if (data.ownerEmail === userEmail && data.status === "completed") {
-              updatedRecords.push({ 
-                id: docSnap.id, 
-                ...data,
-                birthDate: data.birthDate || "",
-                breed: data.breed || "",
-                petAge: data.petAge || "",
-                gender: data.gender || "",
-                color: data.color || "",
-                weight: data.weight || "",
-                allergies: data.allergies || "",
-                existingConditions: data.existingConditions || "",
-                veterinarian: data.veterinarian || ""
-              });
-            }
+        setRecords(uniqueRecords);
+        setLoading(false);
+      });
+    });
+
+    // Subscribe to usermedicalrecord collection
+    const userMedicalRecordsQuery = query(
+      collection(db, "usermedicalrecord"),
+      where("ownerEmail", "==", userEmail),
+      where("status", "==", "completed"),
+      orderBy("date", "desc")
+    );
+
+    // ✅ Fixed: Use const instead of let
+    const unsubscribe2 = onSnapshot(userMedicalRecordsQuery, (snapshot) => {
+      const updatedRecords: MedicalRecord[] = [];
+      
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as Omit<MedicalRecord, "id">;
+        if (data.ownerEmail === userEmail && data.status === "completed") {
+          updatedRecords.push({ 
+            id: docSnap.id, 
+            ...data,
+            birthDate: data.birthDate || "",
+            breed: data.breed || "",
+            petAge: data.petAge || "",
+            gender: data.gender || "",
+            color: data.color || "",
+            weight: data.weight || "",
+            allergies: data.allergies || "",
+            existingConditions: data.existingConditions || "",
+            veterinarian: data.veterinarian || ""
           });
-
-          // Remove duplicates
-          const uniqueRecords = updatedRecords.filter((record, index, self) =>
-            index === self.findIndex(r => (
-              r.id === record.id || 
-              (r.appointmentId && r.appointmentId === record.appointmentId)
-            ))
-          );
-
-          setRecords(uniqueRecords);
-          setLoading(false);
-        });
+        }
       });
 
-      return () => {
-        if (unsubscribe1) unsubscribe1();
-        if (unsubscribe2) unsubscribe2();
-      };
-    },
-    []
-  );
+      // Also check medicalRecords collection
+      const medicalRecordsQuery = query(
+        collection(db, "medicalRecords"),
+        where("ownerEmail", "==", userEmail),
+        where("status", "==", "completed"),
+        orderBy("date", "desc")
+      );
 
+      getDocs(medicalRecordsQuery).then((medicalSnapshot) => {
+        medicalSnapshot.forEach((docSnap) => {
+          const data = docSnap.data() as Omit<MedicalRecord, "id">;
+          if (data.ownerEmail === userEmail && data.status === "completed") {
+            updatedRecords.push({ 
+              id: docSnap.id, 
+              ...data,
+              birthDate: data.birthDate || "",
+              breed: data.breed || "",
+              petAge: data.petAge || "",
+              gender: data.gender || "",
+              color: data.color || "",
+              weight: data.weight || "",
+              allergies: data.allergies || "",
+              existingConditions: data.existingConditions || "",
+              veterinarian: data.veterinarian || ""
+            });
+          }
+        });
+
+        // Remove duplicates
+        const uniqueRecords = updatedRecords.filter((record, index, self) =>
+          index === self.findIndex(r => (
+            r.id === record.id || 
+            (r.appointmentId && r.appointmentId === record.appointmentId)
+          ))
+        );
+
+        setRecords(uniqueRecords);
+        setLoading(false);
+      });
+    });
+
+    // ✅ Return cleanup function
+    return () => {
+      unsubscribe1();
+      unsubscribe2();
+    };
+  },
+  []
+);
   /* Handle auth state */
   useEffect(() => {
     let unsubscribeSnapshot: (() => void) | undefined;
@@ -815,7 +813,7 @@ const UserMedicalRecords: React.FC = () => {
               <EmptyIcon>📋</EmptyIcon>
               <EmptyText>No medical records found</EmptyText>
               <EmptySubtext>
-                You don't have any completed medical records yet. 
+                You don&apos;t have any completed medical records yet. 
                 Records will appear here after your veterinary appointments are completed.
               </EmptySubtext>
             </EmptyState>
