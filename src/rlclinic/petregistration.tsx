@@ -412,7 +412,7 @@ const Petregister: React.FC = () => {
                       <li>Your pet has been successfully registered</li>
                       <li>All data saved to pets collection</li>
                       <li>You can now view your pet in the dashboard</li>
-                      <li>Keep your pet&apos information updated</li>
+                      <li>Keep your pet&apos;s information updated</li>
                     </ul>
                   </InfoText>
                 </InfoBox>
