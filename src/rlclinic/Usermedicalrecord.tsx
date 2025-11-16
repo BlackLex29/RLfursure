@@ -233,7 +233,7 @@ const UserMedicalRecords: React.FC = () => {
   }, []);
 
   /* Helper function to handle snapshot updates */
-  const handleSnapshotUpdate = async (snapshot: any, userEmail: string) => {
+  const handleSnapshotUpdate = async (snapshot: unknown, userEmail: string) => {
     try {
       // Get data from both collections
       const [medicalRecordsSnapshot, userMedicalRecordsSnapshot] = await Promise.all([
