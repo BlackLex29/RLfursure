@@ -155,6 +155,7 @@ const paymentMethods = [
 
 // 🔹 FIXED: Enhanced Appointment Creation with Complete Data - SAVES TO APPOINTMENTS COLLECTION
 // 🔹 FIXED: Enhanced Appointment Creation na MATCH sa Security Rules
+// 🔹 FIXED: Enhanced Appointment Creation with Complete Data
 const createAppointmentInFirestore = async (
   bookingState: BookingState,
   paymentMethod: string,
@@ -168,17 +169,17 @@ const createAppointmentInFirestore = async (
       throw new Error("Missing required appointment data");
     }
 
-    // ✅ CRITICAL: Gumamit ng field names na EXACTLY match sa security rules
+    // ✅ CRITICAL: Create appointment data with EXACT field names
     const appointmentData = {
-      // ⚠️ IMPORTANTE: Gamitin ang EXACT field names na required ng security rules
-      userId: user.uid, // REQUIRED - dapat exact match
-      petId: selectedPet, // REQUIRED - dapat exact match
-      date: selectedDate, // REQUIRED - dapat exact match
-      timeSlot: selectedSlot, // REQUIRED - dapat exact match
-      appointmentType: selectedAppointmentType, // REQUIRED - dapat exact match
-      status: paymentMethod === "Cash" ? "Confirmed" : "Pending Payment", // REQUIRED - dapat exact match
+      // Required fields for security rules
+      userId: user.uid,
+      petId: selectedPet,
+      date: selectedDate,
+      timeSlot: selectedSlot,
+      appointmentType: selectedAppointmentType,
+      status: paymentMethod === "Cash" ? "Confirmed" : "Pending Payment",
       
-      // Additional fields na ginagamit ng app
+      // Additional pet information
       clientName: user.displayName || user.email?.split('@')[0] || "Client",
       clientEmail: user.email || "",
       petName: selectedPetData.name,
@@ -196,11 +197,11 @@ const createAppointmentInFirestore = async (
       // System fields
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-      bookedBy: user.uid, // Para sa security rules
-      userEmail: user.email
+      bookedBy: user.uid
     };
 
-    console.log("💾 Creating appointment with required fields:", {
+    console.log("💾 Creating appointment with user ID:", user.uid);
+    console.log("📋 Appointment data:", {
       userId: appointmentData.userId,
       petId: appointmentData.petId,
       date: appointmentData.date,
@@ -210,12 +211,8 @@ const createAppointmentInFirestore = async (
     });
 
     // ✅ Create the appointment document
-    const newDoc = await addDoc(collection(db, "appointments"), appointmentData);
-
-    // Update the document with its ID
-    await updateDoc(doc(db, "appointments", newDoc.id), {
-      id: newDoc.id
-    });
+    const appointmentsRef = collection(db, "appointments");
+    const newDoc = await addDoc(appointmentsRef, appointmentData);
 
     console.log("✅ Appointment successfully created with ID:", newDoc.id);
     
@@ -226,7 +223,6 @@ const createAppointmentInFirestore = async (
     throw new Error(`Failed to create appointment: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 };
-
 // 🔹 FIXED: Enhanced Payment Processing with Firestore Updates
 // 🔹 FIXED: Enhanced Payment Processing
 const processAppointmentPayment = async (
