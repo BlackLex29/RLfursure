@@ -225,6 +225,7 @@ const createAppointmentInFirestore = async (
 };
 // 🔹 FIXED: Enhanced Payment Processing with Firestore Updates
 // 🔹 FIXED: Enhanced Payment Processing
+// 🔹 FIXED: Enhanced Payment Processing with proper types
 const processAppointmentPayment = async (
   appointmentId: string,
   paymentMethod: string,
@@ -234,7 +235,13 @@ const processAppointmentPayment = async (
   try {
     const appointmentRef = doc(db, "appointments", appointmentId);
     
-    const updateData: any = {
+    // ✅ FIXED: Replace 'any' with proper TypeScript type
+    const updateData: {
+      updatedAt: unknown;
+      status?: string;
+      paymentStatus?: string;
+      referenceNumber?: string;
+    } = {
       updatedAt: serverTimestamp()
     };
 
@@ -321,55 +328,7 @@ const getAppointmentDetails = async (appointmentId: string): Promise<Appointment
 };
 
 // 🔹 FIXED: Enhanced Manual QR Payment Processing Function
-const processPayment = async (
-  appointmentId: string, 
-  amount: number, 
-  appointmentType: string, 
-  petName: string, 
-  paymentMethod: string
-): Promise<{success: boolean; qrData?: string; referenceNumber: string}> => {
-  try {
-    if (paymentMethod === "Cash") {
-      return { success: false, referenceNumber: '' };
-    }
-    
-    console.log("📱 Starting MANUAL GCash payment process for appointment:", appointmentId);
-    console.log("💰 Amount (PHP):", amount);
 
-    const referenceNumber = `GCASH-${Date.now()}`;
-    
-    // Generate QR code data for GCash
-    const qrData = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
-      `GCASH|09171234567|${amount}|${referenceNumber}|FursureCare Veterinary Clinic`
-    )}`;
-    
-    console.log("✅ Generated QR code data:", qrData);
-
-    return { 
-      success: true,
-      qrData: qrData,
-      referenceNumber: referenceNumber
-    };
-    
-  } catch (err) {
-    console.error("❌ Manual Payment processing error:", err);
-    
-    const errorMessage = err instanceof Error ? err.message : 'Unknown payment error';
-    
-    try {
-      await updateDoc(doc(db, "appointments", appointmentId), {
-        status: "Payment Failed",
-        paymentError: errorMessage,
-        updatedAt: serverTimestamp()
-      });
-      console.log("📝 Updated appointment status to 'Payment Failed'");
-    } catch (updateError) {
-      console.error("❌ Failed to update appointment status:", updateError);
-    }
-    
-    throw new Error(`GCash payment failed: ${errorMessage}`);
-  }
-};
 
 // 🔹 Utility function to format date
 const formatBirthday = (birthday: string) => {
@@ -2972,44 +2931,8 @@ const QRCodeImage = styled.img`
   }
 `;
 
-const QRCodeFallback = styled.div`
-  width: 280px;
-  height: 280px;
-  background: linear-gradient(135deg, #34B89C 0%, #6BC1E1 100%);
-  border-radius: 12px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  
-  @media (max-width: 480px) {
-    width: 250px;
-    height: 250px;
-  }
-`;
 
-const QRCodeText = styled.div`
-  font-size: 16px;
-  font-weight: 600;
-  margin-bottom: 8px;
-`;
 
-const QRCodeSubtext = styled.div`
-  font-size: 14px;
-  opacity: 0.9;
-  margin-bottom: 8px;
-`;
-
-const QRCodeAmount = styled.div`
-  font-size: 16px;
-  font-weight: 700;
-  margin-top: 8px;
-  background: rgba(255, 255, 255, 0.3);
-  padding: 4px 12px;
-  border-radius: 20px;
-`;
 
 // 🔹 NEW: Reference Input Section Styles
 const ReferenceInputSection = styled.div`
