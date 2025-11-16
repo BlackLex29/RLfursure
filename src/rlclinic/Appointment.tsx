@@ -167,14 +167,15 @@ const createAppointmentInFirestore = async (
       throw new Error("Missing required appointment data");
     }
 
-    // ✅ FIXED: Complete appointment data for appointments collection
+    // ✅ FIXED: Complete appointment data na MATCH sa security rules
     const appointmentData = {
-      // Basic appointment info
+      // BASIC APPOINTMENT INFO - Match sa rules requirements
       date: selectedDate,
-      timeSlot: selectedSlot,
+      time: selectedSlot, // ⚠️ IMPORTANTE: Gamitin 'time' hindi 'timeSlot'
+      service: selectedAppointmentType, // ⚠️ IMPORTANTE: Gamitin 'service' hindi 'appointmentType'
       status: paymentMethod === "Cash" ? "Confirmed" : "Pending Payment",
       
-      // Pet information
+      // PET INFORMATION
       petId: selectedPet,
       petName: selectedPetData.name,
       petType: selectedPetData.petType || "Unknown",
@@ -184,32 +185,36 @@ const createAppointmentInFirestore = async (
       birthday: selectedPetData.birthday || "",
       age: selectedPetData.age || "",
       
-      // Client information
+      // CLIENT INFORMATION - CRITICAL FOR SECURITY RULES
       clientName: user.displayName || user.email || "Unknown Client",
       clientEmail: user.email || "",
-      userId: user.uid,
+      userId: user.uid, // ⚠️ IMPORTANTE: Required ng security rules
       
-      // Service information
-      appointmentType: selectedAppointmentType,
-      serviceType: selectedAppointmentType,
+      // SERVICE INFORMATION
+      appointmentType: selectedAppointmentType, // Keep for your app logic
+      timeSlot: selectedSlot, // Keep for your app logic
       price: selectedPrice || 0,
       
-      // Payment information
+      // PAYMENT INFORMATION
       paymentMethod: paymentMethod,
       paymentStatus: paymentMethod === "Cash" ? "Complete Payment" : "Pending Payment",
-      referenceNumber: "", // Will be set for GCash payments
+      referenceNumber: "",
       
-      // System fields
+      // SYSTEM FIELDS
       bookedByAdmin: false,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-      bookedBy: user.uid,
       userEmail: user.email
     };
 
-    console.log("💾 Creating appointment in Firestore appointments collection:", appointmentData);
+    console.log("💾 Creating appointment with required fields:", {
+      userId: appointmentData.userId,
+      service: appointmentData.service,
+      time: appointmentData.time,
+      status: appointmentData.status
+    });
 
-    // ✅ FIXED: Create the appointment document in appointments collection
+    // ✅ Create the appointment document in appointments collection
     const newDoc = await addDoc(collection(db, "appointments"), appointmentData);
 
     // Update the document with its ID

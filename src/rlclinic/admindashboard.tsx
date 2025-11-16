@@ -2847,14 +2847,14 @@ useEffect(() => {
                 </SectionHeader>
               
                 <SectionSubtitle>Confirmed Appointments</SectionSubtitle>
-                {filteredAppointments.filter(appt => appt.status === "Confirmed").length === 0 ? (
+                {filteredAppointments.filter(appt => appt.status === "Pending").length === 0 ? (
                   <NoAppointments>
                     No confirmed appointments found.
                   </NoAppointments>
                 ) : (
                   <AppointmentsGrid>
                     {filteredAppointments
-                      .filter(appt => appt.status === "Confirmed")
+                      .filter(appt => appt.status === "Pending")
                       .map((appointment, index) => {
                         const borderColor = statusColor(appointment.status);
                     
