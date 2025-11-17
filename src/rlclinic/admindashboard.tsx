@@ -2253,7 +2253,7 @@ useEffect(() => {
                 onClick={() => setViewMode("all")}
               >
                 <MenuIcon>📋</MenuIcon>
-                <MenuText>List Appointments</MenuText>
+                <MenuText>Appointment List</MenuText>
                 {appointments.filter(appt =>
                   (appt.paymentStatus === "Pending Payment" || appt.paymentStatus === "Complete Payment" || appt.paymentStatus === "Pending Verification") &&
                   appt.status !== "Done" &&

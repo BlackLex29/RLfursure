@@ -6,7 +6,16 @@ import { useRouter } from "next/navigation";
 import { db, auth } from "../firebaseConfig";
 import { collection, doc, setDoc} from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
+import type { Metadata } from "next";
 
+
+ export const metadata: Metadata = {
+  title: "User Dashboard",
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 const GlobalStyle = createGlobalStyle`
   body {
     margin: 0;
@@ -459,6 +468,7 @@ const Petregister: React.FC = () => {
 };
 
 export default Petregister;
+
 
 /* ===== STYLED COMPONENTS ===== */
 const PageContainer = styled.div`

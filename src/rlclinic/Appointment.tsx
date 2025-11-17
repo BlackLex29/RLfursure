@@ -154,8 +154,6 @@ const paymentMethods = [
 ];
 
 // 🔹 FIXED: Enhanced Appointment Creation with Complete Data - SAVES TO APPOINTMENTS COLLECTION
-// 🔹 FIXED: Enhanced Appointment Creation na MATCH sa Security Rules
-// 🔹 FIXED: Enhanced Appointment Creation with Complete Data
 const createAppointmentInFirestore = async (
   bookingState: BookingState,
   paymentMethod: string,
@@ -223,8 +221,7 @@ const createAppointmentInFirestore = async (
     throw new Error(`Failed to create appointment: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 };
-// 🔹 FIXED: Enhanced Payment Processing with Firestore Updates
-// 🔹 FIXED: Enhanced Payment Processing
+
 // 🔹 FIXED: Enhanced Payment Processing with proper types
 const processAppointmentPayment = async (
   appointmentId: string,
@@ -235,7 +232,6 @@ const processAppointmentPayment = async (
   try {
     const appointmentRef = doc(db, "appointments", appointmentId);
     
-    // ✅ FIXED: Replace 'any' with proper TypeScript type
     const updateData: {
       updatedAt: unknown;
       status?: string;
@@ -326,9 +322,6 @@ const getAppointmentDetails = async (appointmentId: string): Promise<Appointment
     createdAt: data.createdAt
   };
 };
-
-// 🔹 FIXED: Enhanced Manual QR Payment Processing Function
-
 
 // 🔹 Utility function to format date
 const formatBirthday = (birthday: string) => {
@@ -790,8 +783,9 @@ const PaymentMethodSelector: React.FC<{
   </FormSection>
 );
 
-// 🔹 FIXED: GCash Payment Modal with Reference Number Input Only
-// 🔹 FIXED: Enhanced GCash Payment Modal
+// 🔹 FIXED: Enhanced GCash Payment Modal with Better Error Handling
+// 🔹 COMPLETE FIX: GCash Payment Modal with Proper Cleanup
+// 🔹 COMPLETE FIX: GCash Payment Modal with Proper Cleanup
 const GCashPaymentModal: React.FC<{
   amount: number;
   appointmentType: string;
@@ -800,25 +794,13 @@ const GCashPaymentModal: React.FC<{
   onCancel: (appointmentId: string) => void;
   appointmentId: string;
 }> = ({ amount, appointmentType, petName, onSuccess, onCancel, appointmentId }) => {
+  const router = useRouter();
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [referenceInput, setReferenceInput] = useState("");
+  const [isCancelling, setIsCancelling] = useState(false);
 
-  const handleCancelPayment = async () => {
-    setIsProcessing(true);
-    try {
-      console.log("❌ Cancelling payment and deleting appointment:", appointmentId);
-      await deleteDoc(doc(db, "appointments", appointmentId));
-      console.log("✅ Appointment successfully deleted");
-      onCancel(appointmentId);
-    } catch (error) {
-      console.error("❌ Error cancelling appointment:", error);
-      alert("Error cancelling appointment. Please try again.");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
+  // 🔹 FIXED: Enhanced reference submission
   const handleSubmitReference = async () => {
     if (!referenceInput.trim()) {
       setError("Please enter your GCash reference number");
@@ -829,46 +811,130 @@ const GCashPaymentModal: React.FC<{
     setError(null);
 
     try {
-      // Update appointment with reference number
-      await updateDoc(doc(db, "appointments", appointmentId), {
+      console.log("📝 Submitting reference number:", referenceInput);
+      
+      const appointmentRef = doc(db, "appointments", appointmentId);
+      
+      // Verify appointment exists
+      const appointmentSnap = await getDoc(appointmentRef);
+      if (!appointmentSnap.exists()) {
+        throw new Error("Appointment not found");
+      }
+      
+      // Update with reference number
+      await updateDoc(appointmentRef, {
         referenceNumber: referenceInput.trim(),
-        status: "Pending Confirmation",
         paymentStatus: "Pending Verification",
+        status: "Pending Confirmation",
         updatedAt: serverTimestamp()
       });
 
-      console.log("✅ Reference number submitted:", referenceInput);
+      console.log("✅ Reference number submitted successfully");
+      
+      // Small delay to ensure Firestore update completes
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      alert("✅ Reference number submitted! Your appointment is pending verification.");
       onSuccess();
+      
     } catch (err) {
       console.error("❌ Error submitting reference:", err);
-      setError("Failed to submit reference number. Please try again.");
+      
+      if (err instanceof Error) {
+        if (err.message.includes('permission')) {
+          setError("Permission denied. Please refresh and try again.");
+        } else if (err.message.includes('not found')) {
+          setError("Appointment not found. It may have been cancelled.");
+        } else {
+          setError(`Failed to submit: ${err.message}`);
+        }
+      } else {
+        setError("An unexpected error occurred. Please try again.");
+      }
     } finally {
       setIsProcessing(false);
     }
   };
 
+  // 🔹 FIXED: Simple and direct cancel logic
+  const handleCancelPayment = async () => {
+    // Prevent double-clicking
+    if (isCancelling || isProcessing) {
+      console.log("⏸️ Already processing, please wait...");
+      return;
+    }
+
+    const userConfirmed = confirm("Are you sure you want to cancel this appointment?");
+    if (!userConfirmed) {
+      console.log("❌ User cancelled the cancellation");
+      return;
+    }
+    
+    console.log("🗑️ Starting cancellation for appointment:", appointmentId);
+    setIsCancelling(true);
+    setError(null);
+
+    try {
+      const appointmentRef = doc(db, "appointments", appointmentId);
+      
+      // Try to delete immediately
+      await deleteDoc(appointmentRef);
+      console.log("✅ Appointment deleted successfully");
+      
+      // Close modal immediately
+      onCancel(appointmentId);
+      
+    } catch (error) {
+      console.error("❌ Error deleting appointment:", error);
+      
+      // If delete fails, try to mark as cancelled
+      try {
+        const appointmentRef = doc(db, "appointments", appointmentId);
+        await updateDoc(appointmentRef, {
+          status: "Cancelled",
+          paymentStatus: "Cancelled",
+          cancelledAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+        
+        console.log("✅ Appointment marked as cancelled");
+        onCancel(appointmentId);
+        
+      } catch (updateError) {
+        console.error("❌ Failed to cancel:", updateError);
+        setError("Failed to cancel appointment. Please try again.");
+        setIsCancelling(false);
+      }
+    }
+  };
+
+  // Copy amount function
   const copyAmount = () => {
     navigator.clipboard.writeText(amount.toString())
       .then(() => {
         alert(`Amount ₱${amount.toLocaleString()} copied to clipboard!`);
       })
       .catch(() => {
-        const textArea = document.createElement("textarea");
-        textArea.value = amount.toString();
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textArea);
-        alert(`Amount ₱${amount.toLocaleString()} copied to clipboard!`);
+        alert(`Amount: ₱${amount.toLocaleString()}`);
       });
   };
 
   return (
-    <PaymentModalOverlay>
-      <PaymentModal className="large-modal">
+    <PaymentModalOverlay onClick={(e) => {
+      // Prevent closing modal when clicking overlay during processing
+      if (isProcessing || isCancelling) {
+        e.stopPropagation();
+      }
+    }}>
+      <PaymentModal className="large-modal" onClick={(e) => e.stopPropagation()}>
         <PaymentModalHeader>
           <PaymentModalTitle>📱 GCash Payment</PaymentModalTitle>
-          <CloseModalButton onClick={() => handleCancelPayment()}>×</CloseModalButton>
+          <CloseModalButton 
+            onClick={handleCancelPayment}
+            disabled={isProcessing || isCancelling}
+          >
+            ×
+          </CloseModalButton>
         </PaymentModalHeader>
         
         <PaymentModalContent>
@@ -927,7 +993,7 @@ const GCashPaymentModal: React.FC<{
                 placeholder="Enter reference number (e.g., 1234567890)"
                 value={referenceInput}
                 onChange={(e) => setReferenceInput(e.target.value)}
-                disabled={isProcessing}
+                disabled={isProcessing || isCancelling}
               />
               <ReferenceInputHint>
                 You can find this in your GCash transaction history
@@ -944,13 +1010,13 @@ const GCashPaymentModal: React.FC<{
           <PaymentModalActions>
             <CancelPaymentButton 
               onClick={handleCancelPayment} 
-              disabled={isProcessing}
+              disabled={isProcessing || isCancelling}
             >
-              {isProcessing ? "Cancelling..." : "❌ Cancel Payment"}
+              {isCancelling ? "Cancelling..." : "❌ Cancel Payment"}
             </CancelPaymentButton>
             <ConfirmPaymentButton 
               onClick={handleSubmitReference} 
-              disabled={isProcessing || !referenceInput.trim()}
+              disabled={isProcessing || isCancelling || !referenceInput.trim()}
             >
               {isProcessing ? (
                 <>
@@ -972,7 +1038,6 @@ const GCashPaymentModal: React.FC<{
     </PaymentModalOverlay>
   );
 };
-
 // 🔹 Clean Printable Receipt Component with Logo and Complete Pet Details
 const PrintableReceipt: React.FC<{
   appointment: Appointment;
@@ -1484,9 +1549,9 @@ const AppointmentPage: React.FC = () => {
   const [showPaymentMethods, setShowPaymentMethods] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
   const [showPrintableReceipt, setShowPrintableReceipt] = useState(false);
-  const [showGCashModal, setShowGCashModal] = useState(false);
+  const [showGCashModal, setShowGCashModal] = useState(false); // ✅ ADDED: Missing state
   const [completedAppointment, setCompletedAppointment] = useState<Appointment | null>(null);
-  const [pendingAppointmentInfo, setPendingAppointmentInfo] = useState<{
+  const [pendingAppointmentInfo, setPendingAppointmentInfo] = useState<{ // ✅ ADDED: Missing state
     id: string;
     amount: number;
     type: string;
@@ -1496,157 +1561,154 @@ const AppointmentPage: React.FC = () => {
   } | null>(null);
 
   // ✅ FIXED: Enhanced GCash Success Handler
-  const handleGCashSuccess = useCallback(async () => {
-    if (pendingAppointmentInfo) {
-      try {
-        // Update appointment status in Firestore
-        await processAppointmentPayment(
-          pendingAppointmentInfo.id, 
-          "GCash", 
-          pendingAppointmentInfo.amount, 
-          pendingAppointmentInfo.referenceNumber
-        );
-
-        // Get updated appointment details
-        const fullAppointment = await getAppointmentDetails(pendingAppointmentInfo.id);
-        
-        setCompletedAppointment(fullAppointment);
-        setShowGCashModal(false);
-        setShowReceipt(true);
-        setPendingAppointmentInfo(null);
-        
-        console.log("✅ GCash payment completed successfully");
-        
-      } catch (error) {
-        console.error("❌ Error completing GCash payment:", error);
-        alert("Payment was successful but there was an error loading your appointment details.");
-      }
-    }
-  }, [pendingAppointmentInfo]);
-
-  // ✅ FIXED: Proper cancel handler for GCash payments
-  const handleGCashCancel = useCallback(async (appointmentId: string) => {
+ // 🔹 FIXED: Enhanced GCash Success Handler
+const handleGCashSuccess = useCallback(async () => {
+  if (pendingAppointmentInfo) {
     try {
-      console.log("🗑️ Deleting cancelled GCash appointment:", appointmentId);
+      // Get updated appointment details
+      const fullAppointment = await getAppointmentDetails(pendingAppointmentInfo.id);
       
-      // Delete the appointment from Firestore
-      await deleteDoc(doc(db, "appointments", appointmentId));
-      
-      console.log("✅ Appointment successfully deleted after cancellation");
-      
-      // Close modal and redirect
+      setCompletedAppointment(fullAppointment);
       setShowGCashModal(false);
+      setShowReceipt(true);
       setPendingAppointmentInfo(null);
       
-      // Show confirmation message
-      alert("Appointment has been cancelled successfully.");
-      
-      // Redirect to dashboard
-      router.push("/userdashboard");
+      console.log("✅ GCash payment completed successfully");
       
     } catch (error) {
-      console.error("❌ Error deleting cancelled appointment:", error);
-      alert("Error cancelling appointment. Please try again.");
-    }
-  }, [router]);
-
-  // 🔹 FIXED: Enhanced Main Booking Handler - SAVES TO APPOINTMENTS COLLECTION
-// 🔹 FIXED: Enhanced Main Booking Handler
-const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
-  setIsProcessing(true);
-  setShowPaymentMethods(false);
-  
-  const { selectedPet, selectedSlot, selectedAppointmentType, selectedDate, selectedPrice } = bookingState;
-
-  try {
-    // Validate required fields
-    if (!selectedPet || !selectedSlot || !selectedAppointmentType || !selectedDate) {
-      throw new Error("Please complete all required fields");
-    }
-
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      throw new Error("No authenticated user found");
-    }
-
-    const selectedPetData = pets.find((p) => p.id === selectedPet);
-    if (!selectedPetData) {
-      throw new Error("Selected pet not found");
-    }
-
-    // Check for conflicts
-    if (isDateUnavailable(selectedDate)) {
-      throw new Error("This date is unavailable. Please select another date.");
-    }
-
-    const isTaken = bookedSlots.some(
-      (s) => s.date === selectedDate && s.timeSlot === selectedSlot && s.status !== "Cancelled"
-    );
-    
-    if (isTaken) {
-      throw new Error("This time slot is already booked by another user");
-    }
-
-    console.log("🚀 Starting appointment creation process...");
-
-    // ✅ STEP 1: Create appointment in Firestore
-    const appointmentId = await createAppointmentInFirestore(
-      bookingState,
-      paymentMethod,
-      currentUser,
-      selectedPetData
-    );
-
-    console.log("✅ Appointment created with ID:", appointmentId);
-
-    // ✅ STEP 2: Send notifications to doctors
-    try {
-      await sendDoctorNotifications(
-        appointmentId, 
-        currentUser, 
-        selectedPetData, 
-        selectedDate, 
-        selectedSlot, 
-        selectedPrice,
-        doctors
-      );
-    } catch (notifError) {
-      console.warn("⚠️ Notification failed (non-critical):", notifError);
-    }
-
-    // ✅ STEP 3: Handle payment method specific flows
-    if (paymentMethod === "Cash") {
-      // For cash payments, show receipt immediately
-      await processAppointmentPayment(appointmentId, "Cash", selectedPrice);
+      console.error("❌ Error completing GCash payment:", error);
+      alert("Payment was successful but there was an error loading your appointment details.");
       
-      const fullAppointment = await getAppointmentDetails(appointmentId);
-      setCompletedAppointment(fullAppointment);
-      setShowReceipt(true);
-      
-      console.log("💰 Cash payment completed successfully");
-      
-    } else if (paymentMethod === "GCash") {
-      // For GCash payments, show payment modal
-      setShowGCashModal(true);
-      setPendingAppointmentInfo({
-        id: appointmentId,
-        amount: selectedPrice,
-        type: selectedAppointmentType,
-        petName: selectedPetData.name,
-        referenceNumber: `GCASH-${Date.now()}`,
-        qrData: `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(`GCASH|09171234567|${selectedPrice}|GCASH-${Date.now()}|FursureCareVet`)}`
-      });
-
-      console.log("📱 GCash payment modal opened");
+      // Still close the modal and redirect
+      setShowGCashModal(false);
+      setPendingAppointmentInfo(null);
+      router.push("/userdashboard");
     }
-
-  } catch (error) {
-    console.error("❌ Appointment booking error:", error);
-    alert(`Failed to book appointment: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  } finally {
-    setIsProcessing(false);
   }
-}, [bookingState, pets, bookedSlots, isDateUnavailable, doctors]);
+}, [pendingAppointmentInfo, router]);
+
+// 🔹 FIXED: Proper cancel handler with cleanup
+const handleGCashCancel = useCallback(async (appointmentId: string) => {
+  try {
+    console.log("🔄 Processing appointment cancellation:", appointmentId);
+    
+    // Close modal first
+    setShowGCashModal(false);
+    setPendingAppointmentInfo(null);
+    
+    // Small delay to allow modal to close smoothly
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // Reset booking state
+    dispatch({ type: 'RESET' });
+    
+    // Redirect to dashboard
+    router.push("/userdashboard");
+    
+    console.log("✅ Cancellation cleanup completed");
+    
+  } catch (error) {
+    console.error("❌ Error in cancellation cleanup:", error);
+    // Still redirect even if there's an error
+    router.push("/userdashboard");
+  }
+}, [router]);
+  // 🔹 FIXED: Enhanced Main Booking Handler
+  const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
+    setIsProcessing(true);
+    setShowPaymentMethods(false);
+    
+    const { selectedPet, selectedSlot, selectedAppointmentType, selectedDate, selectedPrice } = bookingState;
+
+    try {
+      // Validate required fields
+      if (!selectedPet || !selectedSlot || !selectedAppointmentType || !selectedDate) {
+        throw new Error("Please complete all required fields");
+      }
+
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error("No authenticated user found");
+      }
+
+      const selectedPetData = pets.find((p) => p.id === selectedPet);
+      if (!selectedPetData) {
+        throw new Error("Selected pet not found");
+      }
+
+      // Check for conflicts
+      if (isDateUnavailable(selectedDate)) {
+        throw new Error("This date is unavailable. Please select another date.");
+      }
+
+      const isTaken = bookedSlots.some(
+        (s) => s.date === selectedDate && s.timeSlot === selectedSlot && s.status !== "Cancelled"
+      );
+      
+      if (isTaken) {
+        throw new Error("This time slot is already booked by another user");
+      }
+
+      console.log("🚀 Starting appointment creation process...");
+
+      // ✅ STEP 1: Create appointment in Firestore
+      const appointmentId = await createAppointmentInFirestore(
+        bookingState,
+        paymentMethod,
+        currentUser,
+        selectedPetData
+      );
+
+      console.log("✅ Appointment created with ID:", appointmentId);
+
+      // ✅ STEP 2: Send notifications to doctors
+      try {
+        await sendDoctorNotifications(
+          appointmentId, 
+          currentUser, 
+          selectedPetData, 
+          selectedDate, 
+          selectedSlot, 
+          selectedPrice,
+          doctors
+        );
+      } catch (notifError) {
+        console.warn("⚠️ Notification failed (non-critical):", notifError);
+      }
+
+      // ✅ STEP 3: Handle payment method specific flows
+      if (paymentMethod === "Cash") {
+        // For cash payments, show receipt immediately
+        await processAppointmentPayment(appointmentId, "Cash", selectedPrice);
+        
+        const fullAppointment = await getAppointmentDetails(appointmentId);
+        setCompletedAppointment(fullAppointment);
+        setShowReceipt(true);
+        
+        console.log("💰 Cash payment completed successfully");
+        
+      } else if (paymentMethod === "GCash") {
+        // For GCash payments, show payment modal
+        setShowGCashModal(true);
+        setPendingAppointmentInfo({
+          id: appointmentId,
+          amount: selectedPrice,
+          type: selectedAppointmentType,
+          petName: selectedPetData.name,
+          referenceNumber: `GCASH-${Date.now()}`,
+          qrData: `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(`GCASH|09171234567|${selectedPrice}|GCASH-${Date.now()}|FursureCareVet`)}`
+        });
+
+        console.log("📱 GCash payment modal opened");
+      }
+
+    } catch (error) {
+      console.error("❌ Appointment booking error:", error);
+      alert(`Failed to book appointment: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [bookingState, pets, bookedSlots, isDateUnavailable, doctors]);
 
   useEffect(() => {
     const today = new Date().toISOString().split("T")[0];
@@ -2811,9 +2873,21 @@ const CloseModalButton = styled.button`
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: all 0.2s ease;
   
-  &:hover {
+  &:hover:not(:disabled) {
     color: #e74c3c;
+    transform: scale(1.1);
+  }
+  
+  &:active:not(:disabled) {
+    transform: scale(0.95);
+  }
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    color: #999;
   }
 `;
 
@@ -2931,9 +3005,6 @@ const QRCodeImage = styled.img`
   }
 `;
 
-
-
-
 // 🔹 NEW: Reference Input Section Styles
 const ReferenceInputSection = styled.div`
   margin: 20px 0;
@@ -3007,12 +3078,13 @@ const PaymentError = styled.div`
 const PaymentModalActions = styled.div`
   display: flex;
   gap: 12px;
+  position: relative;
+  z-index: 10;
   
   @media (max-width: 480px) {
     flex-direction: column;
   }
 `;
-
 const CancelPaymentButton = styled.button`
   padding: 14px 24px;
   border: 2px solid #e74c3c;
@@ -3026,11 +3098,20 @@ const CancelPaymentButton = styled.button`
   
   &:hover:not(:disabled) {
     background: #ffeaea;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(231, 76, 60, 0.2);
+  }
+  
+  &:active:not(:disabled) {
+    transform: translateY(0);
   }
   
   &:disabled {
-    opacity: 0.6;
+    opacity: 0.5;
     cursor: not-allowed;
+    background: #f5f5f5;
+    color: #999;
+    border-color: #ddd;
   }
 `;
 

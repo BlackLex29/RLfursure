@@ -1,3 +1,4 @@
+// src/app/layout.tsx
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
@@ -13,9 +14,24 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// CRITICAL: Default SEO blocking for ALL pages
 export const metadata: Metadata = {
   title: "FursureCare",
   description: "FursureCare Pet Clinic System",
+  // ITO ANG MAGBABLOCK NG SEARCH ENGINES
+  robots: {
+    index: false,        // Wag i-index
+    follow: false,       // Wag i-follow ang links
+    nocache: true,       // Wag i-cache
+    googleBot: {
+      index: false,
+      follow: false,
+      noimageindex: true,
+    },
+  },
+  // Additional security
+  keywords: ["private", "secure"],
+  authors: [{ name: "FursureCare" }],
   icons: {
     icon: [
       { url: "/RL.jpg", sizes: "32x32", type: "image/jpg" },
@@ -29,6 +45,13 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
+      <head>
+        {/* ADDITIONAL SEO BLOCKING */}
+        <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
+        <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet" />
+        <meta name="slurp" content="noindex, nofollow, noarchive, nosnippet" />
+        <meta name="msnbot" content="noindex, nofollow, noarchive, nosnippet" />
+      </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <StyledComponentsRegistry>{children}</StyledComponentsRegistry>
       </body>
