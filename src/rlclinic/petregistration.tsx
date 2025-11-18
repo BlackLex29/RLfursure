@@ -4,18 +4,9 @@ import React, { useState, useEffect } from "react";
 import styled, { createGlobalStyle, keyframes } from "styled-components";
 import { useRouter } from "next/navigation";
 import { db, auth } from "../firebaseConfig";
-import { collection, doc, setDoc} from "firebase/firestore";
+import { collection, doc, setDoc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
-import type { Metadata } from "next";
 
-
- export const metadata: Metadata = {
-  title: "User Dashboard",
-  robots: {
-    index: false,
-    follow: false,
-  },
-};
 const GlobalStyle = createGlobalStyle`
   body {
     margin: 0;
@@ -77,6 +68,16 @@ const catBreeds = [
   "Others(mixed breed)"
 ];
 
+interface PetData {
+  petName: string;
+  petOwnerName: string;
+  petType: string;
+  petBreed: string;
+  gender: string;
+  birthday: string;
+  color: string;
+}
+
 const Petregister: React.FC = () => {
   const router = useRouter();
 
@@ -92,6 +93,7 @@ const Petregister: React.FC = () => {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [modalMessage, setModalMessage] = useState("");
+  const [successPetData, setSuccessPetData] = useState<PetData | null>(null);
 
   useEffect(() => {
     if (petType === "Dog") {
@@ -143,8 +145,8 @@ const Petregister: React.FC = () => {
       // Get current user
       const currentUser = auth.currentUser;
 
-      // ✅ SIMPLIFIED: Save ONLY to pets collection
-      const petData = {
+      // Save pet data before resetting form
+      const petDataToSave = {
         petId,
         name: petName.trim(),
         birthday: birthday || null,
@@ -152,24 +154,30 @@ const Petregister: React.FC = () => {
         petType: petType.trim(),
         petBreed: petBreed.trim(),
         gender,
-        ownerName: petOwnerName.trim(), // ✅ CHANGED: ownerName instead of email
-        ownerId: currentUser?.uid || "guest", // Still keep ownerId for reference
-        status: "Active", // ✅ CHANGED: Directly active, no approval needed
-        age: age, // ✅ ADDED: Include calculated age
+        ownerName: petOwnerName.trim(),
+        ownerId: currentUser?.uid || "guest",
+        status: "Active",
+        age: age,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
 
-      // ✅ SAVE ONLY TO PETS COLLECTION
-      await setDoc(doc(db, "pets", petId), petData);
+      // Save to pets collection
+      await setDoc(doc(db, "pets", petId), petDataToSave);
 
-      // ✅ REMOVED: No longer saving to petRegistrations collection
-      // ✅ REMOVED: No longer creating medical record automatically
-      // ✅ REMOVED: No longer sending notifications to admin
+      // Set success data for modal BEFORE showing modal and resetting form
+      setSuccessPetData({
+        petName: petName.trim(),
+        petOwnerName: petOwnerName.trim(),
+        petType: petType.trim(),
+        petBreed: petBreed.trim(),
+        gender,
+        birthday: birthday || "Not specified",
+        color: color.trim()
+      });
 
       setModalMessage("Pet registration completed successfully! Your pet has been registered in the system.");
-      setShowSuccessModal(true);
-
+      
       // Reset form
       setPetName("");
       setBirthday("");
@@ -178,6 +186,9 @@ const Petregister: React.FC = () => {
       setPetBreed("");
       setGender("Male");
       setPetOwnerName("");
+
+      // Show success modal after resetting form
+      setShowSuccessModal(true);
 
     } catch (error) {
       console.error("Error saving pet:", error);
@@ -210,6 +221,7 @@ const Petregister: React.FC = () => {
   const handleModalClose = () => {
     setShowSuccessModal(false);
     setShowErrorModal(false);
+    setSuccessPetData(null);
     if (showSuccessModal) {
       router.push("/userdashboard");
     }
@@ -383,7 +395,7 @@ const Petregister: React.FC = () => {
         </Content>
 
         {/* Success Modal */}
-        {showSuccessModal && (
+        {showSuccessModal && successPetData && (
           <ModalOverlay onClick={handleModalClose}>
             <ModalContainer onClick={(e) => e.stopPropagation()}>
               <ModalHeader>
@@ -399,19 +411,25 @@ const Petregister: React.FC = () => {
                 <p>{modalMessage}</p>
                 <PetDetails>
                   <DetailItem>
-                    <strong>Pet Name:</strong> {petName}
+                    <strong>Pet Name:</strong> {successPetData.petName}
                   </DetailItem>
                   <DetailItem>
-                    <strong>Owner Name:</strong> {petOwnerName}
+                    <strong>Owner Name:</strong> {successPetData.petOwnerName}
                   </DetailItem>
                   <DetailItem>
-                    <strong>Type:</strong> {petType}
+                    <strong>Type:</strong> {successPetData.petType}
                   </DetailItem>
                   <DetailItem>
-                    <strong>Breed:</strong> {petBreed}
+                    <strong>Breed:</strong> {successPetData.petBreed}
                   </DetailItem>
                   <DetailItem>
-                    <strong>Gender:</strong> {gender}
+                    <strong>Gender:</strong> {successPetData.gender}
+                  </DetailItem>
+                  <DetailItem>
+                    <strong>Date of Birth:</strong> {successPetData.birthday}
+                  </DetailItem>
+                  <DetailItem>
+                    <strong>Color/Markings:</strong> {successPetData.color}
                   </DetailItem>
                 </PetDetails>
                 <InfoBox>
