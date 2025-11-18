@@ -519,13 +519,18 @@ const useAppointmentData = () => {
   return { pets, bookedSlots, unavailableSlots, doctors, isLoading };
 };
 
-// 🔹 Custom Hook for Availability Logic
+// 🔹 FIXED: Custom Hook for Availability Logic - Proper Date Comparison
 const useAvailability = (unavailableSlots: Unavailable[]) => {
   const isDateUnavailable = useCallback((date: string) => {
     return unavailableSlots.some(slot => {
-      const slotDateFormatted = new Date(slot.date).toISOString().split('T')[0];
-      const selectedDateFormatted = new Date(date).toISOString().split('T')[0];
-      return slotDateFormatted === selectedDateFormatted;
+      // Convert both dates to same format for comparison
+      const slotDate = new Date(slot.date);
+      const selectedDate = new Date(date);
+      
+      // Compare year, month, and day only
+      return slotDate.getFullYear() === selectedDate.getFullYear() &&
+             slotDate.getMonth() === selectedDate.getMonth() &&
+             slotDate.getDate() === selectedDate.getDate();
     });
   }, [unavailableSlots]);
 
@@ -784,8 +789,6 @@ const PaymentMethodSelector: React.FC<{
 );
 
 // 🔹 FIXED: Enhanced GCash Payment Modal with Better Error Handling
-// 🔹 COMPLETE FIX: GCash Payment Modal with Proper Cleanup
-// 🔹 COMPLETE FIX: GCash Payment Modal with Proper Cleanup
 const GCashPaymentModal: React.FC<{
   amount: number;
   appointmentType: string;
@@ -794,7 +797,6 @@ const GCashPaymentModal: React.FC<{
   onCancel: (appointmentId: string) => void;
   appointmentId: string;
 }> = ({ amount, appointmentType, petName, onSuccess, onCancel, appointmentId }) => {
-  const router = useRouter();
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [referenceInput, setReferenceInput] = useState("");
@@ -1038,6 +1040,7 @@ const GCashPaymentModal: React.FC<{
     </PaymentModalOverlay>
   );
 };
+
 // 🔹 Clean Printable Receipt Component with Logo and Complete Pet Details
 const PrintableReceipt: React.FC<{
   appointment: Appointment;
@@ -1549,9 +1552,9 @@ const AppointmentPage: React.FC = () => {
   const [showPaymentMethods, setShowPaymentMethods] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
   const [showPrintableReceipt, setShowPrintableReceipt] = useState(false);
-  const [showGCashModal, setShowGCashModal] = useState(false); // ✅ ADDED: Missing state
+  const [showGCashModal, setShowGCashModal] = useState(false);
   const [completedAppointment, setCompletedAppointment] = useState<Appointment | null>(null);
-  const [pendingAppointmentInfo, setPendingAppointmentInfo] = useState<{ // ✅ ADDED: Missing state
+  const [pendingAppointmentInfo, setPendingAppointmentInfo] = useState<{
     id: string;
     amount: number;
     type: string;
@@ -1560,59 +1563,59 @@ const AppointmentPage: React.FC = () => {
     qrData: string;
   } | null>(null);
 
-  // ✅ FIXED: Enhanced GCash Success Handler
- // 🔹 FIXED: Enhanced GCash Success Handler
-const handleGCashSuccess = useCallback(async () => {
-  if (pendingAppointmentInfo) {
+  // 🔹 FIXED: Enhanced GCash Success Handler
+  const handleGCashSuccess = useCallback(async () => {
+    if (pendingAppointmentInfo) {
+      try {
+        // Get updated appointment details
+        const fullAppointment = await getAppointmentDetails(pendingAppointmentInfo.id);
+        
+        setCompletedAppointment(fullAppointment);
+        setShowGCashModal(false);
+        setShowReceipt(true);
+        setPendingAppointmentInfo(null);
+        
+        console.log("✅ GCash payment completed successfully");
+        
+      } catch (error) {
+        console.error("❌ Error completing GCash payment:", error);
+        alert("Payment was successful but there was an error loading your appointment details.");
+        
+        // Still close the modal and redirect
+        setShowGCashModal(false);
+        setPendingAppointmentInfo(null);
+        router.push("/userdashboard");
+      }
+    }
+  }, [pendingAppointmentInfo, router]);
+
+  // 🔹 FIXED: Proper cancel handler with cleanup
+  const handleGCashCancel = useCallback(async (appointmentId: string) => {
     try {
-      // Get updated appointment details
-      const fullAppointment = await getAppointmentDetails(pendingAppointmentInfo.id);
+      console.log("🔄 Processing appointment cancellation:", appointmentId);
       
-      setCompletedAppointment(fullAppointment);
+      // Close modal first
       setShowGCashModal(false);
-      setShowReceipt(true);
       setPendingAppointmentInfo(null);
       
-      console.log("✅ GCash payment completed successfully");
+      // Small delay to allow modal to close smoothly
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // Reset booking state
+      dispatch({ type: 'RESET' });
+      
+      // Redirect to dashboard
+      router.push("/userdashboard");
+      
+      console.log("✅ Cancellation cleanup completed");
       
     } catch (error) {
-      console.error("❌ Error completing GCash payment:", error);
-      alert("Payment was successful but there was an error loading your appointment details.");
-      
-      // Still close the modal and redirect
-      setShowGCashModal(false);
-      setPendingAppointmentInfo(null);
+      console.error("❌ Error in cancellation cleanup:", error);
+      // Still redirect even if there's an error
       router.push("/userdashboard");
     }
-  }
-}, [pendingAppointmentInfo, router]);
+  }, [router]);
 
-// 🔹 FIXED: Proper cancel handler with cleanup
-const handleGCashCancel = useCallback(async (appointmentId: string) => {
-  try {
-    console.log("🔄 Processing appointment cancellation:", appointmentId);
-    
-    // Close modal first
-    setShowGCashModal(false);
-    setPendingAppointmentInfo(null);
-    
-    // Small delay to allow modal to close smoothly
-    await new Promise(resolve => setTimeout(resolve, 200));
-    
-    // Reset booking state
-    dispatch({ type: 'RESET' });
-    
-    // Redirect to dashboard
-    router.push("/userdashboard");
-    
-    console.log("✅ Cancellation cleanup completed");
-    
-  } catch (error) {
-    console.error("❌ Error in cancellation cleanup:", error);
-    // Still redirect even if there's an error
-    router.push("/userdashboard");
-  }
-}, [router]);
   // 🔹 FIXED: Enhanced Main Booking Handler
   const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
     setIsProcessing(true);
@@ -3085,6 +3088,7 @@ const PaymentModalActions = styled.div`
     flex-direction: column;
   }
 `;
+
 const CancelPaymentButton = styled.button`
   padding: 14px 24px;
   border: 2px solid #e74c3c;

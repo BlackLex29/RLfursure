@@ -6,7 +6,7 @@ import styled, { createGlobalStyle, ThemeProvider, keyframes } from "styled-comp
 import { useRouter } from "next/navigation"
 import { auth, db } from "../firebaseConfig"
 import { signOut } from "firebase/auth"
-import { collection, onSnapshot, doc, deleteDoc, query, where, updateDoc, getDoc, setDoc, orderBy, addDoc } from "firebase/firestore"
+import { collection, onSnapshot, doc,  query, where, updateDoc, getDoc, setDoc, orderBy, addDoc } from "firebase/firestore"
 
 // Define theme interfaces
 interface Theme {
@@ -497,25 +497,6 @@ const completedUnsub = onSnapshot(completedQuery, (snapshot) => {
   }
 
   // ADD: Function to mark appointment as Done
-const handleMarkAsDone = async (appointmentId: string) => {
-  try {
-    const appointmentRef = doc(db, "appointments", appointmentId);
-    
-    await updateDoc(appointmentRef, {
-      status: "Done",
-      completedAt: new Date().toISOString(),
-      paymentStatus: "Complete Payment",
-      updatedAt: new Date().toISOString()
-    });
-    
-    showSuccess("Appointment marked as completed!");
-    console.log("✅ Appointment marked as Done:", appointmentId);
-    
-  } catch (error) {
-    console.error("❌ Error marking appointment as done:", error);
-    alert("Failed to mark appointment as completed. Please try again.");
-  }
-};
 
 const handleRefundRequest = async () => {
   if (!selectedAppointment || !refundReason.trim() || !gcashPhoneNumber.trim()) {
@@ -2448,22 +2429,7 @@ const ContentSubtitle = styled.p<{ theme: Theme }>`
   }
 `;
 
-const DoneButton = styled.button<{ theme: Theme }>`
-  background: #28a745;
-  color: white;
-  border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  
-  &:hover {
-    background: #218838;
-    transform: translateY(-1px);
-  }
-`;
+
 
 // Continue with the rest of the styled components...
 // [Rest of the styled components remain the same but with proper TypeScript types]

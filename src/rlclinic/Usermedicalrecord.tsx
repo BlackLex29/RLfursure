@@ -613,7 +613,9 @@ const UserMedicalRecords: React.FC = () => {
             
             <div class="header">
               <div class="logo-container">
-                <div class="logo">🐾</div>
+                <div class="logo">
+                  <img src="/RL.jpg" alt="RL Clinic Logo" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover;" />
+                </div>
                 <div class="clinic-info">
                   <h1 class="clinic-name">RL VETERINARY CLINIC</h1>
                   <p class="tagline">Compassionate Care for Your Beloved Pets</p>

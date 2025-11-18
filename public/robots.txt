@@ -1,0 +1,48 @@
+# Block ALL bots from sensitive pages
+User-agent: *
+Disallow: /usersdashboard/
+Disallow: /admindashboard/
+Disallow: /vetdashboard/
+Disallow: /petregistration/
+Disallow: /Appointment/
+Disallow: /MonthlyStatistic/
+Disallow: /payment/
+Disallow: /MedicalRecord/
+Disallow: /createaccount/
+Disallow: /forgotpassword/
+Disallow: /Homepage/
+Disallow: /layout/
+Disallow: /registry/
+
+# Allow only login and public pages
+Allow: /login
+Allow: /
+
+# Block specific major crawlers
+User-agent: Googlebot
+Disallow: /usersdashboard/
+Disallow: /admindashboard/
+Disallow: /vetdashboard/
+Disallow: /petregistration/
+Disallow: /Appointment/
+Disallow: /MonthlyStatistic/
+Disallow: /payment/
+Disallow: /MedicalRecord/
+
+User-agent: Bingbot
+Disallow: /usersdashboard/
+Disallow: /admindashboard/
+Disallow: /vetdashboard/
+Disallow: /petregistration/
+Disallow: /Appointment/
+Disallow: /MonthlyStatistic/
+Disallow: /payment/
+Disallow: /MedicalRecord/
+
+User-agent: Slurp
+Disallow: /
+
+User-agent: DuckDuckBot
+Disallow: /usersdashboard/
+Disallow: /admindashboard/
+Disallow: /vetdashboard/

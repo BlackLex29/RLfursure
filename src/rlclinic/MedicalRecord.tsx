@@ -150,11 +150,15 @@ const APPOINTMENT_TYPE_LABELS: Record<string, string> = {
 const sanitizeFirestoreData = (data: Record<string, unknown>) => {
   const sanitized = { ...data };
   Object.keys(sanitized).forEach(key => {
-    if (sanitized[key] === undefined || sanitized[key] === null) delete sanitized[key];
+    // Remove undefined, null, and also convert empty objects/arrays to appropriate values
+    if (sanitized[key] === undefined || sanitized[key] === null) {
+      delete sanitized[key];
+    }
+    // If it's an empty string for optional fields, you might want to keep it
+    // but for required fields, ensure they have default values
   });
   return sanitized;
 };
-
 // Function to get user ID by email
 const getUserIdByEmail = async (email: string): Promise<string | null> => {
   try {
@@ -219,6 +223,8 @@ const sendMedicalRecordNotification = async (
 };
 
 // ✅ NEW: Function to save medical record to usermedicalrecord collection
+// ✅ CORRECTED: Function to save medical record to usermedicalrecord collection
+// ✅ CORRECTED: Function to save medical record to usermedicalrecord collection
 const saveToUserMedicalRecord = async (
   medicalRecordData: MedicalRecord,
   ownerEmail: string
@@ -231,32 +237,37 @@ const saveToUserMedicalRecord = async (
       return;
     }
 
-    // Prepare data for usermedicalrecord collection
+    // ✅ FIXED: Ensure all fields have proper values, replace undefined with empty strings
     const userMedicalRecordData: Omit<UserMedicalRecord, 'id'> = {
-      petName: medicalRecordData.petName,
-      petAge: medicalRecordData.petAge,
-      birthDate: medicalRecordData.birthDate,
-      breed: medicalRecordData.breed,
-      weight: medicalRecordData.weight,
-      gender: medicalRecordData.gender,
-      color: medicalRecordData.color,
-      allergies: medicalRecordData.allergies,
-      existingConditions: medicalRecordData.existingConditions,
-      ownerName: medicalRecordData.ownerName,
-      ownerEmail: medicalRecordData.ownerEmail,
-      petType: medicalRecordData.petType,
-      diagnosis: medicalRecordData.diagnosis,
-      treatment: medicalRecordData.treatment,
-      date: medicalRecordData.date,
-      notes: medicalRecordData.notes,
-      veterinarian: medicalRecordData.veterinarian,
+      petName: medicalRecordData.petName || '',
+      petAge: medicalRecordData.petAge || '',
+      birthDate: medicalRecordData.birthDate || '',
+      breed: medicalRecordData.breed || '',
+      weight: medicalRecordData.weight || '',
+      gender: medicalRecordData.gender || '',
+      color: medicalRecordData.color || '',
+      allergies: medicalRecordData.allergies || '',
+      existingConditions: medicalRecordData.existingConditions || '',
+      ownerName: medicalRecordData.ownerName || '',
+      ownerEmail: medicalRecordData.ownerEmail || '',
+      petType: medicalRecordData.petType || 'dog',
+      diagnosis: medicalRecordData.diagnosis || '',
+      treatment: medicalRecordData.treatment || '',
+      date: medicalRecordData.date || new Date().toISOString().split('T')[0],
+      notes: medicalRecordData.notes || '',
+      veterinarian: medicalRecordData.veterinarian || '',
       status: medicalRecordData.status || "completed",
-      petId: medicalRecordData.petId,
-      appointmentId: medicalRecordData.appointmentId,
-      appointmentType: medicalRecordData.appointmentType,
+      // ✅ FIXED: Ensure petId is never undefined
+      petId: medicalRecordData.petId || '',
+      // ✅ FIXED: Ensure appointmentId is never undefined
+      appointmentId: medicalRecordData.appointmentId || '',
+      appointmentType: medicalRecordData.appointmentType || '',
       userId: userId,
       createdAt: new Date()
     };
+
+    // Sanitize the data to remove any remaining undefined values
+    const sanitizedData = sanitizeFirestoreData(userMedicalRecordData);
 
     // Check if record already exists in usermedicalrecord
     const existingRecordsQuery = query(
@@ -271,13 +282,13 @@ const saveToUserMedicalRecord = async (
       // Update existing record
       const existingDoc = existingRecords.docs[0];
       await updateDoc(doc(db, "usermedicalrecord", existingDoc.id), {
-        ...userMedicalRecordData,
+        ...sanitizedData,
         updatedAt: new Date()
       });
       console.log(`✅ Updated existing medical record in usermedicalrecord for user ${userId}`);
     } else {
       // Create new record
-      await addDoc(collection(db, "usermedicalrecord"), userMedicalRecordData);
+      await addDoc(collection(db, "usermedicalrecord"), sanitizedData);
       console.log(`✅ Created new medical record in usermedicalrecord for user ${userId}`);
     }
     
@@ -286,7 +297,6 @@ const saveToUserMedicalRecord = async (
     throw new Error(`Failed to save medical record to user collection: ${error}`);
   }
 };
-
 // Enhanced function to calculate age from birth date
 const calculateAgeFromBirthDate = (birthDate: string): string => {
   if (!birthDate) return '';
@@ -659,103 +669,104 @@ const MedicalRecord: React.FC = () => {
   };
 
   // ✅ ENHANCED: Handle submit with usermedicalrecord saving and double-click prevention
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+// ✅ ENHANCED: Handle submit with usermedicalrecord saving and double-click prevention
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  
+  // ✅ PREVENT DOUBLE SUBMISSION
+  if (isSubmitting) {
+    console.log('Submission already in progress...');
+    return;
+  }
+
+  if (!currentUser) {
+    alert("Please login first!");
+    return;
+  }
+
+  setIsSubmitting(true);
+
+  const finalStatus = formData.diagnosis && formData.treatment && formData.veterinarian 
+    ? "completed" 
+    : "pending_completion";
+
+  const sanitizedData = sanitizeFirestoreData({
+    ...formData,
+    status: finalStatus,
+    updatedAt: new Date()
+  });
+
+  try {
+    let medicalRecordId: string;
     
-    // ✅ PREVENT DOUBLE SUBMISSION
-    if (isSubmitting) {
-      console.log('Submission already in progress...');
-      return;
-    }
-
-    if (!currentUser) {
-      alert("Please login first!");
-      return;
-    }
-
-    setIsSubmitting(true); // ✅ Set submitting state to true
-
-    const finalStatus = formData.diagnosis && formData.treatment && formData.veterinarian 
-      ? "completed" 
-      : "pending_completion";
-
-    const sanitizedData = sanitizeFirestoreData({
-      ...formData,
-      status: finalStatus,
-      updatedAt: new Date()
-    });
-
-    try {
-      let medicalRecordId: string;
+    if (editingRecord) {
+      // Update existing record
+      await updateDoc(doc(db, "medicalRecords", editingRecord.id), sanitizedData);
+      medicalRecordId = editingRecord.id;
+      setSuccessMessage("✅ Medical record updated successfully!");
       
-      if (editingRecord) {
-        // Update existing record
-        await updateDoc(doc(db, "medicalRecords", editingRecord.id), sanitizedData);
-        medicalRecordId = editingRecord.id;
-        setSuccessMessage("✅ Medical record updated successfully!");
-        
-        // ✅ NEW: Save to usermedicalrecord when editing and completing
-        if (finalStatus === "completed" && editingRecord.status !== "completed") {
-          await saveToUserMedicalRecord(
-            { ...editingRecord, ...sanitizedData } as MedicalRecord,
-            formData.ownerEmail
-          );
-        }
-      } else {
-        // Create new record
-        const docRef = await addDoc(collection(db, "medicalRecords"), {
-          ...sanitizedData,
-          createdAt: new Date()
-        });
-        medicalRecordId = docRef.id;
-        console.log("Medical record created with ID:", docRef.id);
-        
-        setSuccessMessage("✅ Medical record created successfully!");
-        
-        // ✅ NEW: Save to usermedicalrecord when creating completed record
-        if (finalStatus === "completed") {
-          await saveToUserMedicalRecord(
-            { id: medicalRecordId, ...sanitizedData } as MedicalRecord,
-            formData.ownerEmail
-          );
-        }
-        
-        // Refresh appointments list to remove the used one
-        if (formData.appointmentId) {
-          await fetchAppointments();
-        }
-      }
-
-      // ✅ ENHANCED: Send notification if record is completed
-      if (finalStatus === "completed") {
-        await sendMedicalRecordNotification(
-          formData.ownerEmail,
-          formData.petName,
-          medicalRecordId,
-          formData.appointmentType
+      // ✅ NEW: Save to usermedicalrecord when editing and completing
+      if (finalStatus === "completed" && editingRecord.status !== "completed") {
+        await saveToUserMedicalRecord(
+          { ...editingRecord, ...sanitizedData } as MedicalRecord,
+          formData.ownerEmail
         );
       }
-
-      resetForm();
+    } else {
+      // Create new record
+      const docRef = await addDoc(collection(db, "medicalRecords"), {
+        ...sanitizedData,
+        createdAt: new Date()
+      });
+      medicalRecordId = docRef.id;
+      console.log("Medical record created with ID:", docRef.id);
       
-      // ✅ Auto-hide success message after 3 seconds
-      setTimeout(() => {
-        setSuccessMessage(null);
-      }, 3000);
-
-    } catch (error) {
-      console.error("Error saving medical record:", error);
-      setErrorMessage("❌ Failed to save medical record. Please try again.");
+      setSuccessMessage("✅ Medical record created successfully!");
       
-      // ✅ Auto-hide error message after 5 seconds
-      setTimeout(() => {
-        setErrorMessage(null);
-      }, 5000);
-    } finally {
-      // ✅ Reset submitting state whether success or error
-      setIsSubmitting(false);
+      // ✅ NEW: Save to usermedicalrecord when creating completed record
+      if (finalStatus === "completed") {
+        await saveToUserMedicalRecord(
+          { id: medicalRecordId, ...sanitizedData } as MedicalRecord,
+          formData.ownerEmail
+        );
+      }
+      
+      // Refresh appointments list to remove the used one
+      if (formData.appointmentId) {
+        await fetchAppointments();
+      }
     }
-  };
+
+    // ✅ ENHANCED: Send notification if record is completed
+    if (finalStatus === "completed") {
+      await sendMedicalRecordNotification(
+        formData.ownerEmail,
+        formData.petName,
+        medicalRecordId,
+        formData.appointmentType
+      );
+    }
+
+    resetForm();
+    
+    // ✅ Auto-hide success message after 3 seconds
+    setTimeout(() => {
+      setSuccessMessage(null);
+    }, 3000);
+
+  } catch (error) {
+    console.error("Error saving medical record:", error);
+    setErrorMessage("❌ Failed to save medical record. Please try again.");
+    
+    // ✅ Auto-hide error message after 5 seconds
+    setTimeout(() => {
+      setErrorMessage(null);
+    }, 5000);
+  } finally {
+    // ✅ Reset submitting state whether success or error
+    setIsSubmitting(false);
+  }
+};
 
   const handleEdit = (record: MedicalRecord, e?: React.MouseEvent) => {
     if (e) {

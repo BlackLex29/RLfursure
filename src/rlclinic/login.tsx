@@ -1,5 +1,4 @@
-'use client';
-
+"use client"
 import React, { useState, useEffect } from "react";
 import styled, { createGlobalStyle } from "styled-components";
 import { signInWithEmailAndPassword, sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup, getMultiFactorResolver, TotpMultiFactorGenerator, MultiFactorResolver, MultiFactorError } from "firebase/auth";
@@ -55,8 +54,6 @@ const Login: React.FC = () => {
   const [resetLoading, setResetLoading] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
   const [googleUserData, setGoogleUserData] = useState<{ uid: string; email: string; role: string } | null>(null);
-  const [termsAccepted, setTermsAccepted] = useState(false);
-  const [showTermsModal, setShowTermsModal] = useState(false);
   const [totpRequired, setTotpRequired] = useState(false);
   const [totpCode, setTotpCode] = useState("");
   const [mfaResolver, setMfaResolver] = useState<MultiFactorResolver | null>(null);
@@ -93,11 +90,6 @@ const Login: React.FC = () => {
     e.preventDefault();
 
     if (showForgotPassword) {
-      return;
-    }
-
-    if (!termsAccepted) {
-      setError("Please accept the Terms and Conditions to continue.");
       return;
     }
 
@@ -637,11 +629,6 @@ const Login: React.FC = () => {
   };
 
   const handleGoogleLogin = async () => {
-    if (!termsAccepted) {
-      setError("Please accept the Terms and Conditions to continue.");
-      return;
-    }
-
     console.log("🔵 Google login clicked");
     setLoading(true);
     setError("");
@@ -747,14 +734,6 @@ const Login: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleShowTermsModal = () => {
-    setShowTermsModal(true);
-  };
-
-  const handleCloseTermsModal = () => {
-    setShowTermsModal(false);
   };
 
   // Check if we're in a Google OTP flow
@@ -887,24 +866,9 @@ const Login: React.FC = () => {
                     Forgot password?
                   </ForgotPasswordLink>
 
-                  <TermsContainer>
-                    <TermsCheckbox
-                      type="checkbox"
-                      id="terms"
-                      checked={termsAccepted}
-                      onChange={(e) => setTermsAccepted(e.target.checked)}
-                    />
-                    <TermsLabel htmlFor="terms">
-                      I have read and agree to the{" "}
-                      <TermsLink onClick={handleShowTermsModal}>
-                        Terms and Conditions
-                      </TermsLink>
-                    </TermsLabel>
-                  </TermsContainer>
-
                   {error && <ErrorMessage>{error}</ErrorMessage>}
 
-                  <LoginButton type="submit" disabled={loading || !termsAccepted}>
+                  <LoginButton type="submit" disabled={loading}>
                     {loading ? "Signing in..." : "Sign in"}
                   </LoginButton>
 
@@ -917,7 +881,7 @@ const Login: React.FC = () => {
                   <GoogleLoginButton
                     type="button"
                     onClick={handleGoogleLogin}
-                    disabled={loading || !termsAccepted}
+                    disabled={loading}
                   >
                     <GoogleIcon>
                       <svg width="18" height="18" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
@@ -1038,211 +1002,13 @@ const Login: React.FC = () => {
           </FormContainer>
         </RightPanel>
       </LoginContainer>
-
-      {showTermsModal && (
-        <ModalOverlay onClick={handleCloseTermsModal}>
-          <ModalContent onClick={(e) => e.stopPropagation()}>
-            <ModalHeader>
-              <ModalTitle>Terms and Conditions</ModalTitle>
-              <CloseButton onClick={handleCloseTermsModal}>×</CloseButton>
-            </ModalHeader>
-            <ModalBody>
-              <TermsSection>
-                <SectionTitle>1. Acceptance of Terms</SectionTitle>
-                <SectionText>
-                  By accessing and using FurSureCare, you acknowledge that you have read, understood, and agreed to be bound by these Terms and Conditions.
-                </SectionText>
-
-                <SectionTitle>2. Use License</SectionTitle>
-                <SectionText>
-                  Permission is granted to temporarily access FurSureCare for personal, non-commercial use only.
-                </SectionText>
-
-                <SectionTitle>3. User Account</SectionTitle>
-                <SectionText>
-                  You are responsible for maintaining the confidentiality of your account credentials and for all activities under your account.
-                </SectionText>
-
-                <SectionTitle>4. Privacy Policy</SectionTitle>
-                <SectionText>
-                  Your privacy is important to us. Please refer to our Privacy Policy for information about how we collect and use your data.
-                </SectionText>
-
-                <SectionTitle>5. Service Modifications</SectionTitle>
-                <SectionText>
-                  FurSureCare reserves the right to modify or discontinue any part of its services with or without notice.
-                </SectionText>
-
-                <SectionTitle>6. Limitation of Liability</SectionTitle>
-                <SectionText>
-                  FurSureCare shall not be liable for any indirect, incidental, special, or consequential damages arising from your use of the service.
-                </SectionText>
-
-                <SectionTitle>7. Governing Law</SectionTitle>
-                <SectionText>
-                  These Terms shall be governed by and interpreted in accordance with the laws of the Republic of the Philippines.
-                </SectionText>
-              </TermsSection>
-            </ModalBody>
-            <ModalFooter>
-              <AcceptButton onClick={() => { setTermsAccepted(true); handleCloseTermsModal(); }}>
-                I Accept Terms and Conditions
-              </AcceptButton>
-            </ModalFooter>
-          </ModalContent>
-        </ModalOverlay>
-      )}
     </>
   );
 };
 
 export default Login;
 
-// Styled Components (same as before)
-// ... (all the styled components remain unchanged)
-
 // Styled Components
-const TermsContainer = styled.div`
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  margin: 0.5rem 0;
-`;
-
-const TermsCheckbox = styled.input`
-  margin-top: 0.25rem;
-  transform: scale(1.1);
-`;
-
-const TermsLabel = styled.label`
-  font-size: 0.9rem;
-  color: #333;
-  line-height: 1.4;
-  cursor: pointer;
-`;
-
-const TermsLink = styled.button`
-  background: none;
-  border: none;
-  color: #4ecdc4;
-  font-weight: 600;
-  cursor: pointer;
-  text-decoration: underline;
-  padding: 0;
-  
-  &:hover {
-    color: #3db8af;
-  }
-`;
-
-const ModalOverlay = styled.div`
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  padding: 1rem;
-`;
-
-const ModalContent = styled.div`
-  background: white;
-  border-radius: 12px;
-  width: 100%;
-  max-width: 600px;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-`;
-
-const ModalHeader = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1.5rem 2rem;
-  border-bottom: 1px solid #e1e5e9;
-`;
-
-const ModalTitle = styled.h2`
-  margin: 0;
-  color: #1a1a1a;
-  font-size: 1.5rem;
-  font-weight: 700;
-`;
-
-const CloseButton = styled.button`
-  background: none;
-  border: none;
-  font-size: 2rem;
-  cursor: pointer;
-  color: #666;
-  padding: 0;
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  
-  &:hover {
-    color: #333;
-  }
-`;
-
-const ModalBody = styled.div`
-  flex: 1;
-  overflow-y: auto;
-  padding: 2rem;
-`;
-
-const ModalFooter = styled.div`
-  padding: 1.5rem 2rem;
-  border-top: 1px solid #e1e5e9;
-  display: flex;
-  justify-content: flex-end;
-`;
-
-const TermsSection = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-`;
-
-const SectionTitle = styled.h3`
-  margin: 0 0 0.5rem 0;
-  color: #1a1a1a;
-  font-size: 1.1rem;
-  font-weight: 600;
-`;
-
-const SectionText = styled.p`
-  margin: 0;
-  color: #333;
-  line-height: 1.6;
-  font-size: 0.95rem;
-`;
-
-const AcceptButton = styled.button`
-  padding: 0.875rem 2rem;
-  background: linear-gradient(135deg, #4ecdc4 0%, #44a08d 100%);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 1rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  
-  &:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
-  }
-`;
-
 const LoginForm = styled.form`
   display: flex;
   flex-direction: column;

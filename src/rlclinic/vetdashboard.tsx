@@ -105,10 +105,11 @@ const VetDashboard: React.FC = () => {
   const [isMounted, setIsMounted] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState<string>("");
-  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Modal States
   const [showUnavailableModal, setShowUnavailableModal] = useState(false);
+  const [showCancelUnavailableModal, setShowCancelUnavailableModal] = useState(false);
+  const [unavailableToCancel, setUnavailableToCancel] = useState<UnavailableSlot | null>(null);
   const [newUnavailable, setNewUnavailable] = useState({
     date: new Date().toISOString().split('T')[0],
     isAllDay: true,
@@ -385,60 +386,145 @@ const VetDashboard: React.FC = () => {
   };
 
   const handleDeleteUnavailable = async (id: string) => {
-    if (!confirm("Are you sure you want to remove this unavailable date?")) return;
-    
-    setDeletingId(id);
     try {
       await deleteDoc(doc(db, "unavailableSlots", id));
+      setShowCancelUnavailableModal(false);
+      setUnavailableToCancel(null);
       alert("Unavailable date removed successfully!");
     } catch (error) {
       console.error("Error deleting unavailable slot:", error);
       alert("Failed to remove unavailable date. Please try again.");
     } finally {
-      setDeletingId(null);
+
     }
   };
 
-  const handleUpdateAppointmentStatus = async (appointmentId: string, newStatus: string) => {
-    try {
-      const appointmentRef = doc(db, "appointments", appointmentId);
-      await updateDoc(appointmentRef, {
-        status: newStatus,
-      });
-      alert(`Appointment status updated to ${newStatus}!`);
-    } catch (error) {
-      console.error("Error updating appointment status:", error);
-      alert("Failed to update appointment status. Please try again.");
-    }
+  const openCancelUnavailableModal = (slot: UnavailableSlot) => {
+    setUnavailableToCancel(slot);
+    setShowCancelUnavailableModal(true);
   };
+
+  const closeCancelUnavailableModal = () => {
+    setShowCancelUnavailableModal(false);
+    setUnavailableToCancel(null);
+  };
+
 
   // OTP 2FA Functions
-  const handleSendOTP = async () => {
-    if (!otpEmail) {
-      alert("Please enter your email address");
+// OTP 2FA Functions - Gamit ang existing send-email-otp API
+const handleSendOTP = async () => {
+  if (!otpEmail) {
+    alert("Please enter your email address");
+    return;
+  }
+
+  setIsSendingOTP(true);
+  try {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      alert("User not authenticated");
       return;
     }
 
-    setIsSendingOTP(true);
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      
+    // Kunin ang pangalan ng user mula sa Firestore
+    const userDoc = await getDoc(doc(db, "users", currentUser.uid));
+    const userData = userDoc.data();
+    const userName = userData?.name || "Veterinarian";
+
+    const response = await fetch('/api/send-email-otp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: otpEmail,
+        name: userName
+      }),
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      // Store the OTP hash for verification
+      localStorage.setItem('otpHash', data.otpHash);
       setOtpSent(true);
-      alert("OTP sent successfully to your email! (Demo: Use any 6-digit code)");
-    } catch (error) {
-      console.error("Error sending OTP:", error);
-      alert("Failed to send OTP. Please try again.");
-    } finally {
-      setIsSendingOTP(false);
+      alert("OTP sent successfully to your email! Please check your inbox.");
+    } else {
+      throw new Error(data.error || 'Failed to send OTP');
     }
-  };
+  } catch (error) {
+    console.error("Error sending OTP:", error);
+    alert(error instanceof Error ? error.message : "Failed to send OTP. Please try again.");
+  } finally {
+    setIsSendingOTP(false);
+  }
+};
 
-  const handleVerifyOTP = async () => {
-    if (verificationCode.length !== 6) {
-      alert("Please enter a valid 6-digit OTP");
+const handleVerifyOTP = async () => {
+  if (verificationCode.length !== 6) {
+    alert("Please enter a valid 6-digit OTP");
+    return;
+  }
+
+  try {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      alert("User not authenticated");
       return;
     }
 
+    // Kunin ang OTP hash mula sa localStorage
+    const otpHash = localStorage.getItem('otpHash');
+    if (!otpHash) {
+      alert("OTP session expired. Please request a new OTP.");
+      return;
+    }
+
+    // Call the verify-otp API endpoint
+    const response = await fetch('/api/verify-otp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: otpEmail,
+        code: verificationCode,
+        otpHash: otpHash,
+        userId: currentUser.uid
+      }),
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      // Update Firestore
+      const userDocRef = doc(db, "users", currentUser.uid);
+      await updateDoc(userDocRef, {
+        twoFactorEnabled: true,
+        twoFactorEnabledAt: new Date().toISOString()
+      });
+      
+      setTwoFactorEnabled(true);
+      localStorage.setItem('twoFactorEnabled', 'true');
+      
+      // Linisin ang OTP session
+      localStorage.removeItem('otpHash');
+      setShowOTPSetup(false);
+      setVerificationCode("");
+      setOtpSent(false);
+      
+      alert("Two-Factor Authentication enabled successfully!");
+    } else {
+      throw new Error(data.error || 'Failed to verify OTP');
+    }
+  } catch (error) {
+    console.error("Error verifying OTP:", error);
+    alert(error instanceof Error ? error.message : "Failed to verify OTP. Please try again.");
+  }
+};
+
+const handleDisable2FA = async () => {
+  if (confirm("Are you sure you want to disable Two-Factor Authentication? This will make your account less secure.")) {
     try {
       const currentUser = auth.currentUser;
       if (!currentUser) {
@@ -446,51 +532,23 @@ const VetDashboard: React.FC = () => {
         return;
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      
       const userDocRef = doc(db, "users", currentUser.uid);
       await updateDoc(userDocRef, {
-        twoFactorEnabled: true
+        twoFactorEnabled: false,
+        twoFactorDisabledAt: new Date().toISOString()
       });
+
+      setTwoFactorEnabled(false);
+      localStorage.setItem('twoFactorEnabled', 'false');
+      localStorage.removeItem('otpHash');
       
-      setTwoFactorEnabled(true);
-      localStorage.setItem('twoFactorEnabled', 'true');
-      
-      setShowOTPSetup(false);
-      setVerificationCode("");
-      setOtpSent(false);
-      alert("Two-Factor Authentication enabled successfully!");
+      alert("Two-Factor Authentication disabled successfully!");
     } catch (error) {
-      console.error("Error verifying OTP:", error);
-      alert("Failed to verify OTP. Please try again.");
+      console.error("Error disabling 2FA:", error);
+      alert("Failed to disable 2FA. Please try again.");
     }
-  };
-
-  const handleDisable2FA = async () => {
-    if (confirm("Are you sure you want to disable Two-Factor Authentication?")) {
-      try {
-        const currentUser = auth.currentUser;
-        if (!currentUser) {
-          alert("User not authenticated");
-          return;
-        }
-
-        const userDocRef = doc(db, "users", currentUser.uid);
-        await updateDoc(userDocRef, {
-          twoFactorEnabled: false
-        });
-
-        setTwoFactorEnabled(false);
-        localStorage.setItem('twoFactorEnabled', 'false');
-        
-        alert("Two-Factor Authentication disabled successfully!");
-      } catch (error) {
-        console.error("Error disabling 2FA:", error);
-        alert("Failed to disable 2FA. Please try again.");
-      }
-    }
-  };
-
+  }
+};
   const openAppointmentDetails = (appointment: AppointmentType) => {
     setSelectedAppointment(appointment);
     setShowAppointmentDetails(true);
@@ -499,11 +557,6 @@ const VetDashboard: React.FC = () => {
   const closeAppointmentDetails = () => {
     setShowAppointmentDetails(false);
     setSelectedAppointment(null);
-  };
-
-  const openUnavailableDetails = (slot: UnavailableSlot) => {
-    setSelectedUnavailable(slot);
-    setShowUnavailableDetails(true);
   };
 
   const closeUnavailableDetails = () => {
@@ -1085,27 +1138,21 @@ const VetDashboard: React.FC = () => {
                         <UnavailableInfo>
                           <UnavailableDate>{formatDate(slot.date)}</UnavailableDate>
                           <UnavailableTime>
-                            {slot.isAllDay ? "All Day" : `${slot.startTime} - ${slot.endTime}`}
+                            {slot.isAllDay ? "🕐 All Day" : `🕐 ${slot.startTime} - ${slot.endTime}`}
                           </UnavailableTime>
-                          <UnavailableReason>{slot.reason || "No reason provided"}</UnavailableReason>
-                          {slot.leaveDays && slot.leaveDays > 1 && (
-                            <UnavailableDuration>{slot.leaveDays} day(s) leave</UnavailableDuration>
+                          {slot.reason && (
+                            <UnavailableReason>
+                              <strong>📝 Reason:</strong> {slot.reason}
+                            </UnavailableReason>
                           )}
                           <UnavailableStatus>Unavailable</UnavailableStatus>
                         </UnavailableInfo>
                         <UnavailableActions>
                           <ActionButton
-                            $variant="primary"
-                            onClick={() => openUnavailableDetails(slot)}
-                          >
-                            👁 View
-                          </ActionButton>
-                          <ActionButton
                             $variant="danger"
-                            onClick={() => handleDeleteUnavailable(slot.id)}
-                            disabled={deletingId === slot.id}
+                            onClick={() => openCancelUnavailableModal(slot)}
                           >
-                            {deletingId === slot.id ? "Deleting..." : "🗑 Delete"}
+                            🗑 Cancel
                           </ActionButton>
                         </UnavailableActions>
                       </UnavailableCard>
@@ -1161,44 +1208,46 @@ const VetDashboard: React.FC = () => {
                               </SendOTPButton>
                             </OTPEmailSection>
                           ) : (
-                            <OTPVerificationSection>
-                              <OTPInstructions>
-                                We&apos;ve sent a 6-digit verification code to your email. Please enter it below to enable
-                                2FA.
-                              </OTPInstructions>
+                       <OTPVerificationSection>
+                      <OTPInstructions>
+                        We&apos;ve sent a 6-digit verification code to <strong>{otpEmail}</strong>. 
+                        Please enter it below to enable 2FA. The code will expire in 10 minutes.
+                      </OTPInstructions>
 
-                              <OTPInputGroup>
-                                <Label>Enter 6-digit OTP</Label>
-                                <OTPInput
-                                  type="text"
-                                  maxLength={6}
-                                  value={verificationCode}
-                                  onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ""))}
-                                  placeholder="000000"
-                                />
-                                <ResendOTPText>
-                                  Didn&apos;t receive the code?{" "}
-                                  <ResendLink onClick={handleSendOTP} disabled={isSendingOTP}>
-                                    {isSendingOTP ? "Sending..." : "Resend OTP"}
-                                  </ResendLink>
-                                </ResendOTPText>
-                              </OTPInputGroup>
+                      <OTPInputGroup>
+                        <Label>Enter 6-digit OTP</Label>
+                        <OTPInput
+                          type="text"
+                          maxLength={6}
+                          value={verificationCode}
+                          onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ""))}
+                          placeholder="000000"
+                          autoComplete="one-time-code"
+                        />
+                        <ResendOTPText>
+                          Didn&apos;t receive the code?{" "}
+                          <ResendLink onClick={handleSendOTP} disabled={isSendingOTP}>
+                            {isSendingOTP ? "Sending..." : "Resend OTP"}
+                          </ResendLink>
+                        </ResendOTPText>
+                      </OTPInputGroup>
 
-                              <OTPButtonGroup>
-                                <CancelButton
-                                  onClick={() => {
-                                    setShowOTPSetup(false);
-                                    setOtpSent(false);
-                                    setVerificationCode("");
-                                  }}
-                                >
-                                  Cancel
-                                </CancelButton>
-                                <SubmitButton onClick={handleVerifyOTP} disabled={verificationCode.length !== 6}>
-                                  Verify & Enable 2FA
-                                </SubmitButton>
-                              </OTPButtonGroup>
-                            </OTPVerificationSection>
+                      <OTPButtonGroup>
+                        <CancelButton
+                          onClick={() => {
+                            setShowOTPSetup(false);
+                            setOtpSent(false);
+                            setVerificationCode("");
+                            localStorage.removeItem('otpHash');
+                          }}
+                        >
+                          Cancel
+                        </CancelButton>
+                        <SubmitButton onClick={handleVerifyOTP} disabled={verificationCode.length !== 6}>
+                          Verify & Enable 2FA
+                        </SubmitButton>
+                      </OTPButtonGroup>
+                    </OTPVerificationSection>
                           )}
                         </OTPSetupSection>
                       )}
@@ -1372,6 +1421,66 @@ const VetDashboard: React.FC = () => {
                       </SubmitButton>
                     </ButtonGroup>
                   </Form>
+                </ModalContent>
+              </ModalOverlay>
+            )}
+
+            {/* CANCEL UNAVAILABLE MODAL */}
+            {showCancelUnavailableModal && unavailableToCancel && (
+              <ModalOverlay onClick={closeCancelUnavailableModal}>
+                <ModalContent onClick={(e) => e.stopPropagation()} style={{ maxWidth: "500px" }}>
+                  <ModalHeader>
+                    <ModalTitle>Cancel Unavailable Date</ModalTitle>
+                    <CloseButton onClick={closeCancelUnavailableModal} disabled={isLoading}>
+                      ×
+                    </CloseButton>
+                  </ModalHeader>
+                  <div style={{ padding: "2rem" }}>
+                    <p style={{ marginBottom: "1.5rem", color: "#2c3e50" }}>
+                      Are you sure you want to remove this unavailable date?
+                    </p>
+                    
+                    <div style={{ 
+                      background: "#f8f9fa", 
+                      padding: "1rem", 
+                      borderRadius: "8px", 
+                      marginBottom: "1.5rem" 
+                    }}>
+                      <DetailRow>
+                        <DetailLabel>Date:</DetailLabel>
+                        <DetailValue>{formatDate(unavailableToCancel.date)}</DetailValue>
+                      </DetailRow>
+                      <DetailRow>
+                        <DetailLabel>Time:</DetailLabel>
+                        <DetailValue>
+                          {unavailableToCancel.isAllDay ? "All Day" : `${unavailableToCancel.startTime} - ${unavailableToCancel.endTime}`}
+                        </DetailValue>
+                      </DetailRow>
+                      {unavailableToCancel.reason && (
+                        <DetailRow>
+                          <DetailLabel>Reason:</DetailLabel>
+                          <DetailValue>{unavailableToCancel.reason}</DetailValue>
+                        </DetailRow>
+                      )}
+                    </div>
+
+                    <ButtonGroup>
+                      <CancelButton 
+                        type="button" 
+                        onClick={closeCancelUnavailableModal} 
+                        disabled={isLoading}
+                      >
+                        No, Keep It
+                      </CancelButton>
+                      <ActionButton
+                        $variant="danger"
+                        onClick={() => handleDeleteUnavailable(unavailableToCancel.id)}
+                        disabled={isLoading}
+                      >
+                        {isLoading ? "Removing..." : "Yes, Remove It"}
+                      </ActionButton>
+                    </ButtonGroup>
+                  </div>
                 </ModalContent>
               </ModalOverlay>
             )}
@@ -2088,17 +2197,14 @@ const UnavailableTime = styled.p`
 `;
 
 const UnavailableReason = styled.p`
-  margin: 0.25rem 0;
+  margin: 0.5rem 0;
+  padding: 0.75rem;
   font-size: 0.875rem;
   color: #2c3e50;
-  font-style: italic;
-`;
-
-const UnavailableDuration = styled.p`
-  margin: 0.25rem 0;
-  font-size: 0.75rem;
-  color: #3498db;
-  font-weight: 600;
+  background: #fff3cd;
+  border-left: 3px solid #ffc107;
+  border-radius: 4px;
+  line-height: 1.4;
 `;
 
 const UnavailableStatus = styled.span`
