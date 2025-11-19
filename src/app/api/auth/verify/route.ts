@@ -1,55 +1,38 @@
-// lib/firebase-admin.js
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
-import { getFirestore } from 'firebase-admin/firestore';
+import { NextResponse } from 'next/server';
+import { getAdminAuth } from '@/lib/firebase-admin';
 
-// Debug environment variables
-console.log('Firebase Admin Config:', {
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-  privateKeyExists: !!process.env.FIREBASE_PRIVATE_KEY,
-});
+export async function POST(request: Request) {
+  try {
+    const { token } = await request.json();
 
-function initializeFirebaseAdmin() {
-  if (getApps().length > 0) {
-    return getApps()[0];
+    if (!token) {
+      return NextResponse.json(
+        { error: 'No token provided' },
+        { status: 401 }
+      );
+    }
+
+    // Get admin auth instance
+    const adminAuth = getAdminAuth();
+
+    // Verify the ID token
+    const decodedToken = await adminAuth.verifyIdToken(token);
+    
+    // Get user data
+    const user = await adminAuth.getUser(decodedToken.uid);
+
+    return NextResponse.json({
+      uid: user.uid,
+      email: user.email,
+      name: user.displayName || user.email,
+      role: decodedToken.role || 'user',
+      emailVerified: user.emailVerified,
+    });
+  } catch (error) {
+    console.error('Token verification error:', error);
+    return NextResponse.json(
+      { error: 'Invalid token' },
+      { status: 401 }
+    );
   }
-
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
-
-  // Validate all required fields
-  if (!projectId) {
-    throw new Error('Missing FIREBASE_PROJECT_ID environment variable');
-  }
-  if (!clientEmail) {
-    throw new Error('Missing FIREBASE_CLIENT_EMAIL environment variable');
-  }
-  if (!privateKey) {
-    throw new Error('Missing FIREBASE_PRIVATE_KEY environment variable');
-  }
-
-  const serviceAccount = {
-    projectId,
-    clientEmail,
-    privateKey,
-  };
-
-  return initializeApp({
-    credential: cert(serviceAccount),
-  });
 }
-
-// Initialize Firebase Admin
-let adminApp;
-try {
-  adminApp = initializeFirebaseAdmin();
-  console.log('✅ Firebase Admin initialized successfully');
-} catch (error) {
-  console.error('❌ Firebase Admin initialization failed:', error);
-  throw error; // Re-throw to prevent the app from starting with broken Firebase
-}
-
-export const adminAuth = getAuth(adminApp);
-export const adminFirestore = getFirestore(adminApp);

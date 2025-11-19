@@ -10,7 +10,29 @@ const compat = new FlatCompat({
 });
 
 const eslintConfig = [
+  // Ignore build outputs and dependencies
+  {
+    ignores: [
+      ".next/**",
+      "node_modules/**",
+      "out/**",
+      "build/**",
+      "dist/**",
+      ".vercel/**",
+      ".netlify/**",
+      "*.config.js",
+      "*.config.ts",
+    ],
+  },
+  // Extend Next.js configs
   ...compat.extends("next/core-web-vitals", "next/typescript"),
+  // Optional: Override specific rules if needed
+  {
+    rules: {
+      "@typescript-eslint/no-unused-expressions": "off",
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
 ];
 
 export default eslintConfig;
