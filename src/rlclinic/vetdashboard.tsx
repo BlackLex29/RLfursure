@@ -327,8 +327,6 @@ const VetDashboard: React.FC = () => {
     }
   }, []);
 
-  // ✅ FIXED: ADD MISSING fetchUnavailableSlots function
- // ✅ FIXED: Enhanced fetchUnavailableSlots function with proper date handling
 const fetchUnavailableSlots = useCallback(async () => {
   try {
     const snapshot = await getDocs(collection(db, "unavailableSlots"));
@@ -337,9 +335,8 @@ const fetchUnavailableSlots = useCallback(async () => {
       const docData = doc.data();
       
       // Handle date conversion properly
-      let dateValue = docData.startDate || docData.date || "";
+      let dateValue = docData.date || docData.startDate || "";
       
-      // If it's a Firestore Timestamp, convert to string
       if (dateValue && typeof dateValue === 'object' && dateValue.toDate) {
         dateValue = dateValue.toDate().toISOString().split('T')[0];
       }
@@ -363,57 +360,13 @@ const fetchUnavailableSlots = useCallback(async () => {
         isMultipleDays: docData.isMultipleDays || false
       });
     });
+    
+    console.log("📅 Fetched unavailable slots (single documents):", data);
     setUnavailableSlots(data.sort((a, b) => a.date.localeCompare(b.date)));
   } catch (error) {
     console.error("Error fetching unavailable slots:", error);
   }
 }, []);
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      if (user) {
-        try {
-          const userDocRef = doc(db, "users", user.uid);
-          const userDoc = await getDoc(userDocRef);
-          
-          if (userDoc.exists()) {
-            const userData = userDoc.data() as UserRole;
-            const userRole = userData.role || "user";
-            
-            if (userRole === "admin") {
-              router.push("/admindashboard");
-              return;
-            }
-            if (userRole === "user") {
-              router.push("/userdashboard");
-              return;
-            }
-            
-            const is2FAEnabled = userData.twoFactorEnabled || false;
-            setTwoFactorEnabled(is2FAEnabled);
-            localStorage.setItem('twoFactorEnabled', is2FAEnabled.toString());
-          } else {
-            alert("User profile not found.");
-            router.push("/homepage");
-            return;
-          }
-          
-          if (user.email) {
-            setOtpEmail(user.email);
-          }
-          
-          setIsMounted(true);
-        } catch (error) {
-          console.error("Error checking user role:", error);
-          alert("Error verifying access permissions.");
-          router.push("/login");
-        }
-      } else {
-        router.push("/login");
-      }
-    });
-
-    return () => unsubscribe();
-  }, [router]);
 
   useEffect(() => {
     const initialize2FAState = async () => {
@@ -539,70 +492,104 @@ const fetchUnavailableSlots = useCallback(async () => {
   }, [fetchAppointments, fetchTodaysAppointmentsDirectly, fetchUnavailableSlots]);
 
   // ✅ FIXED: Enhanced handleAddUnavailable for proper multiple days handling
-  const handleAddUnavailable = async () => {
-    if (!newUnavailable.date) {
-      alert("Please select a date.");
-      return;
+// 🔹 FIXED: Enhanced handleAddUnavailable with duplicate prevention
+const handleAddUnavailable = async () => {
+  if (!newUnavailable.date) {
+    alert("Please select a date.");
+    return;
+  }
+
+  if (!newUnavailable.reason.trim()) {
+    alert("Please provide a reason for your unavailability.");
+    return;
+  }
+
+  setIsLoading(true);
+  try {
+    const currentUser = auth.currentUser;
+    const userDoc = currentUser ? await getDoc(doc(db, "users", currentUser.uid)) : null;
+    const userData = userDoc?.exists() ? userDoc.data() : null;
+    const vetName = userData?.name || "Veterinarian";
+
+    const startDate = new Date(newUnavailable.date);
+    let endDate = startDate;
+
+    // Calculate end date for multiple days
+    if (newUnavailable.isMultipleDays && newUnavailable.leaveDays > 1) {
+      endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + newUnavailable.leaveDays - 1);
     }
 
-    if (!newUnavailable.reason.trim()) {
-      alert("Please provide a reason for your unavailability.");
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const currentUser = auth.currentUser;
-      const userDoc = currentUser ? await getDoc(doc(db, "users", currentUser.uid)) : null;
-      const userData = userDoc?.exists() ? userDoc.data() : null;
-      const vetName = userData?.name || "Veterinarian";
-
-      const startDate = new Date(newUnavailable.date);
-      let endDate = startDate;
-
-      // Calculate end date for multiple days
-      if (newUnavailable.isMultipleDays && newUnavailable.leaveDays > 1) {
-        endDate = new Date(startDate);
-        endDate.setDate(startDate.getDate() + newUnavailable.leaveDays - 1);
+    // ✅ CHECK FOR EXISTING UNAVAILABLE SLOTS FIRST
+    const existingSlotsSnapshot = await getDocs(collection(db, "unavailableSlots"));
+    const existingDates = new Set();
+    
+    existingSlotsSnapshot.forEach((doc) => {
+      const data = doc.data();
+      if (data.date) {
+        const dateStr = new Date(data.date).toISOString().split('T')[0];
+        existingDates.add(dateStr);
       }
+    });
 
-      // Create single document with date range
-      await addDoc(collection(db, "unavailableSlots"), {
-        startDate: newUnavailable.date,
-        endDate: endDate.toISOString().split('T')[0],
-        veterinarian: vetName,
-        isAllDay: newUnavailable.isAllDay,
-        startTime: newUnavailable.isAllDay ? "" : newUnavailable.startTime,
-        endTime: newUnavailable.isAllDay ? "" : newUnavailable.endTime,
-        reason: newUnavailable.reason,
-        leaveDays: newUnavailable.leaveDays,
-        isMultipleDays: newUnavailable.isMultipleDays && newUnavailable.leaveDays > 1,
-        createdAt: new Date().toISOString(),
-      });
-
-      if (newUnavailable.isMultipleDays && newUnavailable.leaveDays > 1) {
-        alert(`Unavailable time marked successfully for ${newUnavailable.leaveDays} days (${newUnavailable.date} to ${endDate.toISOString().split('T')[0]})!`);
-      } else {
-        alert("Unavailable time marked successfully!");
+    // Create documents for each day in the range
+    const datesToMark = [];
+    const currentDate = new Date(startDate);
+    
+    while (currentDate <= endDate) {
+      const dateString = currentDate.toISOString().split('T')[0];
+      
+      // ✅ CHECK IF DATE ALREADY EXISTS
+      if (existingDates.has(dateString)) {
+        alert(`Date ${dateString} is already marked as unavailable!`);
+        setIsLoading(false);
+        return;
       }
-
-      setShowUnavailableModal(false);
-      setNewUnavailable({
-        date: new Date().toISOString().split('T')[0],
-        isAllDay: true,
-        startTime: "08:00",
-        endTime: "09:00",
-        reason: "",
-        leaveDays: 1,
-        isMultipleDays: false
-      });
-    } catch (error) {
-      console.error("Error marking unavailable:", error);
-      alert("Failed to mark unavailable time. Please try again.");
-    } finally {
-      setIsLoading(false);
+      
+      datesToMark.push(dateString);
+      currentDate.setDate(currentDate.getDate() + 1);
     }
-  };
+
+    // ✅ CREATE ONLY ONE DOCUMENT FOR THE DATE RANGE (not multiple)
+    await addDoc(collection(db, "unavailableSlots"), {
+      date: newUnavailable.date, // Start date
+      startDate: newUnavailable.date,
+      endDate: endDate.toISOString().split('T')[0],
+      veterinarian: vetName,
+      isAllDay: newUnavailable.isAllDay,
+      startTime: newUnavailable.isAllDay ? "" : newUnavailable.startTime,
+      endTime: newUnavailable.isAllDay ? "" : newUnavailable.endTime,
+      reason: newUnavailable.reason,
+      leaveDays: newUnavailable.leaveDays,
+      isMultipleDays: newUnavailable.isMultipleDays && newUnavailable.leaveDays > 1,
+      createdAt: new Date().toISOString(),
+      // ✅ Add all dates in range for easy checking
+      allDatesInRange: datesToMark
+    });
+
+    if (newUnavailable.isMultipleDays && newUnavailable.leaveDays > 1) {
+      alert(`Unavailable time marked successfully for ${newUnavailable.leaveDays} days (${newUnavailable.date} to ${endDate.toISOString().split('T')[0]})!`);
+    } else {
+      alert("Unavailable time marked successfully!");
+    }
+
+    setShowUnavailableModal(false);
+    setNewUnavailable({
+      date: new Date().toISOString().split('T')[0],
+      isAllDay: true,
+      startTime: "08:00",
+      endTime: "09:00",
+      reason: "",
+      leaveDays: 1,
+      isMultipleDays: false
+    });
+  } catch (error) {
+    console.error("Error marking unavailable:", error);
+    alert("Failed to mark unavailable time. Please try again.");
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const handleDeleteUnavailable = async (id: string) => {
     try {

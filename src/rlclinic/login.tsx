@@ -1,10 +1,11 @@
 "use client"
 import React, { useState, useEffect } from "react";
 import styled, { createGlobalStyle } from "styled-components";
-import { signInWithEmailAndPassword, sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup, getMultiFactorResolver, TotpMultiFactorGenerator, MultiFactorResolver, MultiFactorError } from "firebase/auth";
+import { signInWithEmailAndPassword, sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup, TotpMultiFactorGenerator, MultiFactorResolver, } from "firebase/auth";
 import { doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 import { auth, db } from "../firebaseConfig";
 import { useRouter } from "next/navigation";
+import { checkRateLimit, trackFailedLogin, resetFailedAttempts } from '@/lib/services/ratelimitservices'; // Import the rate limit functions
 
 const GlobalStyle = createGlobalStyle`
   body {
@@ -58,7 +59,6 @@ const Login: React.FC = () => {
   const [totpCode, setTotpCode] = useState("");
   const [mfaResolver, setMfaResolver] = useState<MultiFactorResolver | null>(null);
   const router = useRouter();
-  
 
   // Check for reset password action in URL
   useEffect(() => {
@@ -102,6 +102,24 @@ const Login: React.FC = () => {
     try {
       console.log("🔄 Attempting login with:", email);
 
+      // ✅ STEP 1: CHECK RATE LIMIT BEFORE ATTEMPTING LOGIN
+      const rateLimitStatus = await checkRateLimit(email);
+      console.log("📊 Rate limit status:", rateLimitStatus);
+
+      if (rateLimitStatus.isBlocked && rateLimitStatus.blockUntil) {
+        const blockTimeRemaining = Math.ceil((rateLimitStatus.blockUntil - Date.now()) / 1000 / 60);
+        setError(`Account temporarily locked. Please try again in ${blockTimeRemaining} minutes.`);
+        setLoading(false);
+        return;
+      }
+
+      if (rateLimitStatus.attemptsRemaining <= 0) {
+        setError("Too many failed attempts. Account temporarily locked.");
+        setLoading(false);
+        return;
+      }
+
+      // ✅ STEP 2: ATTEMPT LOGIN
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       console.log("✅ Firebase auth success, user ID:", user.uid);
@@ -116,17 +134,19 @@ const Login: React.FC = () => {
       const userData = userDoc.data() as UserRole;
       console.log("👤 User role:", userData.role);
 
-      // Check if 2FA is enabled
+      // ✅ STEP 3: RESET FAILED ATTEMPTS ON SUCCESS
+      await resetFailedAttempts(email);
+      console.log("✅ Reset failed attempts after successful login");
+
+      // Continue with 2FA check and navigation...
       if (userData.twoFactorEnabled) {
         console.log("🔐 2FA enabled, generating OTP...");
-        
-        // Generate and send OTP
         const otp = generateOTP();
         const expiresAt = Date.now() + 10 * 60 * 1000;
 
         const userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || userData.email;
-        
         console.log("✉️ Sending OTP to:", userData.email);
+
         const emailResponse = await fetch('/api/send-email-otp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -138,12 +158,13 @@ const Login: React.FC = () => {
         });
 
         const emailData = await debugAPIResponse(emailResponse);
-        
+        console.log("📩 Email API response:", emailData);
+
         if (!emailResponse.ok) {
-          throw new Error(emailData.error || "Failed to send verification code.");
+          throw new Error(emailData.error || "Failed to send verification code. Please try again.");
         }
 
-        // Store OTP in Firestore
+        console.log("💾 Storing verification code in Firestore...");
         await setDoc(doc(db, "verificationCodes", user.uid), {
           code: otp,
           otpHash: emailData.otpHash,
@@ -153,15 +174,14 @@ const Login: React.FC = () => {
           verified: false
         });
 
-        // Sign out and require OTP verification
+        console.log("🚪 Signing out for OTP verification...");
         await auth.signOut();
-        
+
         setUserId(user.uid);
         setUserRole(userData.role);
         setOtpRequired(true);
-        setError("✅ Verification code sent to your email.");
+        setError("✅ A verification code has been sent to your email.");
       } else {
-        // No 2FA required, navigate directly
         console.log(" No 2FA required, navigating to:", userData.role);
         navigateBasedOnRole(userData.role);
       }
@@ -169,25 +189,31 @@ const Login: React.FC = () => {
     } catch (err: unknown) {
       console.error("❌ Login error:", err);
       
-      // Handle specific Firebase auth errors
       const firebaseError = err as { code?: string; message?: string };
       
-      if (firebaseError.code === "auth/multi-factor-auth-required") {
-        console.log("🔐 GMAIL MFA required");
-        const resolver = getMultiFactorResolver(auth, err as MultiFactorError);
-        setMfaResolver(resolver);
-        setTotpRequired(true);
-        setError("✅ Please enter your Gmail code");
-      } else if (firebaseError.code === "auth/invalid-credential") {
-        setError("Invalid email or password.");
-      } else if (firebaseError.code === "auth/user-not-found") {
-        setError("No account found with this email.");
-      } else if (firebaseError.code === "auth/wrong-password") {
-        setError("Invalid password.");
+      // ✅ STEP 4: HANDLE FAILED ATTEMPTS WITH RATE LIMITING
+      if (firebaseError.code === "auth/invalid-credential" || 
+          firebaseError.code === "auth/wrong-password" ||
+          firebaseError.code === "auth/user-not-found") {
+        
+        // Track failed login attempt
+        const rateLimitResult = await trackFailedLogin(email);
+        console.log("📈 Tracked failed login:", rateLimitResult);
+        
+        if (rateLimitResult.isBlocked && rateLimitResult.blockUntil) {
+          const blockTimeRemaining = Math.ceil((rateLimitResult.blockUntil - Date.now()) / 1000 / 60);
+          setError(`Too many failed attempts. Account locked for ${blockTimeRemaining} minutes.`);
+        } else {
+          const attemptsLeft = rateLimitResult.attemptsRemaining;
+          if (attemptsLeft === 1) {
+            setError(`Invalid email or password. 1 attempt remaining before account lock.`);
+          } else {
+            setError(`Invalid email or password. ${attemptsLeft} attempts remaining.`);
+          }
+        }
+        
       } else if (firebaseError.code === "auth/too-many-requests") {
         setError("Too many failed attempts. Please try again later.");
-      } else if (firebaseError.code === "permission-denied") {
-        setError("Database access denied. Please contact support.");
       } else {
         setError(firebaseError.message || "An error occurred during login.");
       }
@@ -241,6 +267,9 @@ const Login: React.FC = () => {
       const user = userCredential.user;
 
       console.log("✅ TOTP verification successful");
+
+      // Reset failed attempts on successful TOTP verification
+      await resetFailedAttempts(user.email || email);
 
       // Get user role and navigate
       const userDoc = await getDoc(doc(db, "users", user.uid));
@@ -351,6 +380,9 @@ const Login: React.FC = () => {
         // Clean up OTP
         await deleteDoc(doc(db, "verificationCodes", userId));
         
+        // Reset failed attempts on successful OTP verification
+        await resetFailedAttempts(email);
+        
         // Re-authenticate
         console.log(" Re-authenticating user...");
         await signInWithEmailAndPassword(auth, email, password);
@@ -433,6 +465,9 @@ const Login: React.FC = () => {
       if (verificationSuccessful) {
         console.log("✅ Google OTP verification successful, cleaning up...");
         await deleteDoc(doc(db, "verificationCodes", googleUserData.uid));
+
+        // Reset failed attempts for Google login
+        await resetFailedAttempts(googleUserData.email);
 
         console.log("🔑 Re-authenticating Google user...");
         const provider = new GoogleAuthProvider();
@@ -1009,7 +1044,7 @@ const Login: React.FC = () => {
 
 export default Login;
 
-// Styled Components
+// Styled Components (keep all your existing styled components exactly as they are)
 const LoginForm = styled.form`
   display: flex;
   flex-direction: column;

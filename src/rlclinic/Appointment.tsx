@@ -343,6 +343,7 @@ const formatBirthday = (birthday: string) => {
 };
 
 // 🔹 FIXED: Custom Hook for Appointment Data with Enhanced Pet Info
+// 🔹 FIXED: Custom Hook for Appointment Data with Enhanced Unavailable Slots
 const useAppointmentData = () => {
   const [pets, setPets] = useState<Pet[]>([]);
   const [bookedSlots, setBookedSlots] = useState<Appointment[]>([]);
@@ -364,14 +365,13 @@ const useAppointmentData = () => {
             return;
           }
 
-          // ✅ FIXED: Query pets collection with enhanced data
+          // Fetch pets
           const petsQuery = query(
             collection(db, "pets"), 
             where("ownerId", "==", user.uid)
           );
           
           const petsSnapshot = await getDocs(petsQuery);
-          
           const userPets: Pet[] = [];
           petsSnapshot.forEach((doc) => {
             const petData = doc.data();
@@ -406,6 +406,42 @@ const useAppointmentData = () => {
           });
           setDoctors(doctorsData);
 
+          // ✅ CRITICAL: Fetch unavailable slots with proper structure
+          const unavailableSnapshot = await getDocs(collection(db, "unavailableSlots"));
+          const unavailableData: UnavailableSlot[] = [];
+          unavailableSnapshot.forEach((doc) => {
+            const data = doc.data();
+            
+            // Handle date conversion properly - use 'date' field as primary
+            let dateValue = data.date || data.startDate || "";
+            
+            if (dateValue && typeof dateValue === 'object' && dateValue.toDate) {
+              dateValue = dateValue.toDate().toISOString().split('T')[0];
+            }
+            
+            // Handle endDate similarly
+            let endDateValue = data.endDate || "";
+            if (endDateValue && typeof endDateValue === 'object' && endDateValue.toDate) {
+              endDateValue = endDateValue.toDate().toISOString().split('T')[0];
+            }
+
+            unavailableData.push({
+              id: doc.id,
+              date: dateValue, // ✅ This is the key field
+              veterinarian: data.veterinarian || "",
+              isAllDay: data.isAllDay || true,
+              startTime: data.startTime || "",
+              endTime: data.endTime || "",
+              reason: data.reason || "",
+              leaveDays: data.leaveDays || 1,
+              endDate: endDateValue,
+              isMultipleDays: data.isMultipleDays || false
+            });
+          });
+          
+          console.log("✅ Loaded unavailable slots:", unavailableData);
+          setUnavailableSlots(unavailableData);
+
         } catch (error) {
           console.error("❌ Error fetching initial data:", error);
         } finally {
@@ -416,9 +452,9 @@ const useAppointmentData = () => {
       if (user) {
         fetchData(user);
         
-        // Set up real-time listeners with correct query
+        // Set up real-time listeners
         try {
-          // ✅ FIXED: Real-time pets listener with enhanced data
+          // Pets listener
           const petsQuery = query(
             collection(db, "pets"), 
             where("ownerId", "==", user.uid)
@@ -426,7 +462,6 @@ const useAppointmentData = () => {
           
           unsubscribePets = onSnapshot(petsQuery, 
             (snapshot) => {
-              console.log("🔄 Real-time pets update, count:", snapshot.size);
               const userPets: Pet[] = [];
               snapshot.forEach((doc) => {
                 const petData = doc.data();
@@ -442,7 +477,6 @@ const useAppointmentData = () => {
                   age: petData.age
                 });
               });
-              console.log("✅ Updated pets:", userPets);
               setPets(userPets);
             },
             (error) => {
@@ -450,7 +484,7 @@ const useAppointmentData = () => {
             }
           );
 
-          // ✅ FIXED: Real-time appointments listener - watches appointments collection
+          // Appointments listener
           unsubscribeAppointments = onSnapshot(collection(db, "appointments"), 
             (snapshot) => {
               const appointmentsData: Appointment[] = [];
@@ -467,7 +501,6 @@ const useAppointmentData = () => {
                   price: data.price || 0
                 });
               });
-              console.log("🔄 Real-time appointments update, count:", appointmentsData.length);
               setBookedSlots(appointmentsData);
             },
             (error) => {
@@ -475,29 +508,39 @@ const useAppointmentData = () => {
             }
           );
 
-          // Unavailable slots listener
+          // ✅ CRITICAL: Enhanced unavailable slots listener
           unsubscribeUnavailable = onSnapshot(collection(db, "unavailableSlots"), 
             (snapshot) => {
               const unavailableData: UnavailableSlot[] = [];
               snapshot.forEach((doc) => {
                 const data = doc.data();
-                let dateValue = data.date;
-                if (dateValue?.toDate) {
+                
+                // Use 'date' field as primary
+                let dateValue = data.date || data.startDate || "";
+                if (dateValue && typeof dateValue === 'object' && dateValue.toDate) {
                   dateValue = dateValue.toDate().toISOString().split('T')[0];
                 }
+                
+                let endDateValue = data.endDate || "";
+                if (endDateValue && typeof endDateValue === 'object' && endDateValue.toDate) {
+                  endDateValue = endDateValue.toDate().toISOString().split('T')[0];
+                }
+
                 unavailableData.push({
                   id: doc.id,
                   date: dateValue,
-                  veterinarian: data.veterinarian,
-                  isAllDay: data.isAllDay,
-                  startTime: data.startTime,
-                  endTime: data.endTime,
-                  reason: data.reason,
-                  leaveDays: data.leaveDays,
-                  endDate: data.endDate,
-                  isMultipleDays: data.isMultipleDays
+                  veterinarian: data.veterinarian || "",
+                  isAllDay: data.isAllDay || true,
+                  startTime: data.startTime || "",
+                  endTime: data.endTime || "",
+                  reason: data.reason || "",
+                  leaveDays: data.leaveDays || 1,
+                  endDate: endDateValue,
+                  isMultipleDays: data.isMultipleDays || false
                 });
               });
+              
+              console.log("🔄 Real-time unavailable slots update:", unavailableData);
               setUnavailableSlots(unavailableData);
             },
             (error) => {
@@ -532,33 +575,81 @@ const useAppointmentData = () => {
   return { pets, bookedSlots, unavailableSlots, doctors, isLoading };
 };
 
-// 🔹 FIXED: Custom Hook for Availability Logic - Proper Date Comparison
+
 const useAvailability = (unavailableSlots: UnavailableSlot[]) => {
   const isDateUnavailable = useCallback((date: string) => {
+    if (!date) return false;
+    
+    const normalizedSelectedDate = new Date(date).toISOString().split('T')[0];
+    
     return unavailableSlots.some(slot => {
-      // Convert both dates to same format for comparison
-      const slotDate = new Date(slot.date);
+      if (!slot.date) return false;
+      
+      // For single day unavailability
+      if (!slot.isMultipleDays || !slot.endDate) {
+        const normalizedSlotDate = new Date(slot.date).toISOString().split('T')[0];
+        return normalizedSlotDate === normalizedSelectedDate;
+      }
+      
+      // For multiple days unavailability
+      const startDate = new Date(slot.date);
+      const endDate = new Date(slot.endDate);
       const selectedDate = new Date(date);
       
-      // Compare year, month, and day only
-      return slotDate.getFullYear() === selectedDate.getFullYear() &&
-             slotDate.getMonth() === selectedDate.getMonth() &&
-             slotDate.getDate() === selectedDate.getDate();
+      return selectedDate >= startDate && selectedDate <= endDate;
     });
   }, [unavailableSlots]);
 
   const getUnavailableDates = useCallback(() => {
-    return unavailableSlots
-      .map(slot => new Date(slot.date).toLocaleDateString('en-PH', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
-      }));
+    const dates: string[] = [];
+    
+    unavailableSlots.forEach(slot => {
+      if (!slot.date) return;
+      
+      // For single day
+      if (!slot.isMultipleDays || !slot.endDate) {
+        try {
+          const dateObj = new Date(slot.date);
+          if (!isNaN(dateObj.getTime())) {
+            dates.push(dateObj.toLocaleDateString('en-PH', {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric'
+            }));
+          }
+        } catch  {
+          // Skip invalid dates
+        }
+        return;
+      }
+      
+      // For multiple days - add all dates in range
+      try {
+        const startDate = new Date(slot.date);
+        const endDate = new Date(slot.endDate);
+        
+        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return;
+        
+        const currentDate = new Date(startDate);
+        while (currentDate <= endDate) {
+          dates.push(currentDate.toLocaleDateString('en-PH', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+          }));
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+      } catch {
+        // Skip invalid date ranges
+      }
+    });
+    
+    // Remove duplicates and return
+    return [...new Set(dates)];
   }, [unavailableSlots]);
 
   return { isDateUnavailable, getUnavailableDates };
 };
-
 // 🔹 Enhanced Pet Selector Component with Complete Pet Details
 const PetSelector: React.FC<{
   pets: Pet[];
@@ -699,7 +790,6 @@ const DateTimeSelector: React.FC<{
   selectedSlot, 
   bookedSlots, 
   isDateUnavailable, 
-  unavailableDates,
   unavailableSlots,
   onDateChange, 
   onSlotChange,
@@ -707,17 +797,49 @@ const DateTimeSelector: React.FC<{
 }) => {
   // Function to get unavailable reason for selected date
   const getUnavailableReason = (date: string) => {
-    const slot = unavailableSlots.find(s => s.date === date);
+    const slot = unavailableSlots.find(s => {
+      const normalizeDate = (dateStr: string) => {
+        const dateObj = new Date(dateStr);
+        if (isNaN(dateObj.getTime())) return dateStr;
+        const year = dateObj.getFullYear();
+        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const day = String(dateObj.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+      return normalizeDate(s.date) === normalizeDate(date);
+    });
     return slot?.reason || "No reason provided";
   };
-
-  // Function to get veterinarian name for selected date
-  const getUnavailableVeterinarian = (date: string) => {
-    const slot = unavailableSlots.find(s => s.date === date);
+   const getUnavailableVeterinarian = (date: string) => {
+    const slot = unavailableSlots.find(s => {
+      const normalizeDate = (dateStr: string) => {
+        const dateObj = new Date(dateStr);
+        if (isNaN(dateObj.getTime())) return dateStr;
+        const year = dateObj.getFullYear();
+        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const day = String(dateObj.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+      return normalizeDate(s.date) === normalizeDate(date);
+    });
     return slot?.veterinarian || "Veterinarian";
   };
+    const uniqueUnavailableDates = useMemo(() => {
+    const dates = unavailableSlots.map(slot => {
+      if (!slot.date) return '';
+      const dateObj = new Date(slot.date);
+      if (isNaN(dateObj.getTime())) return slot.date;
+      return dateObj.toLocaleDateString('en-PH', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    }).filter(date => date !== '');
+    
+    return [...new Set(dates)]; // Remove duplicates
+  }, [unavailableSlots]);
 
-  return (
+   return (
     <>
       <FormSection>
         <SectionTitle>
@@ -752,7 +874,17 @@ const DateTimeSelector: React.FC<{
             </WarningDetails>
             <ViewDetailsButton 
               onClick={() => {
-                const slot = unavailableSlots.find(s => s.date === selectedDate);
+                const slot = unavailableSlots.find(s => {
+                  const normalizeDate = (dateStr: string) => {
+                    const dateObj = new Date(dateStr);
+                    if (isNaN(dateObj.getTime())) return dateStr;
+                    const year = dateObj.getFullYear();
+                    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                    const day = String(dateObj.getDate()).padStart(2, '0');
+                    return `${year}-${month}-${day}`;
+                  };
+                  return normalizeDate(s.date) === normalizeDate(selectedDate);
+                });
                 if (slot) onViewUnavailableDetails(slot);
               }}
             >
@@ -761,20 +893,27 @@ const DateTimeSelector: React.FC<{
           </UnavailableWarningWithReason>
         )}
         
-        {unavailableDates.length > 0 && (
+        {uniqueUnavailableDates.length > 0 && (
           <UnavailableDatesInfo>
             <strong>Upcoming Unavailable Dates:</strong> 
             <UnavailableDatesList>
-{unavailableDates.slice(0, 5).map((date) => {
-  const slot = unavailableSlots.find(s => s.date === date);
-  return (
-    <UnavailableDateItem 
-      key={date} 
-      onClick={() => {
-        const slot = unavailableSlots.find(s => s.date === date);
-        if (slot) onViewUnavailableDetails(slot);
-      }}
-    >
+              {uniqueUnavailableDates.slice(0, 5).map((date, index) => {
+                const slot = unavailableSlots.find(s => {
+                  const normalizedSlotDate = new Date(s.date).toLocaleDateString('en-PH', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric'
+                  });
+                  return normalizedSlotDate === date;
+                });
+                
+                return (
+                  <UnavailableDateItem 
+                    key={index} 
+                    onClick={() => {
+                      if (slot) onViewUnavailableDetails(slot);
+                    }}
+                  >
                     <DateText>{date}</DateText>
                     {slot?.reason && (
                       <ReasonText title={slot.reason}>
@@ -784,9 +923,9 @@ const DateTimeSelector: React.FC<{
                   </UnavailableDateItem>
                 );
               })}
-              {unavailableDates.length > 5 && (
+              {uniqueUnavailableDates.length > 5 && (
                 <MoreDatesText>
-                  and {unavailableDates.length - 5} more unavailable dates...
+                  and {uniqueUnavailableDates.length - 5} more unavailable dates...
                 </MoreDatesText>
               )}
             </UnavailableDatesList>
@@ -809,6 +948,14 @@ const DateTimeSelector: React.FC<{
               (s) => s.date === selectedDate && s.timeSlot === slot && s.status !== "Cancelled"
             );
             const dateUnavailable = isDateUnavailable(selectedDate);
+            
+            console.log("🕒 Slot check:", {
+              slot,
+              selectedDate,
+              taken,
+              dateUnavailable,
+              isDateUnavailable: isDateUnavailable(selectedDate)
+            });
             
             return (
               <SlotButton

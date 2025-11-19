@@ -200,6 +200,7 @@ const UserDashboard: React.FC = () => {
   const [isClient, setIsClient] = useState(false)
 
   const [isSidebarVisible, setIsSidebarVisible] = useState(true)
+    const [refundFilter, setRefundFilter] = useState<string>("all");
 
   const [showProfileModal, setShowProfileModal] = useState(false)
   const [editFirstName, setEditFirstName] = useState("")
@@ -238,7 +239,7 @@ const UserDashboard: React.FC = () => {
   const [gcashPhoneNumberCancel, setGcashPhoneNumberCancel] = useState("")
   const [showRefundModal, setShowRefundModal] = useState(false)
   const [refundProcessing, setRefundProcessing] = useState(false)
-
+  
   // New state for active menu item
   const [activeMenuItem, setActiveMenuItem] = useState<string>("dashboard")
 
@@ -247,6 +248,7 @@ const UserDashboard: React.FC = () => {
   const [refundHistoryTab, setRefundHistoryTab] = useState<string>("appointments")
   const [selectedRefund, setSelectedRefund] = useState<RefundRequest | null>(null)
   const [showRefundDetailsModal, setShowRefundDetailsModal] = useState(false)
+  
 
   const showSuccess = (message: string) => {
     setSuccessMessage(message)
@@ -545,6 +547,69 @@ const UserDashboard: React.FC = () => {
   }
 
   // ADD: Function to mark appointment as Done
+  const renderRefundHistory = () => {
+    const filteredRefunds = refundRequests.filter(refund => {
+      if (refundFilter === "all") return true;
+      if (refundFilter === "pending") return refund.status === "pending";
+      if (refundFilter === "processing") return refund.status === "approved" || refund.status === "processing";
+      if (refundFilter === "completed") return refund.status === "completed" || refund.refundCompleted;
+      return true;
+    });
+
+    return (
+      <SidebarContent>
+        {/* Filter tabs para sa refund status */}
+        <HistoryTabs>
+          <HistoryTab $active={refundFilter === "all"} onClick={() => setRefundFilter("all")}>
+            All ({refundRequests.length})
+          </HistoryTab>
+          <HistoryTab $active={refundFilter === "pending"} onClick={() => setRefundFilter("pending")}>
+            Pending ({refundRequests.filter(r => r.status === "pending").length})
+          </HistoryTab>
+          <HistoryTab $active={refundFilter === "processing"} onClick={() => setRefundFilter("processing")}>
+            Processing ({refundRequests.filter(r => r.status === "approved" || r.status === "processing").length})
+          </HistoryTab>
+          <HistoryTab $active={refundFilter === "completed"} onClick={() => setRefundFilter("completed")}>
+            Completed ({refundRequests.filter(r => r.status === "completed" || r.refundCompleted).length})
+          </HistoryTab>
+        </HistoryTabs>
+
+        {filteredRefunds.length === 0 ? (
+          <NoHistoryMessage>
+            <NoHistoryIcon>💰</NoHistoryIcon>
+            <NoHistoryText>
+              {refundFilter === "all" 
+                ? "No processing request" 
+                : `No ${refundFilter} processing request`}
+            </NoHistoryText>
+          </NoHistoryMessage>
+        ) : (
+          <SidebarHistoryList>
+            {filteredRefunds.map((refund) => (
+              <RefundHistoryCard key={refund.id} onClick={() => openRefundDetails(refund)}>
+                <SidebarCardHeader>
+                  <AppointmentStatus>{refund.petName}</AppointmentStatus>
+                  <RefundStatusBadge
+                    $status={refund.status}
+                    $completed={refund.refundCompleted || refund.status === "completed"}
+                  >
+                    {getRefundStatusLabel(refund.status, refund.refundCompleted)}
+                  </RefundStatusBadge>
+                </SidebarCardHeader>
+                <ServiceInfo>{getAppointmentTypeLabel(refund.appointmentType)}</ServiceInfo>
+                <DateInfo>Requested: {formatDate(refund.requestedAt)}</DateInfo>
+                <AmountInfo>Amount: ₱{refund.amount || 0}</AmountInfo>
+                {(refund.refundCompleted || refund.status === "completed") && (
+                  <RefundCompleteBadge>✅ Refund Complete</RefundCompleteBadge>
+                )}
+                <ClickHint>Click for details</ClickHint>
+              </RefundHistoryCard>
+            ))}
+          </SidebarHistoryList>
+        )}
+      </SidebarContent>
+    );
+  };
 
   const handleRefundRequest = async () => {
     if (!selectedAppointment || !refundReason.trim() || !gcashPhoneNumber.trim()) {
@@ -934,21 +999,22 @@ const UserDashboard: React.FC = () => {
       day: "numeric",
     })
   }
-
-  const getRefundStatusLabel = (status: string, refundCompleted?: boolean) => {
-    if (refundCompleted) {
-      return "Refund Complete"
-    }
-
-    const statusMap: Record<string, string> = {
-      "pending": "Pending Review",
-      "approved": "Approved",
-      "rejected": "Rejected",
-      "completed": "Refund Complete"
-    }
-    return statusMap[status] || status
+const getRefundStatusLabel = (status: string, refundCompleted?: boolean) => {
+  // If refund is explicitly completed, show as complete
+  if (refundCompleted) {
+    return "Refund Complete";
   }
 
+  // Map status to user-friendly labels
+  const statusMap: Record<string, string> = {
+    "pending": "Pending Review",
+    "approved": "Approved - Processing", 
+    "processing": "Processing Refund",
+    "completed": "Refund Complete"
+  };
+  
+  return statusMap[status] || status;
+};
   // Render different content based on active menu item
   const renderContent = () => {
     switch (activeMenuItem) {
@@ -1270,88 +1336,59 @@ const UserDashboard: React.FC = () => {
     }
   }
 
-  const renderHistorySidebar = () => {
-    return (
-      <>
-        <HistoryTabs>
-          <HistoryTab
-            $active={refundHistoryTab === "appointments"}
-            onClick={() => setRefundHistoryTab("appointments")}
-          >
-            Appointments ({completedAppointments.length})
-          </HistoryTab>
-          <HistoryTab
-            $active={refundHistoryTab === "refunds"}
-            onClick={() => setRefundHistoryTab("refunds")}
-          >
-            Refund Requests ({refundRequests.length})
-          </HistoryTab>
-        </HistoryTabs>
+ const renderHistorySidebar = () => {
+  return (
+    <>
+      <HistoryTabs>
+        <HistoryTab
+          $active={refundHistoryTab === "appointments"}
+          onClick={() => setRefundHistoryTab("appointments")}
+        >
+          Appointments ({completedAppointments.length})
+        </HistoryTab>
+        <HistoryTab
+          $active={refundHistoryTab === "refunds"}
+          onClick={() => setRefundHistoryTab("refunds")}
+        >
+          Refund Requests ({refundRequests.length})
+        </HistoryTab>
+      </HistoryTabs>
 
-        <SidebarContent>
-          {refundHistoryTab === "appointments" ? (
-            completedAppointments.length === 0 ? (
-              <NoHistoryMessage>
-                <NoHistoryIcon>📋</NoHistoryIcon>
-                <NoHistoryText>No appointment history yet</NoHistoryText>
-              </NoHistoryMessage>
-            ) : (
-              <SidebarHistoryList>
-                {completedAppointments.map((appt) => (
-                  <SidebarHistoryCard key={appt.id} onClick={() => openHistoryModal(appt)}>
-                    <SidebarCardHeader>
-                      <AppointmentStatus>{appt.petName}</AppointmentStatus>
-                      <SidebarStatusBadge status={appt.status || "Pending Payment"}>
-                        {appt.status || "Pending Payment"}
-                      </SidebarStatusBadge>
-                    </SidebarCardHeader>
-                    <ServiceInfo>{getAppointmentTypeLabel(appt.appointmentType)}</ServiceInfo>
-                    <DateInfo>
-                      {formatDate(appt.date)} • {appt.timeSlot}
-                    </DateInfo>
-                    <ClickHint>Click for details</ClickHint>
-                  </SidebarHistoryCard>
-                ))}
-              </SidebarHistoryList>
-            )
+      <SidebarContent>
+        {refundHistoryTab === "appointments" ? (
+          // APPOINTMENTS VIEW
+          completedAppointments.length === 0 ? (
+            <NoHistoryMessage>
+              <NoHistoryIcon>📋</NoHistoryIcon>
+              <NoHistoryText>No appointment history yet</NoHistoryText>
+            </NoHistoryMessage>
           ) : (
-            refundRequests.length === 0 ? (
-              <NoHistoryMessage>
-                <NoHistoryIcon>💰</NoHistoryIcon>
-                <NoHistoryText>No refund requests yet</NoHistoryText>
-              </NoHistoryMessage>
-            ) : (
-              <SidebarHistoryList>
-                {refundRequests.map((refund) => (
-                  <RefundHistoryCard key={refund.id} onClick={() => openRefundDetails(refund)}>
-                    <SidebarCardHeader>
-                      <AppointmentStatus>{refund.petName}</AppointmentStatus>
-                      <RefundStatusBadge
-                        $status={refund.status}
-                        $completed={refund.refundCompleted || refund.status === "completed"}
-                      >
-                        {getRefundStatusLabel(refund.status, refund.refundCompleted)}
-                      </RefundStatusBadge>
-                    </SidebarCardHeader>
-                    <ServiceInfo>{getAppointmentTypeLabel(refund.appointmentType)}</ServiceInfo>
-                    <DateInfo>
-                      Requested: {formatDate(refund.requestedAt)}
-                    </DateInfo>
-                    {(refund.refundCompleted || refund.status === "completed") && (
-                      <RefundCompleteBadge>
-                        ✅ Refund Complete
-                      </RefundCompleteBadge>
-                    )}
-                    <ClickHint>Click for details</ClickHint>
-                  </RefundHistoryCard>
-                ))}
-              </SidebarHistoryList>
-            )
-          )}
-        </SidebarContent>
-      </>
-    )
-  }
+            <SidebarHistoryList>
+              {completedAppointments.map((appt) => (
+                <SidebarHistoryCard key={appt.id} onClick={() => openHistoryModal(appt)}>
+                  <SidebarCardHeader>
+                    <AppointmentStatus>{appt.petName}</AppointmentStatus>
+                    <SidebarStatusBadge status={appt.status || "Pending Payment"}>
+                      {appt.status || "Pending Payment"}
+                    </SidebarStatusBadge>
+                  </SidebarCardHeader>
+                  <ServiceInfo>{getAppointmentTypeLabel(appt.appointmentType)}</ServiceInfo>
+                  <DateInfo>
+                    {formatDate(appt.date)} • {appt.timeSlot}
+                  </DateInfo>
+                  <ClickHint>Click for details</ClickHint>
+                </SidebarHistoryCard>
+              ))}
+            </SidebarHistoryList>
+          )
+        ) : (
+          // REFUNDS VIEW - DITO TATAWAGIN ANG RENDERREFUNDHISTORY
+          renderRefundHistory()
+        )}
+      </SidebarContent>
+    </>
+  );
+};
 
   if (!isClient) {
     return (
@@ -2093,6 +2130,7 @@ const UserDashboard: React.FC = () => {
     </ThemeProvider>
   )
 }
+
 
 
 export default UserDashboard
@@ -4109,31 +4147,32 @@ const RefundStatusBadge = styled.span<{ $status: string; $completed?: boolean; t
   font-size: 0.7rem;
   font-weight: 700;
   background: ${props => {
-    if (props.$completed) {
-      return "#d4edda";
+    if (props.$completed || props.$status === "completed") {
+      return "#d4edda"; // Green for completed
     }
     const statusColors: Record<string, { background: string; color: string }> = {
       "pending": { background: "#fff3cd", color: "#856404" },
-      "approved": { background: "#d1ecf1", color: "#0c5460" },
-      "rejected": { background: "#f8d7da", color: "#721c24" },
+      "approved": { background: "#cce7ff", color: "#0066cc" },
+      "processing": { background: "#fff4e6", color: "#cc5500" },
       "completed": { background: "#d4edda", color: "#155724" }
     }
     return statusColors[props.$status]?.background || "#e2e3e5"
   }};
   color: ${props => {
-    if (props.$completed) {
+    if (props.$completed || props.$status === "completed") {
       return "#155724";
     }
     const statusColors: Record<string, { background: string; color: string }> = {
       "pending": { background: "#fff3cd", color: "#856404" },
-      "approved": { background: "#d1ecf1", color: "#0c5460" },
-      "rejected": { background: "#f8d7da", color: "#721c24" },
+      "approved": { background: "#cce7ff", color: "#0066cc" },
+      "processing": { background: "#fff4e6", color: "#cc5500" },
       "completed": { background: "#d4edda", color: "#155724" }
     }
     return statusColors[props.$status]?.color || "#383d41"
   }};
   white-space: nowrap;
-`
+`;
+
 
 const RefundCompleteBadge = styled.div<{ theme: Theme }>`
   background: #d4edda;
@@ -4239,3 +4278,10 @@ const InputHint = styled.div<{ theme: Theme }>`
   transition: color 0.3s ease;
   font-style: italic;
 `
+const AmountInfo = styled.div<{ theme: Theme }>`
+  color: ${props => props.theme.textSecondary};
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+  transition: color 0.3s ease;
+`;
