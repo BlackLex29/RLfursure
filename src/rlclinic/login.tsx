@@ -352,10 +352,10 @@ const Login: React.FC = () => {
         await deleteDoc(doc(db, "verificationCodes", userId));
         
         // Re-authenticate
-        console.log("🔑 Re-authenticating user...");
+        console.log(" Re-authenticating user...");
         await signInWithEmailAndPassword(auth, email, password);
         
-        console.log("🧭 Navigating to:", userRole);
+        console.log(" Navigating to:", userRole);
         navigateBasedOnRole(userRole);
       }
 
