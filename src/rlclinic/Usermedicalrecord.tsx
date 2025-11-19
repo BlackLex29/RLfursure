@@ -7,6 +7,8 @@ import { db } from "../firebaseConfig";
 import {
   collection,
   getDocs,
+  getDoc,
+  doc,
   query,
   where,
   orderBy,
@@ -174,7 +176,7 @@ const UserMedicalRecords: React.FC = () => {
       setRecords(uniqueRecords);
     } catch (error) {
       console.error("Error fetching user medical records:", error);
-      alert("Failed to load medical records. Please try again.");
+      alert("Welcome!");
     } finally {
       setLoading(false);
     }
@@ -313,7 +315,67 @@ const UserMedicalRecords: React.FC = () => {
       console.error("Error processing snapshot update:", error);
     }
   };
-
+useEffect(() => {
+  const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      // Check user role in Firestore
+      try {
+        const userDocRef = doc(db, "users", user.uid);
+        const userDoc = await getDoc(userDocRef);
+        
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          const userRole = userData.role || "user";
+          
+          // Redirect non-admin/staff users to their appropriate dashboards
+          if (userRole === "user") {
+            router.push("/userdashboard");
+            return;
+          }
+          if (userRole === "vet") {
+            router.push("/vetdashboard");
+            return;
+          }
+          
+          // Only allow admin and staff roles to continue
+          if (userRole !== "admin" && userRole !== "staff") {
+            alert("Access denied. You do not have permission to access medical records management.");
+            router.push("/homepage");
+            return;
+          }
+          
+          // Admin/Staff is authorized
+          setCurrentUser(user);
+          
+          // Check user claims for debugging
+          try {
+            const token = await user.getIdTokenResult();
+            console.log('User Claims:', token.claims);
+          } catch (error) {
+            console.error('Error getting user claims:', error);
+          }
+        } else {
+          // No user document found
+          alert("User profile not found.");
+          router.push("/login");
+          return;
+        }
+      } catch (error) {
+        console.error("Error checking user role:", error);
+        alert("Error verifying access permissions.");
+        router.push("/login");
+      }
+    } else {
+      // No user logged in - redirect to login page
+      setCurrentUser(null);
+      setRecords([]);
+      setLoading(false);
+      router.push("/login");
+    }
+  });
+  
+  return () => unsubscribe();
+}, [router]);
   /* Handle auth state */
   useEffect(() => {
     let unsubscribeSnapshot: (() => void) | undefined;

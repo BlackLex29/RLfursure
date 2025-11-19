@@ -52,13 +52,17 @@ interface Appointment {
   createdAt?: unknown;
 }
 
-interface Unavailable {
+interface UnavailableSlot {
   id: string;
   date: string;
   veterinarian: string;
   isAllDay: boolean;
   startTime?: string;
   endTime?: string;
+  reason?: string;
+  leaveDays?: number;
+  endDate?: string;
+  isMultipleDays?: boolean;
 }
 
 interface Doctor {
@@ -165,6 +169,11 @@ const createAppointmentInFirestore = async (
 
     if (!selectedPet || !selectedSlot || !selectedAppointmentType || !selectedDate) {
       throw new Error("Missing required appointment data");
+    }
+
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new Error("No authenticated user found");
     }
 
     // ✅ CRITICAL: Create appointment data with EXACT field names
@@ -337,7 +346,7 @@ const formatBirthday = (birthday: string) => {
 const useAppointmentData = () => {
   const [pets, setPets] = useState<Pet[]>([]);
   const [bookedSlots, setBookedSlots] = useState<Appointment[]>([]);
-  const [unavailableSlots, setUnavailableSlots] = useState<Unavailable[]>([]);
+  const [unavailableSlots, setUnavailableSlots] = useState<UnavailableSlot[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -469,7 +478,7 @@ const useAppointmentData = () => {
           // Unavailable slots listener
           unsubscribeUnavailable = onSnapshot(collection(db, "unavailableSlots"), 
             (snapshot) => {
-              const unavailableData: Unavailable[] = [];
+              const unavailableData: UnavailableSlot[] = [];
               snapshot.forEach((doc) => {
                 const data = doc.data();
                 let dateValue = data.date;
@@ -482,7 +491,11 @@ const useAppointmentData = () => {
                   veterinarian: data.veterinarian,
                   isAllDay: data.isAllDay,
                   startTime: data.startTime,
-                  endTime: data.endTime
+                  endTime: data.endTime,
+                  reason: data.reason,
+                  leaveDays: data.leaveDays,
+                  endDate: data.endDate,
+                  isMultipleDays: data.isMultipleDays
                 });
               });
               setUnavailableSlots(unavailableData);
@@ -520,7 +533,7 @@ const useAppointmentData = () => {
 };
 
 // 🔹 FIXED: Custom Hook for Availability Logic - Proper Date Comparison
-const useAvailability = (unavailableSlots: Unavailable[]) => {
+const useAvailability = (unavailableSlots: UnavailableSlot[]) => {
   const isDateUnavailable = useCallback((date: string) => {
     return unavailableSlots.some(slot => {
       // Convert both dates to same format for comparison
@@ -670,87 +683,152 @@ const AppointmentTypeGrid: React.FC<{
   </FormSection>
 );
 
-// 🔹 Date Time Selector Component
+// 🔹 Date Time Selector Component with Enhanced Unavailable Dates
 const DateTimeSelector: React.FC<{
   selectedDate: string;
   selectedSlot: string | null;
   bookedSlots: Appointment[];
   isDateUnavailable: (date: string) => boolean;
   unavailableDates: string[];
+  unavailableSlots: UnavailableSlot[];
   onDateChange: (date: string) => void;
   onSlotChange: (slot: string) => void;
+  onViewUnavailableDetails: (slot: UnavailableSlot) => void;
 }> = ({ 
   selectedDate, 
   selectedSlot, 
   bookedSlots, 
   isDateUnavailable, 
   unavailableDates,
+  unavailableSlots,
   onDateChange, 
-  onSlotChange 
-}) => (
-  <>
-    <FormSection>
-      <SectionTitle>
-        <SectionIcon>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-            <path fillRule="evenodd" d="M6.75 2.25A.75.75 0 017.5 3v1.5h9V3A.75.75 0 0118 3v1.5h.75a3 3 0 013 3v11.25a3 3 0 01-3 3H5.25a3 3 0 01-3-3V7.5a3 3 0 013-3H6V3a.75.75 0 01.75-.75zm13.5 9a1.5 1.5 0 00-1.5-1.5H5.25a1.5 1.5 0 00-1.5 1.5v7.5a1.5 1.5 0 001.5 1.5h13.5a1.5 1.5 0 001.5-1.5v-7.5z" clipRule="evenodd" />
-          </svg>
-        </SectionIcon>
-        Select Date
-      </SectionTitle>
-      <DateInput
-        type="date"
-        value={selectedDate}
-        min={new Date().toISOString().split("T")[0]}
-        onChange={(e) => onDateChange(e.target.value)}
-      />
-      {isDateUnavailable(selectedDate) && (
-        <UnavailableWarning>
-          ⚠️ This date is unavailable. Please select another date.
-        </UnavailableWarning>
-      )}
-      {unavailableDates.length > 0 && (
-        <UnavailableDatesInfo>
-          <strong>Upcoming Unavailable Dates:</strong> {unavailableDates.slice(0, 5).join(", ")}
-          {unavailableDates.length > 5 && ` and ${unavailableDates.length - 5} more...`}
-        </UnavailableDatesInfo>
-      )}
-    </FormSection>
+  onSlotChange,
+  onViewUnavailableDetails
+}) => {
+  // Function to get unavailable reason for selected date
+  const getUnavailableReason = (date: string) => {
+    const slot = unavailableSlots.find(s => s.date === date);
+    return slot?.reason || "No reason provided";
+  };
 
-    <FormSection>
-      <SectionTitle>
-        <SectionIcon>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-            <path fillRule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM12.75 6a.75.75 0 00-1.5 0v6c0 .414.336.75.75.75h4.5a.75.75 0 000-1.5h-3.75V6z" clipRule="evenodd" />
-          </svg>
-        </SectionIcon>
-        Select Time Slot
-      </SectionTitle>
-      <SlotGrid>
-        {timeSlots.map((slot) => {
-          const taken = bookedSlots.some(
-            (s) => s.date === selectedDate && s.timeSlot === slot && s.status !== "Cancelled"
-          );
-          const dateUnavailable = isDateUnavailable(selectedDate);
-          
-          return (
-            <SlotButton
-              key={slot}
-              type="button"
-              disabled={taken || dateUnavailable}
-              className={selectedSlot === slot ? "selected" : ""}
-              onClick={() => !dateUnavailable && !taken && onSlotChange(slot)}
+  // Function to get veterinarian name for selected date
+  const getUnavailableVeterinarian = (date: string) => {
+    const slot = unavailableSlots.find(s => s.date === date);
+    return slot?.veterinarian || "Veterinarian";
+  };
+
+  return (
+    <>
+      <FormSection>
+        <SectionTitle>
+          <SectionIcon>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+              <path fillRule="evenodd" d="M6.75 2.25A.75.75 0 017.5 3v1.5h9V3A.75.75 0 0118 3v1.5h.75a3 3 0 013 3v11.25a3 3 0 01-3 3H5.25a3 3 0 01-3-3V7.5a3 3 0 013-3H6V3a.75.75 0 01.75-.75zm13.5 9a1.5 1.5 0 00-1.5-1.5H5.25a1.5 1.5 0 00-1.5 1.5v7.5a1.5 1.5 0 001.5 1.5h13.5a1.5 1.5 0 001.5-1.5v-7.5z" clipRule="evenodd" />
+            </svg>
+          </SectionIcon>
+          Select Date
+        </SectionTitle>
+        <DateInput
+          type="date"
+          value={selectedDate}
+          min={new Date().toISOString().split("T")[0]}
+          onChange={(e) => onDateChange(e.target.value)}
+        />
+        
+        {/* Enhanced Unavailable Warning with Reason */}
+        {isDateUnavailable(selectedDate) && (
+          <UnavailableWarningWithReason>
+            <WarningHeader>
+              <WarningIcon>⚠️</WarningIcon>
+              <WarningTitle>This date is unavailable</WarningTitle>
+            </WarningHeader>
+            <WarningDetails>
+              <VeterinarianInfo>
+                <strong>Veterinarian:</strong> {getUnavailableVeterinarian(selectedDate)}
+              </VeterinarianInfo>
+              <ReasonInfo>
+                <strong>Reason:</strong> {getUnavailableReason(selectedDate)}
+              </ReasonInfo>
+            </WarningDetails>
+            <ViewDetailsButton 
+              onClick={() => {
+                const slot = unavailableSlots.find(s => s.date === selectedDate);
+                if (slot) onViewUnavailableDetails(slot);
+              }}
             >
-              {slot}
-              {taken && <TakenIndicator>Booked</TakenIndicator>}
-              {dateUnavailable && <TakenIndicator>Unavailable</TakenIndicator>}
-            </SlotButton>
-          );
-        })}
-      </SlotGrid>
-    </FormSection>
-  </>
-);
+              📋 View Full Details
+            </ViewDetailsButton>
+          </UnavailableWarningWithReason>
+        )}
+        
+        {unavailableDates.length > 0 && (
+          <UnavailableDatesInfo>
+            <strong>Upcoming Unavailable Dates:</strong> 
+            <UnavailableDatesList>
+              {unavailableDates.slice(0, 5).map((date, index) => {
+                const slot = unavailableSlots.find(s => s.date === date);
+                return (
+                  <UnavailableDateItem 
+                    key={date} 
+                    onClick={() => {
+                      const slot = unavailableSlots.find(s => s.date === date);
+                      if (slot) onViewUnavailableDetails(slot);
+                    }}
+                  >
+                    <DateText>{date}</DateText>
+                    {slot?.reason && (
+                      <ReasonText title={slot.reason}>
+                        {slot.reason.length > 30 ? slot.reason.substring(0, 30) + '...' : slot.reason}
+                      </ReasonText>
+                    )}
+                  </UnavailableDateItem>
+                );
+              })}
+              {unavailableDates.length > 5 && (
+                <MoreDatesText>
+                  and {unavailableDates.length - 5} more unavailable dates...
+                </MoreDatesText>
+              )}
+            </UnavailableDatesList>
+          </UnavailableDatesInfo>
+        )}
+      </FormSection>
+
+      <FormSection>
+        <SectionTitle>
+          <SectionIcon>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+              <path fillRule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM12.75 6a.75.75 0 00-1.5 0v6c0 .414.336.75.75.75h4.5a.75.75 0 000-1.5h-3.75V6z" clipRule="evenodd" />
+            </svg>
+          </SectionIcon>
+          Select Time Slot
+        </SectionTitle>
+        <SlotGrid>
+          {timeSlots.map((slot) => {
+            const taken = bookedSlots.some(
+              (s) => s.date === selectedDate && s.timeSlot === slot && s.status !== "Cancelled"
+            );
+            const dateUnavailable = isDateUnavailable(selectedDate);
+            
+            return (
+              <SlotButton
+                key={slot}
+                type="button"
+                disabled={taken || dateUnavailable}
+                className={selectedSlot === slot ? "selected" : ""}
+                onClick={() => !dateUnavailable && !taken && onSlotChange(slot)}
+              >
+                {slot}
+                {taken && <TakenIndicator>Booked</TakenIndicator>}
+                {dateUnavailable && <TakenIndicator>Unavailable</TakenIndicator>}
+              </SlotButton>
+            );
+          })}
+        </SlotGrid>
+      </FormSection>
+    </>
+  );
+};
 
 // 🔹 Payment Method Selector Component
 const PaymentMethodSelector: React.FC<{
@@ -787,6 +865,121 @@ const PaymentMethodSelector: React.FC<{
     </PaymentMethodContainer>
   </FormSection>
 );
+
+// 🔹 Unavailable Details Modal Component
+const UnavailableDetailsModal: React.FC<{
+  slot: UnavailableSlot | null;
+  onClose: () => void;
+}> = ({ slot, onClose }) => {
+  if (!slot) return null;
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-PH', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
+  const formatTime = (startTime?: string, endTime?: string, isAllDay?: boolean) => {
+    if (isAllDay) return "All Day";
+    if (startTime && endTime) return `${startTime} - ${endTime}`;
+    return "Not specified";
+  };
+
+  return (
+    <ModalOverlay onClick={onClose}>
+      <ModalContent onClick={(e) => e.stopPropagation()} style={{ maxWidth: "500px" }}>
+        <ModalHeader>
+          <ModalTitle>Unavailable Date Details</ModalTitle>
+          <CloseButton onClick={onClose}>×</CloseButton>
+        </ModalHeader>
+        
+        <DetailsContent>
+          <DetailSection>
+            <DetailSectionTitle>Unavailability Information</DetailSectionTitle>
+            
+            <DetailItem>
+              <DetailLabelLarge>Veterinarian:</DetailLabelLarge>
+              <DetailValueLarge>{slot.veterinarian}</DetailValueLarge>
+            </DetailItem>
+
+            <DetailItem>
+              <DetailLabelLarge>Date:</DetailLabelLarge>
+              <DetailValueLarge>{formatDate(slot.date)}</DetailValueLarge>
+            </DetailItem>
+
+            {slot.endDate && slot.isMultipleDays && (
+              <DetailItem>
+                <DetailLabelLarge>End Date:</DetailLabelLarge>
+                <DetailValueLarge>{formatDate(slot.endDate)}</DetailValueLarge>
+              </DetailItem>
+            )}
+
+            {slot.leaveDays && slot.leaveDays > 1 && (
+              <DetailItem>
+                <DetailLabelLarge>Duration:</DetailLabelLarge>
+                <DetailValueLarge>{slot.leaveDays} days</DetailValueLarge>
+              </DetailItem>
+            )}
+
+            <DetailItem>
+              <DetailLabelLarge>Time:</DetailLabelLarge>
+              <DetailValueLarge>
+                {formatTime(slot.startTime, slot.endTime, slot.isAllDay)}
+              </DetailValueLarge>
+            </DetailItem>
+
+            <DetailItem>
+              <DetailLabelLarge>Status:</DetailLabelLarge>
+              <DetailValueLarge>
+                <span style={{
+                  color: '#e74c3c',
+                  fontWeight: 'bold',
+                  fontSize: '0.875rem'
+                }}>
+                  UNAVAILABLE
+                </span>
+              </DetailValueLarge>
+            </DetailItem>
+
+            {slot.reason && (
+              <DetailItem style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                <DetailLabelLarge style={{ marginBottom: '0.5rem' }}>Reason:</DetailLabelLarge>
+                <div style={{
+                  background: '#f8f9fa',
+                  padding: '1rem',
+                  borderRadius: '6px',
+                  border: '1px solid #e9ecef',
+                  width: '100%'
+                }}>
+                  <DetailValueLarge style={{ 
+                    fontStyle: 'italic', 
+                    lineHeight: '1.5',
+                    color: '#2c3e50'
+                  }}>
+                    {slot.reason}
+                  </DetailValueLarge>
+                </div>
+              </DetailItem>
+            )}
+          </DetailSection>
+
+          <AppointmentActions>
+            <ActionButton
+              $variant="primary"
+              onClick={onClose}
+              style={{ flex: 1 }}
+            >
+              Close
+            </ActionButton>
+          </AppointmentActions>
+        </DetailsContent>
+      </ModalContent>
+    </ModalOverlay>
+  );
+};
 
 // 🔹 FIXED: Enhanced GCash Payment Modal with Better Error Handling
 const GCashPaymentModal: React.FC<{
@@ -1553,6 +1746,8 @@ const AppointmentPage: React.FC = () => {
   const [showReceipt, setShowReceipt] = useState(false);
   const [showPrintableReceipt, setShowPrintableReceipt] = useState(false);
   const [showGCashModal, setShowGCashModal] = useState(false);
+  const [showUnavailableDetails, setShowUnavailableDetails] = useState(false);
+  const [selectedUnavailableSlot, setSelectedUnavailableSlot] = useState<UnavailableSlot | null>(null);
   const [completedAppointment, setCompletedAppointment] = useState<Appointment | null>(null);
   const [pendingAppointmentInfo, setPendingAppointmentInfo] = useState<{
     id: string;
@@ -1615,6 +1810,17 @@ const AppointmentPage: React.FC = () => {
       router.push("/userdashboard");
     }
   }, [router]);
+
+  // 🔹 Unavailable Details Modal Handlers
+  const openUnavailableDetails = (slot: UnavailableSlot) => {
+    setSelectedUnavailableSlot(slot);
+    setShowUnavailableDetails(true);
+  };
+
+  const closeUnavailableDetails = () => {
+    setShowUnavailableDetails(false);
+    setSelectedUnavailableSlot(null);
+  };
 
   // 🔹 FIXED: Enhanced Main Booking Handler
   const handlePaymentSelection = useCallback(async (paymentMethod: string) => {
@@ -1857,8 +2063,10 @@ const AppointmentPage: React.FC = () => {
                   bookedSlots={bookedSlots}
                   isDateUnavailable={isDateUnavailable}
                   unavailableDates={getUnavailableDates()}
+                  unavailableSlots={unavailableSlots}
                   onDateChange={(date) => dispatch({ type: 'SET_DATE', payload: date })}
                   onSlotChange={(slot) => dispatch({ type: 'SET_SLOT', payload: slot })}
+                  onViewUnavailableDetails={openUnavailableDetails}
                 />
 
                 <ButtonGroup>
@@ -1919,7 +2127,7 @@ const AppointmentPage: React.FC = () => {
           )}
         </Card>
 
-        {/* GCash Payment Modal - FIXED with reference number input only */}
+        {/* GCash Payment Modal */}
         {showGCashModal && pendingAppointmentInfo && (
           <GCashPaymentModal
             amount={pendingAppointmentInfo.amount}
@@ -1930,6 +2138,14 @@ const AppointmentPage: React.FC = () => {
             onCancel={handleGCashCancel}
           />
         )}
+
+        {/* Unavailable Details Modal */}
+        {showUnavailableDetails && (
+          <UnavailableDetailsModal 
+            slot={selectedUnavailableSlot} 
+            onClose={closeUnavailableDetails} 
+          />
+        )}
       </Wrapper>
     </>
   );
@@ -1937,7 +2153,9 @@ const AppointmentPage: React.FC = () => {
 
 export default AppointmentPage;
 
-// 🔹 STYLED COMPONENTS - Improved GCash Modal Styles with Reference Input
+// 🔹 STYLED COMPONENTS - All the styled components from the previous code remain the same
+// (Include all the styled components from the previous implementation)
+
 const GlobalStyle = createGlobalStyle`
   body {
     margin: 0;
@@ -2220,13 +2438,62 @@ const DateInput = styled.input`
   }
 `;
 
-const UnavailableWarning = styled.div`
+// 🔹 NEW: Enhanced Unavailable Warning with Reason
+const UnavailableWarningWithReason = styled.div`
   background-color: #fff3cd;
   color: #856404;
-  padding: 12px 16px;
+  padding: 16px;
   border-radius: 8px;
-  font-weight: 500;
-  margin-top: 8px;
+  margin-top: 12px;
+  border-left: 4px solid #ffc107;
+`;
+
+const WarningHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+`;
+
+const WarningIcon = styled.span`
+  font-size: 18px;
+`;
+
+const WarningTitle = styled.span`
+  font-weight: 600;
+  font-size: 16px;
+`;
+
+const WarningDetails = styled.div`
+  margin-bottom: 12px;
+  padding-left: 26px;
+`;
+
+const VeterinarianInfo = styled.div`
+  margin-bottom: 4px;
+  font-size: 14px;
+`;
+
+const ReasonInfo = styled.div`
+  font-size: 14px;
+  line-height: 1.4;
+`;
+
+const ViewDetailsButton = styled.button`
+  background: transparent;
+  border: 1px solid #856404;
+  color: #856404;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-left: 26px;
+  
+  &:hover {
+    background: #856404;
+    color: white;
+  }
 `;
 
 const UnavailableDatesInfo = styled.div`
@@ -2236,6 +2503,54 @@ const UnavailableDatesInfo = styled.div`
   border-radius: 8px;
   font-size: 14px;
   margin-top: 8px;
+`;
+
+const UnavailableDatesList = styled.div`
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+`;
+
+const UnavailableDateItem = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border-left: 3px solid #e74c3c;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background: #e9ecef;
+    transform: translateX(4px);
+  }
+`;
+
+const DateText = styled.span`
+  font-weight: 600;
+  color: #2c3e50;
+  font-size: 14px;
+`;
+
+const ReasonText = styled.span`
+  color: #7f8c8d;
+  font-size: 12px;
+  font-style: italic;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+const MoreDatesText = styled.div`
+  text-align: center;
+  color: #7f8c8d;
+  font-size: 12px;
+  font-style: italic;
+  margin-top: 4px;
 `;
 
 const SlotGrid = styled.div`
@@ -2391,7 +2706,139 @@ const LoadingSpinner = styled.div`
   font-weight: 600;
 `;
 
-// 🔹 Receipt Screen Styled Components - Clean Design with Logo
+// 🔹 Modal Styled Components
+const ModalOverlay = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+`;
+
+const ModalContent = styled.div`
+  background: white;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: ${fadeIn} 0.3s ease-out;
+`;
+
+const ModalHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid #ecf0f1;
+`;
+
+const ModalTitle = styled.h2`
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #2c3e50;
+`;
+
+const CloseButton = styled.button`
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #7f8c8d;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  &:hover {
+    color: #2c3e50;
+  }
+`;
+
+const DetailsContent = styled.div`
+  padding: 2rem;
+`;
+
+const DetailSection = styled.div`
+  margin-bottom: 2rem;
+`;
+
+const DetailSectionTitle = styled.h3`
+  margin: 0 0 1rem 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #2c3e50;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #ecf0f1;
+`;
+
+const DetailItem = styled.div`
+  display: flex;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+`;
+
+const DetailLabelLarge = styled.span`
+  font-weight: 500;
+  color: #7f8c8d;
+  min-width: 120px;
+`;
+
+const DetailValueLarge = styled.span`
+  color: #2c3e50;
+  flex: 1;
+`;
+
+const AppointmentActions = styled.div`
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+`;
+
+const ActionButton = styled.button<{ $variant: "primary" | "success" | "warning" | "danger" | "info" }>`
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex: 1;
+  
+  background: ${props =>
+    props.$variant === "primary" ? "#3498db" :
+    props.$variant === "success" ? "#28a745" :
+    props.$variant === "warning" ? "#ffc107" :
+    props.$variant === "danger" ? "#dc3545" :
+    "#17a2b8"
+  };
+  
+  color: ${props => 
+    props.$variant === "warning" ? "#212529" : "white"
+  };
+  
+  &:hover:not(:disabled) {
+    opacity: 0.9;
+    transform: translateY(-1px);
+  }
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+`;
+
+// 🔹 Receipt Screen Styled Components
 const ReceiptContainer = styled.div`
   display: flex;
   flex-direction: column;
@@ -2482,12 +2929,6 @@ const DetailsGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 16px;
-`;
-
-const DetailItem = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 `;
 
 const DetailLabel = styled.span`
@@ -2598,7 +3039,7 @@ const PrintIcon = styled.span`
   font-size: 16px;
 `;
 
-// 🔹 Printable Receipt Styled Components with Logo
+// 🔹 Printable Receipt Styled Components
 const PrintOverlay = styled.div`
   position: fixed;
   top: 0;
@@ -2802,23 +3243,7 @@ const PrintButton = styled.button`
   }
 `;
 
-const CloseButton = styled.button`
-  padding: 12px 20px;
-  border: 2px solid #e74c3c;
-  border-radius: 8px;
-  background: white;
-  color: #e74c3c;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  flex: 1;
-  
-  &:hover { 
-    background: #ffeaea;
-  }
-`;
-
-// 🔹 NEW: Improved Styled Components for Enhanced GCash Modal with Reference Input
+// 🔹 GCash Payment Modal Styled Components
 const PaymentModalOverlay = styled.div`
   position: fixed;
   top: 0;

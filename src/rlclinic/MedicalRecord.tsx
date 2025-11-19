@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import styled, { createGlobalStyle } from "styled-components";
 import { useRouter } from "next/navigation";
 import { db, auth } from "../firebaseConfig";
-import { collection, getDocs, addDoc, updateDoc, doc, query, where, orderBy, onSnapshot } from "firebase/firestore";
+import { collection, getDocs, addDoc, updateDoc, doc, query, where, orderBy, onSnapshot, getDoc } from "firebase/firestore";
 import { onAuthStateChanged, User } from "firebase/auth";
 
 const GlobalStyle = createGlobalStyle`
@@ -124,7 +124,7 @@ const TREATMENT_OPTIONS = {
 
 const PET_BREEDS = {
   dog: ["Aspin (Asong Pinoy)","Shih Tzu","Siberian Husky","Chihuahua","Labrador Retriever","Beagle","Golden Retriever","Poodle","Dachshund","Rottweiler","Philippine Forest Dog (Asong Gubat)"],
-  cat: ["British Shorthair","Burmese","Abyssinian","Scottish Fold","Siamese","Sphynx","Ragdoll","American Shorthair","Maine Coon","Persian","Putot Cat (Pusang Putot)"]
+  cat: ["British Shorthair","Burmese","Abyssinian","Scottish Fold","Siamese","Sphynx","Ragdoll","American Shorthair","Maine Coon","Persian","Pusang Aspin"]
 };
 
 const APPOINTMENT_TYPE_MAPPINGS: Record<string, {diagnosis: string, treatment: string}> = {
@@ -440,6 +440,67 @@ const MedicalRecord: React.FC = () => {
   });
 
   const [isFromAppointment, setIsFromAppointment] = useState(false);
+  useEffect(() => {
+  const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      // Check user role in Firestore
+      try {
+        const userDocRef = doc(db, "users", user.uid);
+        const userDoc = await getDoc(userDocRef);
+        
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          const userRole = userData.role || "user";
+          
+          // Redirect non-admin/staff users to their appropriate dashboards
+          if (userRole === "user") {
+            router.push("/userdashboard");
+            return;
+          }
+          if (userRole === "vet") {
+            router.push("/vetdashboard");
+            return;
+          }
+          
+          // Only allow admin and staff roles to continue
+          if (userRole !== "admin" && userRole !== "staff") {
+            alert("Access denied. You do not have permission to access medical records management.");
+            router.push("/homepage");
+            return;
+          }
+          
+          // Admin/Staff is authorized
+          setCurrentUser(user);
+          
+          // Check user claims for debugging
+          try {
+            const token = await user.getIdTokenResult();
+            console.log('User Claims:', token.claims);
+          } catch (error) {
+            console.error('Error getting user claims:', error);
+          }
+        } else {
+          // No user document found
+          alert("User profile not found.");
+          router.push("/homepage");
+          return;
+        }
+      } catch (error) {
+        console.error("Error checking user role:", error);
+        alert("Error verifying access permissions.");
+        router.push("/homepage");
+      }
+    } else {
+      // No user logged in - redirect to login page
+      setCurrentUser(null);
+      setRecords([]);
+      setLoading(false);
+      router.push("/homepage");
+    }
+  });
+  
+  return () => unsubscribe();
+}, [router]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {

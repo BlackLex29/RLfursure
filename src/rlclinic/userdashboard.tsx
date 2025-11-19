@@ -6,7 +6,7 @@ import styled, { createGlobalStyle, ThemeProvider, keyframes } from "styled-comp
 import { useRouter } from "next/navigation"
 import { auth, db } from "../firebaseConfig"
 import { signOut } from "firebase/auth"
-import { collection, onSnapshot, doc,  query, where, updateDoc, getDoc, setDoc, orderBy, addDoc } from "firebase/firestore"
+import { collection, onSnapshot, doc, query, where, updateDoc, getDoc, setDoc, orderBy, addDoc } from "firebase/firestore"
 
 // Define theme interfaces
 interface Theme {
@@ -60,7 +60,7 @@ const themes: Themes = {
 
 declare module 'styled-components' {
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-  export interface DefaultTheme {}
+  export interface DefaultTheme { }
 }
 
 // Create GlobalStyle with theme support
@@ -260,6 +260,54 @@ const UserDashboard: React.FC = () => {
     setIsClient(true)
     setToday(new Date().toISOString().split("T")[0])
 
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      if (user) {
+        // Check user role in Firestore
+        try {
+          const userDoc = await getDoc(doc(db, "users", user.uid))
+
+          if (userDoc.exists()) {
+            const userData = userDoc.data()
+            const userRole = userData.role || "user"
+
+            // Redirect admin users to admin dashboard
+            if (userRole === "admin") {
+              router.push("/admindashboard")
+              return
+            }
+
+            // Redirect staff users to staff dashboard
+            if (userRole === "staff") {
+              router.push("/staff")
+              return
+            }
+          }
+
+          // Allow access for regular users
+          setUserEmail(user.email)
+          setUserId(user.uid)
+          setOtpEmail(user.email || "")
+        } catch (error) {
+          console.error("Error checking user role:", error)
+          // If there's an error, treat as regular user
+          setUserEmail(user.email)
+          setUserId(user.uid)
+          setOtpEmail(user.email || "")
+        }
+      } else {
+        // No user logged in - redirect to login page
+        router.push("/login")
+      }
+    })
+
+    return () => unsubscribe()
+  }, [router])
+
+
+  useEffect(() => {
+    setIsClient(true)
+    setToday(new Date().toISOString().split("T")[0])
+
     const unsubscribe = auth.onAuthStateChanged((user) => {
       if (user) {
         setUserEmail(user.email)
@@ -280,7 +328,7 @@ const UserDashboard: React.FC = () => {
     const fetchUserProfile = async () => {
       try {
         const userDoc = await getDoc(doc(db, "users", userId))
-        
+
         if (userDoc.exists()) {
           const profileData = userDoc.data() as UserProfile;
           setUserProfile(profileData);
@@ -303,7 +351,7 @@ const UserDashboard: React.FC = () => {
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
           };
-          
+
           // Use setDoc instead of addDoc for specific document ID
           await setDoc(doc(db, "users", userId), defaultProfile);
           setUserProfile(defaultProfile);
@@ -358,64 +406,64 @@ const UserDashboard: React.FC = () => {
     })
 
     // FIXED: Query appointments by userId instead of clientName
-// FIXED: Query appointments by userId instead of clientName
-// FIXED: Active appointments - dapat WALANG "Done" status dito
-const activeQuery = query(
-  collection(db, "appointments"), 
-  where("userId", "==", userId)
-)
+    // FIXED: Query appointments by userId instead of clientName
+    // FIXED: Active appointments - dapat WALANG "Done" status dito
+    const activeQuery = query(
+      collection(db, "appointments"),
+      where("userId", "==", userId)
+    )
 
-const activeUnsub = onSnapshot(activeQuery, (snapshot) => {
-  const data: AppointmentType[] = []
-  snapshot.forEach((doc) => {
-    const appointmentData = { 
-      id: doc.id, 
-      ...(doc.data() as Omit<AppointmentType, "id">) 
-    }
-    
-    // STRICT FILTERING: Mga status na dapat nasa active appointments
-    const activeStatuses = ["Confirmed", "Pending Payment", "Pending Confirmation", "Scheduled", "Pending"]
-    const status = appointmentData.status || ""
-    
-    if (activeStatuses.includes(status)) {
-      data.push(appointmentData)
-    }
-  })
-  data.sort((a, b) => a.date.localeCompare(b.date))
-  setAppointments(data)
-  console.log("📅 Active appointments:", data.length)
-})
+    const activeUnsub = onSnapshot(activeQuery, (snapshot) => {
+      const data: AppointmentType[] = []
+      snapshot.forEach((doc) => {
+        const appointmentData = {
+          id: doc.id,
+          ...(doc.data() as Omit<AppointmentType, "id">)
+        }
 
-// FIXED: Completed appointments - dapat mga "Done" at cancelled status dito
-const completedQuery = query(
-  collection(db, "appointments"), 
-  where("userId", "==", userId)
-)
+        // STRICT FILTERING: Mga status na dapat nasa active appointments
+        const activeStatuses = ["Confirmed", "Pending Payment", "Pending Confirmation", "Scheduled", "Pending"]
+        const status = appointmentData.status || ""
 
-const completedUnsub = onSnapshot(completedQuery, (snapshot) => {
-  const data: AppointmentType[] = []
-  snapshot.forEach((doc) => {
-    const appointmentData = { 
-      id: doc.id, 
-      ...(doc.data() as Omit<AppointmentType, "id">) 
-    }
-    
-    // STRICT FILTERING: Mga status na dapat nasa completed/history
-    const completedStatuses = ["Done", "Completed", "Not Attend", "Cancelled"]
-    const status = appointmentData.status || ""
-    
-    if (completedStatuses.includes(status)) {
-      data.push(appointmentData)
-    }
-  })
-  data.sort((a, b) => {
-    const dateA = a.completedAt || a.date
-    const dateB = b.completedAt || b.date
-    return new Date(dateB).getTime() - new Date(dateA).getTime()
-  })
-  setCompletedAppointments(data)
-  console.log("✅ Completed appointments:", data.length)
-})
+        if (activeStatuses.includes(status)) {
+          data.push(appointmentData)
+        }
+      })
+      data.sort((a, b) => a.date.localeCompare(b.date))
+      setAppointments(data)
+      console.log("📅 Active appointments:", data.length)
+    })
+
+    // FIXED: Completed appointments - dapat mga "Done" at cancelled status dito
+    const completedQuery = query(
+      collection(db, "appointments"),
+      where("userId", "==", userId)
+    )
+
+    const completedUnsub = onSnapshot(completedQuery, (snapshot) => {
+      const data: AppointmentType[] = []
+      snapshot.forEach((doc) => {
+        const appointmentData = {
+          id: doc.id,
+          ...(doc.data() as Omit<AppointmentType, "id">)
+        }
+
+        // STRICT FILTERING: Mga status na dapat nasa completed/history
+        const completedStatuses = ["Done", "Completed", "Not Attend", "Cancelled"]
+        const status = appointmentData.status || ""
+
+        if (completedStatuses.includes(status)) {
+          data.push(appointmentData)
+        }
+      })
+      data.sort((a, b) => {
+        const dateA = a.completedAt || a.date
+        const dateB = b.completedAt || b.date
+        return new Date(dateB).getTime() - new Date(dateA).getTime()
+      })
+      setCompletedAppointments(data)
+      console.log("✅ Completed appointments:", data.length)
+    })
 
     return () => {
       unsubscribePets()
@@ -437,7 +485,7 @@ const completedUnsub = onSnapshot(completedQuery, (snapshot) => {
     if (!userId) return
 
     const refundQuery = query(
-      collection(db, "refundRequests"), 
+      collection(db, "refundRequests"),
       where("userId", "==", userId),
       orderBy("requestedAt", "desc")
     )
@@ -482,7 +530,7 @@ const completedUnsub = onSnapshot(completedQuery, (snapshot) => {
 
   const openCancelModal = (appt: AppointmentType) => {
     setSelectedAppointment(appt)
-    
+
     // Check if payment method is GCash
     if (appt.paymentMethod?.toLowerCase() === 'gcash') {
       setGcashReferenceNo("")
@@ -498,96 +546,24 @@ const completedUnsub = onSnapshot(completedQuery, (snapshot) => {
 
   // ADD: Function to mark appointment as Done
 
-const handleRefundRequest = async () => {
-  if (!selectedAppointment || !refundReason.trim() || !gcashPhoneNumber.trim()) {
-    alert("Please provide both the GCash phone number and reason for cancellation.");
-    return;
-  }
+  const handleRefundRequest = async () => {
+    if (!selectedAppointment || !refundReason.trim() || !gcashPhoneNumber.trim()) {
+      alert("Please provide both the GCash phone number and reason for cancellation.");
+      return;
+    }
 
-  // Validate GCash phone number format (09XXXXXXXXX)
-  const gcashRegex = /^09\d{9}$/;
-  const cleanedPhone = gcashPhoneNumber.replace(/\s/g, '');
-  
-  if (!gcashRegex.test(cleanedPhone)) {
-    alert("Please enter a valid GCash phone number (09XXXXXXXXX).");
-    return;
-  }
+    // Validate GCash phone number format (09XXXXXXXXX)
+    const gcashRegex = /^09\d{9}$/;
+    const cleanedPhone = gcashPhoneNumber.replace(/\s/g, '');
 
-  setRefundProcessing(true);
-  
-  try {
-    const servicePrices: Record<string, number> = {
-      "vaccination": 500,
-      "checkup": 300,
-      "antiRabies": 300,
-      "ultrasound": 800,
-      "groom": 900,
-      "spayNeuter": 1500,
-      "deworm": 300
-    };
-    
-    const refundAmount = servicePrices[selectedAppointment.appointmentType || "checkup"] || 300;
+    if (!gcashRegex.test(cleanedPhone)) {
+      alert("Please enter a valid GCash phone number (09XXXXXXXXX).");
+      return;
+    }
 
-    const refundRequest = {
-      appointmentId: selectedAppointment.id || "",
-      clientName: selectedAppointment.clientName || "",
-      clientEmail: userEmail || "",
-      petName: selectedAppointment.petName || "",
-      appointmentType: selectedAppointment.appointmentType || "checkup",
-      originalDate: selectedAppointment.date || "",
-      originalTime: selectedAppointment.timeSlot || "",
-      amount: refundAmount,
-      paymentMethod: selectedAppointment.paymentMethod || "GCash",
-      refundReason: refundReason.trim(),
-      gcashPhoneNumber: cleanedPhone,
-      gcashReferenceNo: gcashReferenceNo.trim() || "",
-      status: "pending",
-      requestedAt: new Date().toISOString(),
-      userId: userId || "",
-      refundCompleted: false
-    };
+    setRefundProcessing(true);
 
-    console.log("📤 Creating refund request with data:", refundRequest);
-
-    // Add refund request to Firestore
-    const docRef = await addDoc(collection(db, "refundRequests"), refundRequest);
-    console.log("✅ Refund request created with ID:", docRef.id);
-
-    // ✅ PALITAN: Cancel the appointment by updating status instead of deleting
-    await updateDoc(doc(db, "appointments", selectedAppointment.id), {
-      status: "Cancelled",
-      updatedAt: new Date().toISOString(),
-      cancelledAt: new Date().toISOString(),
-      cancelledBy: userId,
-      cancellationReason: "Cancelled for refund: " + refundReason.trim()
-    });
-
-    setShowRefundModal(false);
-    setRefundReason("");
-    setGcashReferenceNo("");
-    setGcashPhoneNumber("");
-    setRefundProcessing(false);
-    
-    showSuccess(`Appointment cancelled and refund request for ₱${refundAmount} submitted successfully!`);
-    
-  } catch (error) {
-    console.error("❌ Error processing refund request:", error);
-    alert("Failed to process refund request. Please try again.");
-    setRefundProcessing(false);
-  }
-};
-  // Update the regular cancel function to handle GCash reference if needed
-const handleDelete = async (id: string) => {
-  try {
-    // If it's a GCash payment and phone number is provided, create a refund request
-    if (selectedAppointment?.paymentMethod?.toLowerCase() === 'gcash' && gcashPhoneNumberCancel.trim()) {
-      // Validate GCash phone number format
-      const gcashRegex = /^09\d{9}$/;
-      if (!gcashRegex.test(gcashPhoneNumberCancel.replace(/\s/g, ''))) {
-        alert("Please enter a valid GCash phone number (09XXXXXXXXX).");
-        return;
-      }
-
+    try {
       const servicePrices: Record<string, number> = {
         "vaccination": 500,
         "checkup": 300,
@@ -597,60 +573,132 @@ const handleDelete = async (id: string) => {
         "spayNeuter": 1500,
         "deworm": 300
       };
-      
+
       const refundAmount = servicePrices[selectedAppointment.appointmentType || "checkup"] || 300;
 
       const refundRequest = {
-        appointmentId: selectedAppointment.id,
-        clientName: selectedAppointment.clientName,
+        appointmentId: selectedAppointment.id || "",
+        clientName: selectedAppointment.clientName || "",
         clientEmail: userEmail || "",
-        petName: selectedAppointment.petName,
+        petName: selectedAppointment.petName || "",
         appointmentType: selectedAppointment.appointmentType || "checkup",
-        originalDate: selectedAppointment.date,
-        originalTime: selectedAppointment.timeSlot,
+        originalDate: selectedAppointment.date || "",
+        originalTime: selectedAppointment.timeSlot || "",
         amount: refundAmount,
         paymentMethod: selectedAppointment.paymentMethod || "GCash",
-        refundReason: "Appointment cancellation",
-        gcashReferenceNo: gcashReferenceNoCancel.trim() || "",
-        gcashPhoneNumber: gcashPhoneNumberCancel.replace(/\s/g, ''),
+        refundReason: refundReason.trim(),
+        gcashPhoneNumber: cleanedPhone,
+        gcashReferenceNo: gcashReferenceNo.trim() || "",
         status: "pending",
         requestedAt: new Date().toISOString(),
         userId: userId || "",
         refundCompleted: false
       };
-      
-      console.log("Creating refund request from cancel with data:", refundRequest);
-      
-      await addDoc(collection(db, "refundRequests"), refundRequest);
+
+      console.log("📤 Creating refund request with data:", refundRequest);
+
+      // Add refund request to Firestore
+      const docRef = await addDoc(collection(db, "refundRequests"), refundRequest);
+      console.log("✅ Refund request created with ID:", docRef.id);
+
+      // ✅ PALITAN: Cancel the appointment by updating status instead of deleting
+      await updateDoc(doc(db, "appointments", selectedAppointment.id), {
+        status: "Cancelled",
+        updatedAt: new Date().toISOString(),
+        cancelledAt: new Date().toISOString(),
+        cancelledBy: userId,
+        cancellationReason: "Cancelled for refund: " + refundReason.trim()
+      });
+
+      setShowRefundModal(false);
+      setRefundReason("");
+      setGcashReferenceNo("");
+      setGcashPhoneNumber("");
+      setRefundProcessing(false);
+
       showSuccess(`Appointment cancelled and refund request for ₱${refundAmount} submitted successfully!`);
-    } else {
-      // Regular cancellation without refund
-      showSuccess("Appointment cancelled successfully!");
+
+    } catch (error) {
+      console.error("❌ Error processing refund request:", error);
+      alert("Failed to process refund request. Please try again.");
+      setRefundProcessing(false);
     }
+  };
+  // Update the regular cancel function to handle GCash reference if needed
+  const handleDelete = async (id: string) => {
+    try {
+      // If it's a GCash payment and phone number is provided, create a refund request
+      if (selectedAppointment?.paymentMethod?.toLowerCase() === 'gcash' && gcashPhoneNumberCancel.trim()) {
+        // Validate GCash phone number format
+        const gcashRegex = /^09\d{9}$/;
+        if (!gcashRegex.test(gcashPhoneNumberCancel.replace(/\s/g, ''))) {
+          alert("Please enter a valid GCash phone number (09XXXXXXXXX).");
+          return;
+        }
 
-    // ✅ PALITAN: Gamitin updateDoc imbes na deleteDoc
-    await updateDoc(doc(db, "appointments", id), {
-      status: "Cancelled",
-      updatedAt: new Date().toISOString(),
-      cancelledAt: new Date().toISOString(),
-      cancelledBy: userId,
-      cancellationReason: "User cancelled appointment"
-    });
+        const servicePrices: Record<string, number> = {
+          "vaccination": 500,
+          "checkup": 300,
+          "antiRabies": 300,
+          "ultrasound": 800,
+          "groom": 900,
+          "spayNeuter": 1500,
+          "deworm": 300
+        };
 
-    setShowCancelModal(false);
-    setGcashReferenceNoCancel("");
-    setGcashPhoneNumberCancel("");
-  } catch (error) {
-    console.error("Error cancelling appointment:", error);
-    alert("Failed to cancel appointment. Please try again.");
+        const refundAmount = servicePrices[selectedAppointment.appointmentType || "checkup"] || 300;
+
+        const refundRequest = {
+          appointmentId: selectedAppointment.id,
+          clientName: selectedAppointment.clientName,
+          clientEmail: userEmail || "",
+          petName: selectedAppointment.petName,
+          appointmentType: selectedAppointment.appointmentType || "checkup",
+          originalDate: selectedAppointment.date,
+          originalTime: selectedAppointment.timeSlot,
+          amount: refundAmount,
+          paymentMethod: selectedAppointment.paymentMethod || "GCash",
+          refundReason: "Appointment cancellation",
+          gcashReferenceNo: gcashReferenceNoCancel.trim() || "",
+          gcashPhoneNumber: gcashPhoneNumberCancel.replace(/\s/g, ''),
+          status: "pending",
+          requestedAt: new Date().toISOString(),
+          userId: userId || "",
+          refundCompleted: false
+        };
+
+        console.log("Creating refund request from cancel with data:", refundRequest);
+
+        await addDoc(collection(db, "refundRequests"), refundRequest);
+        showSuccess(`Appointment cancelled and refund request for ₱${refundAmount} submitted successfully!`);
+      } else {
+        // Regular cancellation without refund
+        showSuccess("Appointment cancelled successfully!");
+      }
+
+      // ✅ PALITAN: Gamitin updateDoc imbes na deleteDoc
+      await updateDoc(doc(db, "appointments", id), {
+        status: "Cancelled",
+        updatedAt: new Date().toISOString(),
+        cancelledAt: new Date().toISOString(),
+        cancelledBy: userId,
+        cancellationReason: "User cancelled appointment"
+      });
+
+      setShowCancelModal(false);
+      setGcashReferenceNoCancel("");
+      setGcashPhoneNumberCancel("");
+    } catch (error) {
+      console.error("Error cancelling appointment:", error);
+      alert("Failed to cancel appointment. Please try again.");
+    }
   }
-}
 
   // Format GCash phone number as user types
   const formatGcashPhoneNumber = (value: string) => {
     // Remove all non-digit characters
     const digits = value.replace(/\D/g, '');
-    
+
     // Format as 09XX XXX XXXX
     if (digits.length <= 2) {
       return digits;
@@ -821,7 +869,7 @@ const handleDelete = async (id: string) => {
     try {
       // Verify OTP logic here
       await new Promise((resolve) => setTimeout(resolve, 1000))
-      
+
       // Update 2FA status with complete profile data
       if (userId) {
         await setDoc(doc(db, "users", userId), {
@@ -829,7 +877,7 @@ const handleDelete = async (id: string) => {
           updatedAt: new Date().toISOString(),
         }, { merge: true });
       }
-      
+
       setTwoFactorEnabled(true)
       setShowOTPSetup(false)
       setShow2FAModal(false)
@@ -891,7 +939,7 @@ const handleDelete = async (id: string) => {
     if (refundCompleted) {
       return "Refund Complete"
     }
-    
+
     const statusMap: Record<string, string> = {
       "pending": "Pending Review",
       "approved": "Approved",
@@ -907,7 +955,7 @@ const handleDelete = async (id: string) => {
       case "pet-registration":
         return (
 
-          
+
           <MainContent>
             <ContentHeader>
               <ContentTitle>Pet Registration</ContentTitle>
@@ -1226,14 +1274,14 @@ const handleDelete = async (id: string) => {
     return (
       <>
         <HistoryTabs>
-          <HistoryTab 
-            $active={refundHistoryTab === "appointments"} 
+          <HistoryTab
+            $active={refundHistoryTab === "appointments"}
             onClick={() => setRefundHistoryTab("appointments")}
           >
             Appointments ({completedAppointments.length})
           </HistoryTab>
-          <HistoryTab 
-            $active={refundHistoryTab === "refunds"} 
+          <HistoryTab
+            $active={refundHistoryTab === "refunds"}
             onClick={() => setRefundHistoryTab("refunds")}
           >
             Refund Requests ({refundRequests.length})
@@ -1278,8 +1326,8 @@ const handleDelete = async (id: string) => {
                   <RefundHistoryCard key={refund.id} onClick={() => openRefundDetails(refund)}>
                     <SidebarCardHeader>
                       <AppointmentStatus>{refund.petName}</AppointmentStatus>
-                      <RefundStatusBadge 
-                        $status={refund.status} 
+                      <RefundStatusBadge
+                        $status={refund.status}
                         $completed={refund.refundCompleted || refund.status === "completed"}
                       >
                         {getRefundStatusLabel(refund.status, refund.refundCompleted)}
@@ -1343,8 +1391,8 @@ const handleDelete = async (id: string) => {
 
           <HeaderBar>
             <BrandSection>
-              <MenuToggle 
-                onClick={() => setIsSidebarVisible(!isSidebarVisible)} 
+              <MenuToggle
+                onClick={() => setIsSidebarVisible(!isSidebarVisible)}
                 $isOpen={isSidebarVisible}
               >
                 <span></span>
@@ -1653,7 +1701,7 @@ const handleDelete = async (id: string) => {
 
                   <FormGroup>
                     <Label htmlFor="gcash-reference">
-                      GCash Reference Number 
+                      GCash Reference Number
                     </Label>
                     <EditInput
                       id="gcash-reference"
@@ -1680,12 +1728,12 @@ const handleDelete = async (id: string) => {
                   </FormGroup>
 
                   <RefundInfoNote>
-                    <strong>Refund Process:</strong> Your refund request will be reviewed within 1-3 business days. 
+                    <strong>Refund Process:</strong> Your refund request will be reviewed within 1-3 business days.
                     Once approved, the amount will be refunded to your GCash account using the phone number you provided.
                   </RefundInfoNote>
                 </ModalContent>
                 <ModalActions>
-                  <CancelModalButton 
+                  <CancelModalButton
                     onClick={() => {
                       setShowRefundModal(false)
                       setGcashReferenceNo("")
@@ -1696,7 +1744,7 @@ const handleDelete = async (id: string) => {
                   >
                     Cancel
                   </CancelModalButton>
-                  <RefundRequestButton 
+                  <RefundRequestButton
                     onClick={handleRefundRequest}
                     disabled={!refundReason.trim() || !gcashPhoneNumber.trim() || refundProcessing}
                   >
@@ -1720,7 +1768,7 @@ const handleDelete = async (id: string) => {
                     <WarningIcon>⚠️</WarningIcon>
                     <WarningText>
                       Are you sure you want to cancel this appointment? This action cannot be undone.
-                      {selectedAppointment.paymentMethod?.toLowerCase() === 'gcash' && 
+                      {selectedAppointment.paymentMethod?.toLowerCase() === 'gcash' &&
                         " If you paid via GCash and would like a refund, please provide your GCash registered phone number below."}
                     </WarningText>
                   </WarningMessage>
@@ -1843,8 +1891,8 @@ const handleDelete = async (id: string) => {
                     <InfoItem>
                       <InfoLabel>Refund Status:</InfoLabel>
                       <InfoValue>
-                        <RefundStatusBadge 
-                          $status={selectedRefund.status} 
+                        <RefundStatusBadge
+                          $status={selectedRefund.status}
                           $completed={selectedRefund.refundCompleted || selectedRefund.status === "completed"}
                         >
                           {getRefundStatusLabel(selectedRefund.status, selectedRefund.refundCompleted)}
@@ -1863,7 +1911,7 @@ const handleDelete = async (id: string) => {
                       <InfoItem>
                         <InfoLabel>Processed At:</InfoLabel>
                         <InfoValue>{formatDate(selectedRefund.processedAt)}</InfoValue>
-                    </InfoItem>
+                      </InfoItem>
                     )}
                     {selectedRefund.refundAmount && (
                       <InfoItem>
@@ -1898,8 +1946,8 @@ const handleDelete = async (id: string) => {
               </ModalContainer>
             </ModalOverlay>
           )}
-          
-          
+
+
 
           {/* Reschedule Modal */}
           {showRescheduleModal && selectedAppointment && (

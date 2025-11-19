@@ -4,8 +4,9 @@ import React, { useState, useEffect } from "react";
 import styled, { createGlobalStyle, keyframes } from "styled-components";
 import { useRouter } from "next/navigation";
 import { db, auth } from "../firebaseConfig";
-import { collection, doc, setDoc } from "firebase/firestore";
+import { collection, doc, getDoc, setDoc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
+
 
 const GlobalStyle = createGlobalStyle`
   body {
@@ -64,7 +65,7 @@ const catBreeds = [
   "American Shorthair",
   "Maine Coon",
   "Persian",
-  "Putot Cat (Pusang Putot)",
+  "Pusang Aspin",
   "Others(mixed breed)"
 ];
 
@@ -94,6 +95,73 @@ const Petregister: React.FC = () => {
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [modalMessage, setModalMessage] = useState("");
   const [successPetData, setSuccessPetData] = useState<PetData | null>(null);
+  
+// Add this useEffect to replace the existing auth checking useEffect in your MedicalRecord component
+
+// CORRECT CODE FOR PETREGISTER COMPONENT
+// Replace the existing useEffect that handles auth (around line 85-95)
+
+useEffect(() => {
+  const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      // Check user role in Firestore
+      try {
+        const userDocRef = doc(db, "users", user.uid);
+        const userDoc = await getDoc(userDocRef);
+        
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          const userRole = userData.role || "user";
+          
+          // Redirect non-user roles to their appropriate dashboards
+          if (userRole === "admin") {
+            router.push("/admindashboard");
+            return;
+          }
+          if (userRole === "staff") {
+            router.push("/staff");
+            return;
+          }
+          if (userRole === "vet") {
+            router.push("/vetdashboard");
+            return;
+          }
+          
+          // Only allow regular users to continue
+          if (userRole !== "user") {
+            alert("Access denied. Pet registration is only for pet owners.");
+            router.push("/login");
+            return;
+          }
+          
+          // User is authorized - set owner name
+          if (user.displayName) {
+            setPetOwnerName(user.displayName);
+          } else if (user.email) {
+            // Use email as fallback if display name is not available
+            setPetOwnerName(user.email.split('@')[0]);
+          } else {
+            setPetOwnerName("");
+          }
+        } else {
+          // No user document found
+          alert("User profile not found.");
+          router.push("/homepage");
+          return;
+        }
+      } catch (error) {
+        console.error("Error checking user role:", error);
+        alert("Error verifying access permissions.");
+        router.push("/login");
+      }
+    } else {
+      // No user logged in - redirect to login page
+      router.push("/homepage");
+    }
+  });
+  
+  return () => unsubscribe();
+}, [router]);
 
   useEffect(() => {
     if (petType === "Dog") {

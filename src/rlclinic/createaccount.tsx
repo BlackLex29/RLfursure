@@ -1577,7 +1577,7 @@ const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
                       onClick={togglePasswordVisibility}
                       aria-label={showPassword ? "Hide password" : "Show password"}
                     >
-                      {showPassword ? "🔓" : "🔒"}
+                      {showPassword ? "" : ""}
                     </PasswordToggle>
                   </PasswordInputContainer>
                   
@@ -1621,7 +1621,7 @@ const handleVerifyOTP = async (e: React.FormEvent): Promise<void> => {
                       onClick={toggleConfirmPasswordVisibility}
                       aria-label={showConfirmPassword ? "Hide password" : "Show password"}
                     >
-                      {showConfirmPassword ? "🔓" : "🔒"}
+                      {showConfirmPassword ? "" : ""}
                     </PasswordToggle>
                   </PasswordInputContainer>
                   {formData.confirmPassword && formData.password !== formData.confirmPassword && (

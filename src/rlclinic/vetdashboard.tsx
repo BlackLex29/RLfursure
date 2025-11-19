@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { auth, db } from "../firebaseConfig";
 import { signOut } from "firebase/auth";
@@ -12,7 +12,9 @@ import {
   deleteDoc, 
   doc, 
   updateDoc,
-  getDoc
+  getDoc,
+  query,
+  where
 } from "firebase/firestore";
 import styled, { createGlobalStyle, keyframes } from "styled-components";
 
@@ -51,6 +53,7 @@ interface AppointmentType {
   color?: string;
   petType?: string;
   petBreed?: string;
+  breed?: string;
   gender?: string;
   date: string;
   timeSlot: string;
@@ -132,12 +135,327 @@ const VetDashboard: React.FC = () => {
   const [isSendingOTP, setIsSendingOTP] = useState(false);
   const [otpEmail, setOtpEmail] = useState("");
 
+  // ✅ FIXED: Improved date utility functions
+  const getTodayDateString = (): string => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // ✅ FIXED: Enhanced date normalization function
+  const normalizeDate = (dateString: string): string => {
+    if (!dateString) return '';
+    
+    try {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+        return dateString;
+      }
+      
+      if (dateString.includes('T')) {
+        const date = new Date(dateString);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+      
+      if (dateString.includes('/')) {
+        const parts = dateString.split('/');
+        if (parts.length === 3) {
+          const month = parts[0].padStart(2, '0');
+          const day = parts[1].padStart(2, '0');
+          const year = parts[2];
+          return `${year}-${month}-${day}`;
+        }
+      }
+      
+      if (dateString.includes('-')) {
+        const parts = dateString.split('-');
+        if (parts.length === 3 && parts[0].length === 4) {
+          return dateString;
+        }
+        if (parts.length === 3 && parts[2].length === 4) {
+          const day = parts[0].padStart(2, '0');
+          const month = parts[1].padStart(2, '0');
+          const year = parts[2];
+          return `${year}-${month}-${day}`;
+        }
+      }
+      
+      const date = new Date(dateString);
+      if (!isNaN(date.getTime())) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+      
+      return dateString;
+    } catch (error) {
+      console.warn('Error normalizing date:', dateString, error);
+      return dateString;
+    }
+  };
+  
+
   const months = [
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"
   ];
 
-  // Initialize 2FA state from Firestore
+  // ✅ FIXED: Enhanced fetchAppointments function
+  const fetchAppointments = useCallback(async () => {
+    try {
+      const snapshot = await getDocs(collection(db, "appointments"));
+      const data: AppointmentType[] = [];
+      snapshot.forEach((doc) => {
+        const docData = doc.data();
+        const breed = docData.breed || docData.petBreed || "Not specified";
+        
+        data.push({
+          id: doc.id,
+          clientName: docData.clientName || "",
+          petName: docData.petName || "",
+          birthday: docData.birthday || "",
+          color: docData.color || "",
+          petType: docData.petType || "",
+          petBreed: breed,
+          breed: breed,
+          gender: docData.gender || "",
+          date: docData.date || "",
+          timeSlot: docData.timeSlot || "",
+          status: docData.status || "Pending",
+          bookedByAdmin: docData.bookedByAdmin || false,
+          createdAt: docData.createdAt || "",
+          serviceType: docData.serviceType || docData.appointmentType || "Check Up",
+          paymentMethod: docData.paymentMethod || "Cash",
+        });
+      });
+      
+      setAppointments(data.sort((a, b) => a.date.localeCompare(b.date)));
+      
+      const todayString = getTodayDateString();
+      const todayAppts = data.filter((appt) => {
+        const normalizedDate = normalizeDate(appt.date);
+        return normalizedDate === todayString;
+      });
+      
+      setTodaysAppointments(todayAppts);
+    } catch (error) {
+      console.error("Error fetching appointments:", error);
+    }
+  }, []);
+
+  // ✅ FIXED: Enhanced direct query for today's appointments
+  const fetchTodaysAppointmentsDirectly = useCallback(async () => {
+    try {
+      const todayString = getTodayDateString();
+      const appointmentsRef = collection(db, "appointments");
+      
+      let todayAppts: AppointmentType[] = [];
+      
+      try {
+        const q = query(appointmentsRef, where("date", "==", todayString));
+        const snapshot = await getDocs(q);
+        
+        snapshot.forEach((doc) => {
+          const docData = doc.data();
+          const breed = docData.breed || docData.petBreed || "Not specified";
+          
+          todayAppts.push({
+            id: doc.id,
+            clientName: docData.clientName || "",
+            petName: docData.petName || "",
+            birthday: docData.birthday || "",
+            color: docData.color || "",
+            petType: docData.petType || "",
+            petBreed: breed,
+            breed: breed,
+            gender: docData.gender || "",
+            date: docData.date || "",
+            timeSlot: docData.timeSlot || "",
+            status: docData.status || "Pending",
+            bookedByAdmin: docData.bookedByAdmin || false,
+            createdAt: docData.createdAt || "",
+            serviceType: docData.serviceType || docData.appointmentType || "Check Up",
+            paymentMethod: docData.paymentMethod || "Cash",
+          });
+        });
+      } catch (queryError) {
+        console.error("Direct query failed:", queryError);
+      }
+      
+      if (todayAppts.length === 0) {
+        const allSnapshot = await getDocs(appointmentsRef);
+        const allAppts: AppointmentType[] = [];
+        
+        allSnapshot.forEach((doc) => {
+          const docData = doc.data();
+          const breed = docData.breed || docData.petBreed || "Not specified";
+          
+          allAppts.push({
+            id: doc.id,
+            clientName: docData.clientName || "",
+            petName: docData.petName || "",
+            birthday: docData.birthday || "",
+            color: docData.color || "",
+            petType: docData.petType || "",
+            petBreed: breed,
+            breed: breed,
+            gender: docData.gender || "",
+            date: docData.date || "",
+            timeSlot: docData.timeSlot || "",
+            status: docData.status || "Pending",
+            bookedByAdmin: docData.bookedByAdmin || false,
+            createdAt: docData.createdAt || "",
+            serviceType: docData.serviceType || docData.appointmentType || "Check Up",
+            paymentMethod: docData.paymentMethod || "Cash",
+          });
+        });
+        
+        todayAppts = allAppts.filter((appt) => {
+          const normalizedDate = normalizeDate(appt.date);
+          return normalizedDate === todayString;
+        });
+      }
+      
+      setTodaysAppointments(todayAppts);
+    } catch (error) {
+      console.error("Error fetching today's appointments directly:", error);
+    }
+  }, []);
+
+  // ✅ FIXED: ADD MISSING fetchUnavailableSlots function
+ // ✅ FIXED: Enhanced fetchUnavailableSlots function with proper date handling
+const fetchUnavailableSlots = useCallback(async () => {
+  try {
+    const snapshot = await getDocs(collection(db, "unavailableSlots"));
+    const data: UnavailableSlot[] = [];
+    snapshot.forEach((doc) => {
+      const docData = doc.data();
+      
+      // Handle date conversion properly
+      let dateValue = docData.startDate || docData.date || "";
+      
+      // If it's a Firestore Timestamp, convert to string
+      if (dateValue && typeof dateValue === 'object' && dateValue.toDate) {
+        dateValue = dateValue.toDate().toISOString().split('T')[0];
+      }
+      
+      // Handle endDate similarly
+      let endDateValue = docData.endDate || "";
+      if (endDateValue && typeof endDateValue === 'object' && endDateValue.toDate) {
+        endDateValue = endDateValue.toDate().toISOString().split('T')[0];
+      }
+
+      data.push({
+        id: doc.id,
+        date: dateValue,
+        veterinarian: docData.veterinarian || "",
+        isAllDay: docData.isAllDay || true,
+        startTime: docData.startTime || "",
+        endTime: docData.endTime || "",
+        reason: docData.reason || "",
+        leaveDays: docData.leaveDays || 1,
+        endDate: endDateValue,
+        isMultipleDays: docData.isMultipleDays || false
+      });
+    });
+    setUnavailableSlots(data.sort((a, b) => a.date.localeCompare(b.date)));
+  } catch (error) {
+    console.error("Error fetching unavailable slots:", error);
+  }
+}, []);
+
+// ✅ FIXED: Enhanced real-time listener for unavailable slots
+const unsubscribeUnavailable = onSnapshot(collection(db, "unavailableSlots"), 
+  (snapshot) => {
+    const data: UnavailableSlot[] = [];
+    snapshot.forEach((doc) => {
+      const docData = doc.data();
+      
+      // Handle date conversion properly
+      let dateValue = docData.startDate || docData.date || "";
+      
+      // If it's a Firestore Timestamp, convert to string
+      if (dateValue && typeof dateValue === 'object' && dateValue.toDate) {
+        dateValue = dateValue.toDate().toISOString().split('T')[0];
+      }
+      
+      // Handle endDate similarly
+      let endDateValue = docData.endDate || "";
+      if (endDateValue && typeof endDateValue === 'object' && endDateValue.toDate) {
+        endDateValue = endDateValue.toDate().toISOString().split('T')[0];
+      }
+
+      data.push({
+        id: doc.id,
+        date: dateValue,
+        veterinarian: docData.veterinarian || "",
+        isAllDay: docData.isAllDay || true,
+        startTime: docData.startTime || "",
+        endTime: docData.endTime || "",
+        reason: docData.reason || "",
+        leaveDays: docData.leaveDays || 1,
+        endDate: endDateValue,
+        isMultipleDays: docData.isMultipleDays || false
+      });
+    });
+    setUnavailableSlots(data.sort((a, b) => a.date.localeCompare(b.date)));
+  },
+  (error) => {
+    console.error("❌ Unavailable slots listener error:", error);
+  }
+);
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      if (user) {
+        try {
+          const userDocRef = doc(db, "users", user.uid);
+          const userDoc = await getDoc(userDocRef);
+          
+          if (userDoc.exists()) {
+            const userData = userDoc.data() as UserRole;
+            const userRole = userData.role || "user";
+            
+            if (userRole === "admin") {
+              router.push("/admindashboard");
+              return;
+            }
+            if (userRole === "user") {
+              router.push("/userdashboard");
+              return;
+            }
+            
+            const is2FAEnabled = userData.twoFactorEnabled || false;
+            setTwoFactorEnabled(is2FAEnabled);
+            localStorage.setItem('twoFactorEnabled', is2FAEnabled.toString());
+          } else {
+            alert("User profile not found.");
+            router.push("/homepage");
+            return;
+          }
+          
+          if (user.email) {
+            setOtpEmail(user.email);
+          }
+          
+          setIsMounted(true);
+        } catch (error) {
+          console.error("Error checking user role:", error);
+          alert("Error verifying access permissions.");
+          router.push("/login");
+        }
+      } else {
+        router.push("/login");
+      }
+    });
+
+    return () => unsubscribe();
+  }, [router]);
+
   useEffect(() => {
     const initialize2FAState = async () => {
       setIsMounted(true);
@@ -177,7 +495,6 @@ const VetDashboard: React.FC = () => {
     initialize2FAState();
   }, []);
 
-  // Save 2FA state to localStorage whenever it changes
   useEffect(() => {
     if (isMounted) {
       localStorage.setItem('twoFactorEnabled', twoFactorEnabled.toString());
@@ -193,70 +510,18 @@ const VetDashboard: React.FC = () => {
     }
   };
 
-  const fetchAppointments = async () => {
-    try {
-      const snapshot = await getDocs(collection(db, "appointments"));
-      const data: AppointmentType[] = [];
-      snapshot.forEach((doc) => {
-        const docData = doc.data();
-        data.push({
-          id: doc.id,
-          clientName: docData.clientName || "",
-          petName: docData.petName || "",
-          birthday: docData.birthday || "",
-          color: docData.color || "",
-          petType: docData.petType || "",
-          petBreed: docData.petBreed || "",
-          gender: docData.gender || "",
-          date: docData.date || "",
-          timeSlot: docData.timeSlot || "",
-          status: docData.status || "Pending",
-          bookedByAdmin: docData.bookedByAdmin || false,
-          createdAt: docData.createdAt || "",
-          serviceType: docData.serviceType || docData.appointmentType || "Check Up",
-        });
-      });
-      setAppointments(data.sort((a, b) => a.date.localeCompare(b.date)));
-      const today = new Date().toISOString().split("T")[0];
-      setTodaysAppointments(data.filter((appt) => appt.date === today));
-    } catch (error) {
-      console.error("Error fetching appointments:", error);
-    }
-  };
-
-  const fetchUnavailableSlots = async () => {
-    try {
-      const snapshot = await getDocs(collection(db, "unavailableSlots"));
-      const data: UnavailableSlot[] = [];
-      snapshot.forEach((doc) => {
-        const docData = doc.data();
-        data.push({
-          id: doc.id,
-          date: docData.date || "",
-          veterinarian: docData.veterinarian || "",
-          isAllDay: docData.isAllDay || true,
-          startTime: docData.startTime || "",
-          endTime: docData.endTime || "",
-          reason: docData.reason || "",
-          leaveDays: docData.leaveDays || 1,
-          endDate: docData.endDate || "",
-          isMultipleDays: docData.isMultipleDays || false
-        });
-      });
-      setUnavailableSlots(data.sort((a, b) => a.date.localeCompare(b.date)));
-    } catch (error) {
-      console.error("Error fetching unavailable slots:", error);
-    }
-  };
-
+  // ✅ FIXED: Enhanced real-time listener with better date handling
   useEffect(() => {
     fetchAppointments();
+    fetchTodaysAppointmentsDirectly();
     fetchUnavailableSlots();
 
     const unsubscribeAppointments = onSnapshot(collection(db, "appointments"), (snapshot) => {
       const data: AppointmentType[] = [];
       snapshot.forEach((doc) => {
         const docData = doc.data();
+        const breed = docData.breed || docData.petBreed || "Not specified";
+        
         data.push({
           id: doc.id,
           clientName: docData.clientName || "",
@@ -264,7 +529,8 @@ const VetDashboard: React.FC = () => {
           birthday: docData.birthday || "",
           color: docData.color || "",
           petType: docData.petType || "",
-          petBreed: docData.petBreed || "",
+          petBreed: breed,
+          breed: breed,
           gender: docData.gender || "",
           date: docData.date || "",
           timeSlot: docData.timeSlot || "",
@@ -272,11 +538,19 @@ const VetDashboard: React.FC = () => {
           bookedByAdmin: docData.bookedByAdmin || false,
           createdAt: docData.createdAt || "",
           serviceType: docData.serviceType || docData.appointmentType || "Check Up",
+          paymentMethod: docData.paymentMethod || "Cash",
         });
       });
+      
       setAppointments(data.sort((a, b) => a.date.localeCompare(b.date)));
-      const today = new Date().toISOString().split("T")[0];
-      setTodaysAppointments(data.filter((appt) => appt.date === today));
+      
+      const todayString = getTodayDateString();
+      const todayAppts = data.filter((appt) => {
+        const normalizedDate = normalizeDate(appt.date);
+        return normalizedDate === todayString;
+      });
+      
+      setTodaysAppointments(todayAppts);
     });
 
     const unsubscribeUnavailable = onSnapshot(collection(db, "unavailableSlots"), (snapshot) => {
@@ -285,7 +559,7 @@ const VetDashboard: React.FC = () => {
         const docData = doc.data();
         data.push({
           id: doc.id,
-          date: docData.date || "",
+          date: docData.startDate || docData.date || "",
           veterinarian: docData.veterinarian || "",
           isAllDay: docData.isAllDay || true,
           startTime: docData.startTime || "",
@@ -303,8 +577,9 @@ const VetDashboard: React.FC = () => {
       unsubscribeAppointments();
       unsubscribeUnavailable();
     };
-  }, []);
+  }, [fetchAppointments, fetchTodaysAppointmentsDirectly, fetchUnavailableSlots]);
 
+  // ✅ FIXED: Enhanced handleAddUnavailable for proper multiple days handling
   const handleAddUnavailable = async () => {
     if (!newUnavailable.date) {
       alert("Please select a date.");
@@ -323,47 +598,32 @@ const VetDashboard: React.FC = () => {
       const userData = userDoc?.exists() ? userDoc.data() : null;
       const vetName = userData?.name || "Veterinarian";
 
+      const startDate = new Date(newUnavailable.date);
+      let endDate = startDate;
+
+      // Calculate end date for multiple days
       if (newUnavailable.isMultipleDays && newUnavailable.leaveDays > 1) {
-        // Handle multiple days leave
-        const startDate = new Date(newUnavailable.date);
-        const unavailablePromises = [];
+        endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + newUnavailable.leaveDays - 1);
+      }
 
-        for (let i = 0; i < newUnavailable.leaveDays; i++) {
-          const currentDate = new Date(startDate);
-          currentDate.setDate(startDate.getDate() + i);
-          const dateString = currentDate.toISOString().split('T')[0];
+      // Create single document with date range
+      await addDoc(collection(db, "unavailableSlots"), {
+        startDate: newUnavailable.date,
+        endDate: endDate.toISOString().split('T')[0],
+        veterinarian: vetName,
+        isAllDay: newUnavailable.isAllDay,
+        startTime: newUnavailable.isAllDay ? "" : newUnavailable.startTime,
+        endTime: newUnavailable.isAllDay ? "" : newUnavailable.endTime,
+        reason: newUnavailable.reason,
+        leaveDays: newUnavailable.leaveDays,
+        isMultipleDays: newUnavailable.isMultipleDays && newUnavailable.leaveDays > 1,
+        createdAt: new Date().toISOString(),
+      });
 
-          unavailablePromises.push(
-            addDoc(collection(db, "unavailableSlots"), {
-              date: dateString,
-              veterinarian: vetName,
-              isAllDay: newUnavailable.isAllDay,
-              startTime: newUnavailable.isAllDay ? "" : newUnavailable.startTime,
-              endTime: newUnavailable.isAllDay ? "" : newUnavailable.endTime,
-              reason: newUnavailable.reason,
-              leaveDays: newUnavailable.leaveDays,
-              endDate: new Date(startDate.getTime() + (newUnavailable.leaveDays - 1) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-              isMultipleDays: true,
-              createdAt: new Date().toISOString(),
-            })
-          );
-        }
-
-        await Promise.all(unavailablePromises);
-        alert(`Unavailable time marked successfully for ${newUnavailable.leaveDays} days!`);
+      if (newUnavailable.isMultipleDays && newUnavailable.leaveDays > 1) {
+        alert(`Unavailable time marked successfully for ${newUnavailable.leaveDays} days (${newUnavailable.date} to ${endDate.toISOString().split('T')[0]})!`);
       } else {
-        // Single day leave
-        await addDoc(collection(db, "unavailableSlots"), {
-          date: newUnavailable.date,
-          veterinarian: vetName,
-          isAllDay: newUnavailable.isAllDay,
-          startTime: newUnavailable.isAllDay ? "" : newUnavailable.startTime,
-          endTime: newUnavailable.isAllDay ? "" : newUnavailable.endTime,
-          reason: newUnavailable.reason,
-          leaveDays: 1,
-          isMultipleDays: false,
-          createdAt: new Date().toISOString(),
-        });
         alert("Unavailable time marked successfully!");
       }
 
@@ -394,8 +654,6 @@ const VetDashboard: React.FC = () => {
     } catch (error) {
       console.error("Error deleting unavailable slot:", error);
       alert("Failed to remove unavailable date. Please try again.");
-    } finally {
-
     }
   };
 
@@ -409,122 +667,52 @@ const VetDashboard: React.FC = () => {
     setUnavailableToCancel(null);
   };
 
+  // ✅ FIXED: Enhanced formatDate function for date ranges
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString("en-PH", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  };
 
-  // OTP 2FA Functions
-// OTP 2FA Functions - Gamit ang existing send-email-otp API
-const handleSendOTP = async () => {
-  if (!otpEmail) {
-    alert("Please enter your email address");
-    return;
-  }
-
-  setIsSendingOTP(true);
-  try {
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      alert("User not authenticated");
-      return;
-    }
-
-    // Kunin ang pangalan ng user mula sa Firestore
-    const userDoc = await getDoc(doc(db, "users", currentUser.uid));
-    const userData = userDoc.data();
-    const userName = userData?.name || "Veterinarian";
-
-    const response = await fetch('/api/send-email-otp', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email: otpEmail,
-        name: userName
-      }),
+  const formatDateRange = (startDate: string, endDate?: string, isMultipleDays?: boolean) => {
+    const start = new Date(startDate);
+    const formattedStart = start.toLocaleDateString("en-PH", {
+      month: "short",
+      day: "numeric",
     });
 
-    const data = await response.json();
-
-    if (response.ok) {
-      // Store the OTP hash for verification
-      localStorage.setItem('otpHash', data.otpHash);
-      setOtpSent(true);
-      alert("OTP sent successfully to your email! Please check your inbox.");
-    } else {
-      throw new Error(data.error || 'Failed to send OTP');
-    }
-  } catch (error) {
-    console.error("Error sending OTP:", error);
-    alert(error instanceof Error ? error.message : "Failed to send OTP. Please try again.");
-  } finally {
-    setIsSendingOTP(false);
-  }
-};
-
-const handleVerifyOTP = async () => {
-  if (verificationCode.length !== 6) {
-    alert("Please enter a valid 6-digit OTP");
-    return;
-  }
-
-  try {
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      alert("User not authenticated");
-      return;
-    }
-
-    // Kunin ang OTP hash mula sa localStorage
-    const otpHash = localStorage.getItem('otpHash');
-    if (!otpHash) {
-      alert("OTP session expired. Please request a new OTP.");
-      return;
-    }
-
-    // Call the verify-otp API endpoint
-    const response = await fetch('/api/verify-otp', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email: otpEmail,
-        code: verificationCode,
-        otpHash: otpHash,
-        userId: currentUser.uid
-      }),
-    });
-
-    const data = await response.json();
-
-    if (response.ok) {
-      // Update Firestore
-      const userDocRef = doc(db, "users", currentUser.uid);
-      await updateDoc(userDocRef, {
-        twoFactorEnabled: true,
-        twoFactorEnabledAt: new Date().toISOString()
+    if (isMultipleDays && endDate) {
+      const end = new Date(endDate);
+      const formattedEnd = end.toLocaleDateString("en-PH", {
+        month: "short",
+        day: "numeric",
       });
       
-      setTwoFactorEnabled(true);
-      localStorage.setItem('twoFactorEnabled', 'true');
-      
-      // Linisin ang OTP session
-      localStorage.removeItem('otpHash');
-      setShowOTPSetup(false);
-      setVerificationCode("");
-      setOtpSent(false);
-      
-      alert("Two-Factor Authentication enabled successfully!");
-    } else {
-      throw new Error(data.error || 'Failed to verify OTP');
+      // If same month: "Dec 25-28"
+      if (start.getMonth() === end.getMonth()) {
+        return `${start.toLocaleDateString("en-PH", { month: "short" })} ${start.getDate()}-${end.getDate()}`;
+      } 
+      // Different months: "Dec 25 - Jan 2"
+      else {
+        return `${formattedStart} - ${formattedEnd}`;
+      }
     }
-  } catch (error) {
-    console.error("Error verifying OTP:", error);
-    alert(error instanceof Error ? error.message : "Failed to verify OTP. Please try again.");
-  }
-};
+    
+    return formattedStart;
+  };
 
-const handleDisable2FA = async () => {
-  if (confirm("Are you sure you want to disable Two-Factor Authentication? This will make your account less secure.")) {
+  // OTP 2FA Functions (unchanged)
+  const handleSendOTP = async () => {
+    if (!otpEmail) {
+      alert("Please enter your email address");
+      return;
+    }
+
+    setIsSendingOTP(true);
     try {
       const currentUser = auth.currentUser;
       if (!currentUser) {
@@ -532,23 +720,124 @@ const handleDisable2FA = async () => {
         return;
       }
 
-      const userDocRef = doc(db, "users", currentUser.uid);
-      await updateDoc(userDocRef, {
-        twoFactorEnabled: false,
-        twoFactorDisabledAt: new Date().toISOString()
+      const userDoc = await getDoc(doc(db, "users", currentUser.uid));
+      const userData = userDoc.data();
+      const userName = userData?.name || "Veterinarian";
+
+      const response = await fetch('/api/send-email-otp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: otpEmail,
+          name: userName
+        }),
       });
 
-      setTwoFactorEnabled(false);
-      localStorage.setItem('twoFactorEnabled', 'false');
-      localStorage.removeItem('otpHash');
-      
-      alert("Two-Factor Authentication disabled successfully!");
+      const data = await response.json();
+
+      if (response.ok) {
+        localStorage.setItem('otpHash', data.otpHash);
+        setOtpSent(true);
+        alert("OTP sent successfully to your email! Please check your inbox.");
+      } else {
+        throw new Error(data.error || 'Failed to send OTP');
+      }
     } catch (error) {
-      console.error("Error disabling 2FA:", error);
-      alert("Failed to disable 2FA. Please try again.");
+      console.error("Error sending OTP:", error);
+      alert(error instanceof Error ? error.message : "Failed to send OTP. Please try again.");
+    } finally {
+      setIsSendingOTP(false);
     }
-  }
-};
+  };
+
+  const handleVerifyOTP = async () => {
+    if (verificationCode.length !== 6) {
+      alert("Please enter a valid 6-digit OTP");
+      return;
+    }
+
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        alert("User not authenticated");
+        return;
+      }
+
+      const otpHash = localStorage.getItem('otpHash');
+      if (!otpHash) {
+        alert("OTP session expired. Please request a new OTP.");
+        return;
+      }
+
+      const response = await fetch('/api/verify-otp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: otpEmail,
+          code: verificationCode,
+          otpHash: otpHash,
+          userId: currentUser.uid
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        const userDocRef = doc(db, "users", currentUser.uid);
+        await updateDoc(userDocRef, {
+          twoFactorEnabled: true,
+          twoFactorEnabledAt: new Date().toISOString()
+        });
+        
+        setTwoFactorEnabled(true);
+        localStorage.setItem('twoFactorEnabled', 'true');
+        
+        localStorage.removeItem('otpHash');
+        setShowOTPSetup(false);
+        setVerificationCode("");
+        setOtpSent(false);
+        
+        alert("Two-Factor Authentication enabled successfully!");
+      } else {
+        throw new Error(data.error || 'Failed to verify OTP');
+      }
+    } catch (error) {
+      console.error("Error verifying OTP:", error);
+      alert(error instanceof Error ? error.message : "Failed to verify OTP. Please try again.");
+    }
+  };
+
+  const handleDisable2FA = async () => {
+    if (confirm("Are you sure you want to disable Two-Factor Authentication? This will make your account less secure.")) {
+      try {
+        const currentUser = auth.currentUser;
+        if (!currentUser) {
+          alert("User not authenticated");
+          return;
+        }
+
+        const userDocRef = doc(db, "users", currentUser.uid);
+        await updateDoc(userDocRef, {
+          twoFactorEnabled: false,
+          twoFactorDisabledAt: new Date().toISOString()
+        });
+
+        setTwoFactorEnabled(false);
+        localStorage.setItem('twoFactorEnabled', 'false');
+        localStorage.removeItem('otpHash');
+        
+        alert("Two-Factor Authentication disabled successfully!");
+      } catch (error) {
+        console.error("Error disabling 2FA:", error);
+        alert("Failed to disable 2FA. Please try again.");
+      }
+    }
+  };
+
   const openAppointmentDetails = (appointment: AppointmentType) => {
     setSelectedAppointment(appointment);
     setShowAppointmentDetails(true);
@@ -579,16 +868,6 @@ const handleDisable2FA = async () => {
       default:
         return "#ffc107";
     }
-  };
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString("en-PH", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
   };
 
   const filteredAppointments = selectedMonth
@@ -707,7 +986,6 @@ const handleDisable2FA = async () => {
             </MenuList>
           </Sidebar>
 
-          {/* Floating Menu Button for Mobile */}
           {!isSidebarOpen && (
             <FloatingMenuButton onClick={() => setIsSidebarOpen(true)}>
               ☰
@@ -730,13 +1008,13 @@ const handleDisable2FA = async () => {
                   </ContentSubtitle>
                 </DashboardHeader>
 
-                {/* QUICK STATS SECTION */}
                 <StatisticsSection>
                   <SectionHeader>
                     <SectionTitle>📊 Quick Overview</SectionTitle>
                     <RefreshButton
                       onClick={() => {
                         fetchAppointments();
+                        fetchTodaysAppointmentsDirectly();
                         fetchUnavailableSlots();
                       }}
                     >
@@ -773,7 +1051,6 @@ const handleDisable2FA = async () => {
                   </StatsGrid>
                 </StatisticsSection>
 
-                {/* TODAY'S APPOINTMENTS SECTION */}
                 <AppointmentsSection>
                   <SectionHeader>
                     <SectionTitle>Today&apos;s Appointments</SectionTitle>
@@ -830,7 +1107,6 @@ const handleDisable2FA = async () => {
                                 >
                                   👁 View
                                 </ActionButton>
-                                {/* REMOVED THE "DONE" BUTTON FROM DASHBOARD VIEW */}
                               </AppointmentActions>
                             </AppointmentCard>
                           );
@@ -839,7 +1115,6 @@ const handleDisable2FA = async () => {
                   )}
                 </AppointmentsSection>
 
-                {/* QUICK ACTIONS SECTION */}
                 <QuickActionsSection>
                   <SectionTitle>Quick Actions</SectionTitle>
                   <QuickActionsGrid>
@@ -884,6 +1159,7 @@ const handleDisable2FA = async () => {
                     <RefreshButton
                       onClick={() => {
                         fetchAppointments();
+                        fetchTodaysAppointmentsDirectly();
                         fetchUnavailableSlots();
                       }}
                     >
@@ -939,7 +1215,6 @@ const handleDisable2FA = async () => {
                               >
                                 👁 View
                               </ActionButton>
-                              {/* REMOVED THE "DONE" BUTTON FROM TODAY'S APPOINTMENTS VIEW */}
                             </AppointmentActions>
                           </AppointmentCard>
                         );
@@ -976,7 +1251,6 @@ const handleDisable2FA = async () => {
                   </ControlsContainer>
                 </SectionHeader>
 
-                {/* Active Appointments Section */}
                 <SectionSubtitle>Active Appointments</SectionSubtitle>
                 {filteredAppointments.filter(appt => appt.status !== "Done" && appt.status !== "Cancelled").length === 0 ? (
                   <NoAppointments>
@@ -1022,7 +1296,6 @@ const handleDisable2FA = async () => {
                               >
                                 👁 View
                               </ActionButton>
-                              {/* REMOVED THE "DONE" BUTTON FROM ALL APPOINTMENTS VIEW */}
                             </AppointmentActions>
                           </AppointmentCard>
                         );
@@ -1030,7 +1303,6 @@ const handleDisable2FA = async () => {
                   </AppointmentsGrid>
                 )}
 
-                {/* Completed Appointments Section */}
                 <SectionSubtitle style={{ marginTop: '3rem', color: '#007bff' }}>
                   Completed Appointments
                 </SectionSubtitle>
@@ -1136,7 +1408,17 @@ const handleDisable2FA = async () => {
                       <UnavailableCard key={slot.id} $delay={index * 0.1}>
                         <UnavailableIcon>⏰</UnavailableIcon>
                         <UnavailableInfo>
-                          <UnavailableDate>{formatDate(slot.date)}</UnavailableDate>
+                          <UnavailableDate>
+                            {slot.isMultipleDays && slot.endDate 
+                              ? `${formatDateRange(slot.date, slot.endDate, true)}` 
+                              : formatDate(slot.date)
+                            }
+                            {slot.isMultipleDays && slot.leaveDays && slot.leaveDays > 1 && (
+                              <span style={{fontSize: '0.75rem', color: '#7f8c8d', marginLeft: '0.5rem'}}>
+                                ({slot.leaveDays} days)
+                              </span>
+                            )}
+                          </UnavailableDate>
                           <UnavailableTime>
                             {slot.isAllDay ? "🕐 All Day" : `🕐 ${slot.startTime} - ${slot.endTime}`}
                           </UnavailableTime>
@@ -1208,46 +1490,46 @@ const handleDisable2FA = async () => {
                               </SendOTPButton>
                             </OTPEmailSection>
                           ) : (
-                       <OTPVerificationSection>
-                      <OTPInstructions>
-                        We&apos;ve sent a 6-digit verification code to <strong>{otpEmail}</strong>. 
-                        Please enter it below to enable 2FA. The code will expire in 10 minutes.
-                      </OTPInstructions>
+                            <OTPVerificationSection>
+                              <OTPInstructions>
+                                We&apos;ve sent a 6-digit verification code to <strong>{otpEmail}</strong>. 
+                                Please enter it below to enable 2FA. The code will expire in 10 minutes.
+                              </OTPInstructions>
 
-                      <OTPInputGroup>
-                        <Label>Enter 6-digit OTP</Label>
-                        <OTPInput
-                          type="text"
-                          maxLength={6}
-                          value={verificationCode}
-                          onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ""))}
-                          placeholder="000000"
-                          autoComplete="one-time-code"
-                        />
-                        <ResendOTPText>
-                          Didn&apos;t receive the code?{" "}
-                          <ResendLink onClick={handleSendOTP} disabled={isSendingOTP}>
-                            {isSendingOTP ? "Sending..." : "Resend OTP"}
-                          </ResendLink>
-                        </ResendOTPText>
-                      </OTPInputGroup>
+                              <OTPInputGroup>
+                                <Label>Enter 6-digit OTP</Label>
+                                <OTPInput
+                                  type="text"
+                                  maxLength={6}
+                                  value={verificationCode}
+                                  onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ""))}
+                                  placeholder="000000"
+                                  autoComplete="one-time-code"
+                                />
+                                <ResendOTPText>
+                                  Didn&apos;t receive the code?{" "}
+                                  <ResendLink onClick={handleSendOTP} disabled={isSendingOTP}>
+                                    {isSendingOTP ? "Sending..." : "Resend OTP"}
+                                  </ResendLink>
+                                </ResendOTPText>
+                              </OTPInputGroup>
 
-                      <OTPButtonGroup>
-                        <CancelButton
-                          onClick={() => {
-                            setShowOTPSetup(false);
-                            setOtpSent(false);
-                            setVerificationCode("");
-                            localStorage.removeItem('otpHash');
-                          }}
-                        >
-                          Cancel
-                        </CancelButton>
-                        <SubmitButton onClick={handleVerifyOTP} disabled={verificationCode.length !== 6}>
-                          Verify & Enable 2FA
-                        </SubmitButton>
-                      </OTPButtonGroup>
-                    </OTPVerificationSection>
+                              <OTPButtonGroup>
+                                <CancelButton
+                                  onClick={() => {
+                                    setShowOTPSetup(false);
+                                    setOtpSent(false);
+                                    setVerificationCode("");
+                                    localStorage.removeItem('otpHash');
+                                  }}
+                                >
+                                  Cancel
+                                </CancelButton>
+                                <SubmitButton onClick={handleVerifyOTP} disabled={verificationCode.length !== 6}>
+                                  Verify & Enable 2FA
+                                </SubmitButton>
+                              </OTPButtonGroup>
+                            </OTPVerificationSection>
                           )}
                         </OTPSetupSection>
                       )}
@@ -1437,7 +1719,7 @@ const handleDisable2FA = async () => {
                   </ModalHeader>
                   <div style={{ padding: "2rem" }}>
                     <p style={{ marginBottom: "1.5rem", color: "#2c3e50" }}>
-                      Are you sure you want to remove this unavailable date?
+                      Are you sure you want to remove this unavailable period?
                     </p>
                     
                     <div style={{ 
@@ -1447,8 +1729,13 @@ const handleDisable2FA = async () => {
                       marginBottom: "1.5rem" 
                     }}>
                       <DetailRow>
-                        <DetailLabel>Date:</DetailLabel>
-                        <DetailValue>{formatDate(unavailableToCancel.date)}</DetailValue>
+                        <DetailLabel>Period:</DetailLabel>
+                        <DetailValue>
+                          {unavailableToCancel.isMultipleDays && unavailableToCancel.endDate
+                            ? `${formatDate(unavailableToCancel.date)} to ${formatDate(unavailableToCancel.endDate)}`
+                            : formatDate(unavailableToCancel.date)
+                          }
+                        </DetailValue>
                       </DetailRow>
                       <DetailRow>
                         <DetailLabel>Time:</DetailLabel>
@@ -1615,7 +1902,8 @@ const handleDisable2FA = async () => {
   );
 };
 
-// Styled Components (same as before)
+// Styled Components (same as before - keep all your existing styled components)
+
 const PageContainer = styled.div`
   min-height: 100vh;
   background-color: #f8fafc;
@@ -2431,7 +2719,10 @@ const InfoGrid = styled.div`
   gap: 1.5rem;
 `;
 
-const InfoItem = styled.div``;
+const InfoItem = styled.div`
+  display: flex;
+  flex-direction: column;
+`;
 
 const InfoLabel = styled.div`
   font-size: 0.875rem;

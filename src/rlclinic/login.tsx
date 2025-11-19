@@ -58,6 +58,7 @@ const Login: React.FC = () => {
   const [totpCode, setTotpCode] = useState("");
   const [mfaResolver, setMfaResolver] = useState<MultiFactorResolver | null>(null);
   const router = useRouter();
+  
 
   // Check for reset password action in URL
   useEffect(() => {
@@ -572,7 +573,7 @@ const Login: React.FC = () => {
 
       console.log("✅ Password reset email sent successfully");
       setResetSuccess(true);
-      setError("✅ Password reset link has been sent to your email!");
+      setError("✅ Password reset link has been sent to your spam email!");
 
       setTimeout(() => {
         setShowForgotPassword(false);
