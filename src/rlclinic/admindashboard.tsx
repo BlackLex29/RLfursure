@@ -264,7 +264,7 @@ const Admindashboard: React.FC = () => {
   const [newAccountEmail, setNewAccountEmail] = useState("");
   const [newAccountPassword, setNewAccountPassword] = useState("");
   const [newAccountName, setNewAccountName] = useState("");
-  const [newAccountRole, setNewAccountRole] = useState<"admin" | "doctor">("doctor");
+  const [newAccountRole, setNewAccountRole] = useState<"admin" | "veterinarian">("veterinarian");
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [createAccountMessage, setCreateAccountMessage] = useState("");
   const [show2FAModal, setShow2FAModal] = useState(false);
@@ -1753,7 +1753,7 @@ const fetchUnavailableSlots = async () => {
         setNewAccountEmail("");
         setNewAccountPassword("");
         setNewAccountName("");
-        setNewAccountRole("doctor");
+        setNewAccountRole("veterinarian");
         setShowCreateAccount(false);
         setCreateAccountMessage("");
       }, 3000);
@@ -4322,7 +4322,7 @@ const fetchUnavailableSlots = async () => {
                         <select
                           id="accountRole"
                           value={newAccountRole}
-                          onChange={(e) => setNewAccountRole(e.target.value as "admin" | "doctor")}
+                          onChange={(e) => setNewAccountRole(e.target.value as "admin" | "veterinarian")}
                           style={{
                             width: "100%",
                             padding: "0.75rem",
