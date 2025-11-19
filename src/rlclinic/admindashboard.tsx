@@ -4385,7 +4385,6 @@ const fetchUnavailableSlots = async () => {
   );
 };
 
-// Asana-inspired Styled Components for Refund Completion Modal
 const AsanaModalOverlay = styled.div`
       position: fixed;
       top: 0;
