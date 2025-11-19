@@ -368,47 +368,6 @@ const fetchUnavailableSlots = useCallback(async () => {
     console.error("Error fetching unavailable slots:", error);
   }
 }, []);
-
-// ✅ FIXED: Enhanced real-time listener for unavailable slots
-const unsubscribeUnavailable = onSnapshot(collection(db, "unavailableSlots"), 
-  (snapshot) => {
-    const data: UnavailableSlot[] = [];
-    snapshot.forEach((doc) => {
-      const docData = doc.data();
-      
-      // Handle date conversion properly
-      let dateValue = docData.startDate || docData.date || "";
-      
-      // If it's a Firestore Timestamp, convert to string
-      if (dateValue && typeof dateValue === 'object' && dateValue.toDate) {
-        dateValue = dateValue.toDate().toISOString().split('T')[0];
-      }
-      
-      // Handle endDate similarly
-      let endDateValue = docData.endDate || "";
-      if (endDateValue && typeof endDateValue === 'object' && endDateValue.toDate) {
-        endDateValue = endDateValue.toDate().toISOString().split('T')[0];
-      }
-
-      data.push({
-        id: doc.id,
-        date: dateValue,
-        veterinarian: docData.veterinarian || "",
-        isAllDay: docData.isAllDay || true,
-        startTime: docData.startTime || "",
-        endTime: docData.endTime || "",
-        reason: docData.reason || "",
-        leaveDays: docData.leaveDays || 1,
-        endDate: endDateValue,
-        isMultipleDays: docData.isMultipleDays || false
-      });
-    });
-    setUnavailableSlots(data.sort((a, b) => a.date.localeCompare(b.date)));
-  },
-  (error) => {
-    console.error("❌ Unavailable slots listener error:", error);
-  }
-);
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       if (user) {

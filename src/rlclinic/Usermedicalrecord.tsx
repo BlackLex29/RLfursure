@@ -7,8 +7,6 @@ import { db } from "../firebaseConfig";
 import {
   collection,
   getDocs,
-  getDoc,
-  doc,
   query,
   where,
   orderBy,
@@ -315,67 +313,36 @@ const UserMedicalRecords: React.FC = () => {
       console.error("Error processing snapshot update:", error);
     }
   };
+/* Handle auth state */
 useEffect(() => {
-  const unsubscribe = onAuthStateChanged(auth, async (user) => {
-    if (user) {
-      // Check user role in Firestore
-      try {
-        const userDocRef = doc(db, "users", user.uid);
-        const userDoc = await getDoc(userDocRef);
-        
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          const userRole = userData.role || "user";
-          
-          // Redirect non-admin/staff users to their appropriate dashboards
-          if (userRole === "user") {
-            router.push("/userdashboard");
-            return;
-          }
-          if (userRole === "vet") {
-            router.push("/vetdashboard");
-            return;
-          }
-          
-          // Only allow admin and staff roles to continue
-          if (userRole !== "admin" && userRole !== "staff") {
-            alert("Access denied. You do not have permission to access medical records management.");
-            router.push("/homepage");
-            return;
-          }
-          
-          // Admin/Staff is authorized
-          setCurrentUser(user);
-          
-          // Check user claims for debugging
-          try {
-            const token = await user.getIdTokenResult();
-            console.log('User Claims:', token.claims);
-          } catch (error) {
-            console.error('Error getting user claims:', error);
-          }
-        } else {
-          // No user document found
-          alert("User profile not found.");
-          router.push("/login");
-          return;
-        }
-      } catch (error) {
-        console.error("Error checking user role:", error);
-        alert("Error verifying access permissions.");
-        router.push("/login");
-      }
+  let unsubscribeSnapshot: (() => void) | undefined;
+  
+  const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+    console.log("Auth state changed:", user?.email);
+    setCurrentUser(user);
+    const email = user?.email ?? null;
+    
+    if (unsubscribeSnapshot) {
+      unsubscribeSnapshot();
+    }
+    
+    if (email && user) {
+      setLoading(true);
+      await fetchUserMedicalRecords(email);
+      unsubscribeSnapshot = subscribeToMedicalRecordUpdates(email);
     } else {
-      // No user logged in - redirect to login page
-      setCurrentUser(null);
       setRecords([]);
       setLoading(false);
-      router.push("/login");
     }
   });
-  
-  return () => unsubscribe();
-}, [router]);
+
+  return () => {
+    unsubscribeAuth();
+    if (unsubscribeSnapshot) {
+      unsubscribeSnapshot();
+    }
+  };
+}, [auth, fetchUserMedicalRecords, subscribeToMedicalRecordUpdates]);
   /* Handle auth state */
   useEffect(() => {
     let unsubscribeSnapshot: (() => void) | undefined;

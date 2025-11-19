@@ -765,16 +765,16 @@ const DateTimeSelector: React.FC<{
           <UnavailableDatesInfo>
             <strong>Upcoming Unavailable Dates:</strong> 
             <UnavailableDatesList>
-              {unavailableDates.slice(0, 5).map((date, index) => {
-                const slot = unavailableSlots.find(s => s.date === date);
-                return (
-                  <UnavailableDateItem 
-                    key={date} 
-                    onClick={() => {
-                      const slot = unavailableSlots.find(s => s.date === date);
-                      if (slot) onViewUnavailableDetails(slot);
-                    }}
-                  >
+{unavailableDates.slice(0, 5).map((date) => {
+  const slot = unavailableSlots.find(s => s.date === date);
+  return (
+    <UnavailableDateItem 
+      key={date} 
+      onClick={() => {
+        const slot = unavailableSlots.find(s => s.date === date);
+        if (slot) onViewUnavailableDetails(slot);
+      }}
+    >
                     <DateText>{date}</DateText>
                     {slot?.reason && (
                       <ReasonText title={slot.reason}>
