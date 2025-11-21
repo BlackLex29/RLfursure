@@ -258,71 +258,66 @@ const UserDashboard: React.FC = () => {
     }, 3000)
   }
 
-  useEffect(() => {
-    setIsClient(true)
-    setToday(new Date().toISOString().split("T")[0])
+useEffect(() => {
+  setIsClient(true)
+  setToday(new Date().toISOString().split("T")[0])
 
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      if (user) {
-        // Check user role in Firestore
-        try {
-          const userDoc = await getDoc(doc(db, "users", user.uid))
+  const unsubscribe = auth.onAuthStateChanged(async (user) => {
+    if (user) {
+      // Check user role in Firestore
+      try {
+        const userDoc = await getDoc(doc(db, "users", user.uid))
 
-          if (userDoc.exists()) {
-            const userData = userDoc.data()
-            const userRole = userData.role || "user"
+        if (userDoc.exists()) {
+          const userData = userDoc.data()
+          const userRole = userData.role || "user"
 
-            // Redirect admin users to admin dashboard
+          // BLOCK veterinarian and admin roles from accessing this page
+          const blockedRoles = ["veterinarian", "admin"];
+          
+          if (blockedRoles.includes(userRole)) {
+            console.log(`🚫 Access denied for ${userRole} role`);
+            
+            // Redirect based on role
             if (userRole === "admin") {
               router.push("/admindashboard")
-              return
+            } else if (userRole === "veterinarian") {
+              router.push("/vetdashboard") // Or wherever veterinarians should go
             }
-
-            // Redirect staff users to staff dashboard
-            if (userRole === "staff") {
-              router.push("/staff")
-              return
-            }
+            return
           }
 
-          // Allow access for regular users
+          // Redirect other non-client roles to their respective dashboards
+          if (userRole === "staff") {
+            router.push("/staff")
+            return
+          }
+
+          // Allow access for regular users only
           setUserEmail(user.email)
           setUserId(user.uid)
           setOtpEmail(user.email || "")
-        } catch (error) {
-          console.error("Error checking user role:", error)
-          // If there's an error, treat as regular user
+        } else {
+          // If no user document, treat as regular user
           setUserEmail(user.email)
           setUserId(user.uid)
           setOtpEmail(user.email || "")
         }
-      } else {
-        // No user logged in - redirect to login page
-        router.push("/login")
-      }
-    })
-
-    return () => unsubscribe()
-  }, [router])
-
-
-  useEffect(() => {
-    setIsClient(true)
-    setToday(new Date().toISOString().split("T")[0])
-
-    const unsubscribe = auth.onAuthStateChanged((user) => {
-      if (user) {
+      } catch (error) {
+        console.error("Error checking user role:", error)
+        // If there's an error, treat as regular user
         setUserEmail(user.email)
         setUserId(user.uid)
         setOtpEmail(user.email || "")
-      } else {
-        router.push("/")
       }
-    })
+    } else {
+      // No user logged in - redirect to login page
+      router.push("/login")
+    }
+  })
 
-    return () => unsubscribe()
-  }, [router])
-
+  return () => unsubscribe()
+}, [router])
   // FIXED: User Profile Fetching and Creation
   useEffect(() => {
     if (!userEmail || !userId) return

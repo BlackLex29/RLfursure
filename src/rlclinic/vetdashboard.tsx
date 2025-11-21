@@ -368,45 +368,97 @@ const fetchUnavailableSlots = useCallback(async () => {
   }
 }, []);
 
-  useEffect(() => {
-    const initialize2FAState = async () => {
-      setIsMounted(true);
+useEffect(() => {
+  const initialize2FAStateAndCheckAccess = async () => {
+    setIsMounted(true);
+    
+    const currentUser = auth.currentUser;
+    const currentPath = window.location.pathname;
+    const isAccessingVetDashboard = currentPath === "/vetdashboard" || currentPath.includes("/vetdashboard");
+    const isAccessingUserDashboard = currentPath === "/userdashboard" || currentPath.includes("/userdashboard");
+    
+    // Immediate check for unauthenticated users accessing any dashboard
+    if (!currentUser && (isAccessingVetDashboard || isAccessingUserDashboard)) {
+      console.log("🚫 Unauthenticated access to dashboard - redirecting to homepage");
+      router.replace("/homepage");
+      return;
+    }
+
+    if (!currentUser) {
+      return;
+    }
+
+    try {
+      const userDocRef = doc(db, "users", currentUser.uid);
+      const userDoc = await getDoc(userDocRef);
       
-      const currentUser = auth.currentUser;
-      if (currentUser) {
-        try {
-          const userDocRef = doc(db, "users", currentUser.uid);
-          const userDoc = await getDoc(userDocRef);
-          
-          if (userDoc.exists()) {
-            const userData = userDoc.data() as UserRole;
-            const is2FAEnabled = userData.twoFactorEnabled || false;
-            
-            setTwoFactorEnabled(is2FAEnabled);
-            localStorage.setItem('twoFactorEnabled', is2FAEnabled.toString());
-          } else {
-            const saved2FA = localStorage.getItem('twoFactorEnabled');
-            if (saved2FA === 'true') {
-              setTwoFactorEnabled(true);
-            }
-          }
-          
-          if (currentUser.email) {
-            setOtpEmail(currentUser.email);
-          }
-        } catch (error) {
-          console.error("Error fetching user data:", error);
-          const saved2FA = localStorage.getItem('twoFactorEnabled');
-          if (saved2FA === 'true') {
-            setTwoFactorEnabled(true);
-          }
+      if (!userDoc.exists()) {
+        console.log("❌ User not properly signed up - no document in database");
+        
+        if (isAccessingVetDashboard || isAccessingUserDashboard) {
+          console.log("🚫 Blocking access to dashboard - user not signed up");
+          router.replace("/homepage");
+          return;
         }
+        
+        const saved2FA = localStorage.getItem('twoFactorEnabled');
+        if (saved2FA === 'true') {
+          setTwoFactorEnabled(true);
+        }
+        return;
       }
-    };
 
-    initialize2FAState();
-  }, []);
+      const userData = userDoc.data() as UserRole;
+      const is2FAEnabled = userData.twoFactorEnabled || false;
+      const userRole = userData.role || "client";
+      
+      // VET DASHBOARD ACCESS CONTROL
+      if (isAccessingVetDashboard) {
+        const allowedVetRoles = ["admin", "doctor", "veterinarian"];
+        if (!allowedVetRoles.includes(userRole)) {
+          console.log(`🚫 VetDashboard access denied - User role '${userRole}' not allowed`);
+          router.replace("/userdashboard");
+          return;
+        }
+        console.log(`✅ Vet dashboard access granted for role: ${userRole}`);
+      }
+      
+      // USER DASHBOARD ACCESS CONTROL - BLOCK ADMIN/USER ROLES
+      if (isAccessingUserDashboard) {
+        const blockedRolesForUserDashboard = ["admin", "user"];
+        if (blockedRolesForUserDashboard.includes(userRole)) {
+          console.log(`🚫 UserDashboard access denied - User role '${userRole}' not allowed`);
+          router.replace("/vetdashboard");
+          return;
+        }
+        console.log(`✅ User dashboard access granted for role: ${userRole}`);
+      }
+      
+      setTwoFactorEnabled(is2FAEnabled);
+      localStorage.setItem('twoFactorEnabled', is2FAEnabled.toString());
+      
+      if (currentUser.email) {
+        setOtpEmail(currentUser.email);
+      }
+      
+    } catch (error) {
+      console.error("Error in access check:", error);
+      
+      if (isAccessingVetDashboard || isAccessingUserDashboard) {
+        console.log("❌ Error during access verification - redirecting to homepage");
+        router.replace("/homepage");
+        return;
+      }
+      
+      const saved2FA = localStorage.getItem('twoFactorEnabled');
+      if (saved2FA === 'true') {
+        setTwoFactorEnabled(true);
+      }
+    }
+  };
 
+  initialize2FAStateAndCheckAccess();
+}, [router]);
   useEffect(() => {
     if (isMounted) {
       localStorage.setItem('twoFactorEnabled', twoFactorEnabled.toString());

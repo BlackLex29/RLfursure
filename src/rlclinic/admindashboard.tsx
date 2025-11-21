@@ -782,45 +782,60 @@ const closeUnavailableDetails = () => {
   };
 
 
-  useEffect(() => {
-    const checkAdminAccess = async () => {
-      const currentUser = auth.currentUser;
+ useEffect(() => {
+  const checkVetAccess = async () => {
+    const currentUser = auth.currentUser;
 
-      if (!currentUser) {
-        router.push("/userdashboard");
-        return;
-      }
+    if (!currentUser) {
+      router.push("/homepage");
+      return;
+    }
 
-      try {
-        const userDoc = await getDoc(doc(db, "users", currentUser.uid));
+    try {
+      const userDoc = await getDoc(doc(db, "users", currentUser.uid));
 
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          const userRole = userData.role || "client";
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        const userRole = userData.role || "client";
+        const currentPath = window.location.pathname;
 
-          // Only allow admin and doctor roles
-          if (userRole !== "admin" && userRole !== "doctor") {
-            console.log("Unauthorized access attempt. Redirecting...");
-            router.push("/userdashboard"); // Redirect regular users to user dashboard
+        // Check if trying to access vetdashboard
+        const isAccessingVetDashboard = currentPath === "/vetdashboard" || currentPath.includes("/vetdashboard");
+
+        // STRICTLY ALLOWED roles for vetdashboard - ONLY admin and doctor
+        const allowedVetRoles = ["admin", "doctor"];
+        
+        // BLOCKED roles for vetdashboard - user and veterinarian
+        const blockedVetRoles = ["user", "veterinarian"];
+
+        // Check if accessing vetdashboard without proper role
+        if (isAccessingVetDashboard) {
+          if (!allowedVetRoles.includes(userRole)) {
+            console.log(`🚫 Unauthorized access to vetdashboard. Role '${userRole}' not allowed. Redirecting to userdashboard...`);
+            router.push("/userdashboard");
             return;
           }
-
-
-          console.log("✅ Admin access granted for:", userRole);
-        } else {
-          // User document doesn't exist, redirect to login
-          router.push("/homepage");
+          
+          // Additional check: explicitly block user and veterinarian roles
+          if (blockedVetRoles.includes(userRole)) {
+            console.log(`🚫 Explicitly blocking '${userRole}' role from vetdashboard. Redirecting to userdashboard...`);
+            router.push("/userdashboard");
+            return;
+          }
         }
-      } catch (error) {
-        console.error("Error checking admin access:", error);
-        router.push("/userdashboard");
+
+        console.log("✅ Access granted for:", userRole, "on", currentPath);
+      } else {
+        router.push("/homepage");
       }
-    };
+    } catch (error) {
+      console.error("Error checking access:", error);
+      router.push("/homepage");
+    }
+  };
 
-    checkAdminAccess();
-  }, [router]);
-
-
+  checkVetAccess();
+}, [router]);
   // 2FA Initialization
   useEffect(() => {
     const initialize2FAState = async () => {
