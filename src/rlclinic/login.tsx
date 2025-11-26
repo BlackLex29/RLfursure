@@ -5,7 +5,7 @@ import { signInWithEmailAndPassword, sendPasswordResetEmail, GoogleAuthProvider,
 import { doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 import { auth, db } from "../firebaseConfig";
 import { useRouter } from "next/navigation";
-import { checkRateLimit, trackFailedLogin, resetFailedAttempts } from '@/lib/services/ratelimitservices'; // Import the rate limit functions
+import { checkRateLimit, trackFailedLogin, resetFailedAttempts } from '@/lib/services/ratelimitservices';
 
 const GlobalStyle = createGlobalStyle`
   body {
@@ -90,7 +90,9 @@ const Login: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
+    // ✅ FIX: Check if forgot password form is showing, then prevent login
     if (showForgotPassword) {
+      console.log("ℹ️ Forgot password form is active, skipping login");
       return;
     }
 
@@ -226,6 +228,17 @@ const Login: React.FC = () => {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ✅ FIX: Handle Enter key press specifically for password field
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !showForgotPassword) {
+      // Only trigger login if we're not in forgot password mode
+      const form = e.currentTarget.closest('form');
+      if (form) {
+        form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+      }
     }
   };
 
@@ -875,6 +888,7 @@ const Login: React.FC = () => {
                       placeholder="Enter your email"
                       required
                       disabled={loading}
+                      onKeyPress={handleKeyPress} // ✅ ADDED: Handle Enter key
                     />
                   </InputGroup>
 
@@ -888,6 +902,7 @@ const Login: React.FC = () => {
                         placeholder="Enter your password"
                         required
                         disabled={loading}
+                        onKeyPress={handleKeyPress} // ✅ ADDED: Handle Enter key
                       />
                       <PasswordToggle
                         type="button"
@@ -898,7 +913,8 @@ const Login: React.FC = () => {
                     </PasswordContainer>
                   </InputGroup>
 
-                  <ForgotPasswordLink onClick={handleForgotPasswordClick}>
+                  {/* ✅ FIX: Changed to span to prevent form submission */}
+                  <ForgotPasswordLink as="span" onClick={handleForgotPasswordClick}>
                     Forgot password?
                   </ForgotPasswordLink>
 
@@ -1044,7 +1060,7 @@ const Login: React.FC = () => {
 
 export default Login;
 
-// Styled Components (keep all your existing styled components exactly as they are)
+// Styled Components - UPDATED ForgotPasswordLink to support span
 const LoginForm = styled.form`
   display: flex;
   flex-direction: column;
@@ -1267,7 +1283,8 @@ const PasswordToggle = styled.button`
   }
 `;
 
-const ForgotPasswordLink = styled.button`
+// ✅ UPDATED: Added support for span element
+const ForgotPasswordLink = styled.button<{ as?: string }>`
   background: none;
   border: none;
   color: #4ecdc4;

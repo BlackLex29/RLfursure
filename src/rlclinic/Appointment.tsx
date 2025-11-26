@@ -351,6 +351,7 @@ const useAppointmentData = () => {
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       let unsubscribePets: () => void;
@@ -2134,6 +2135,60 @@ const AppointmentPage: React.FC = () => {
   const handleClosePrintableReceipt = () => {
     setShowPrintableReceipt(false);
   };
+  useEffect(() => {
+  const checkVetAccess = async () => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      router.push("/homepage");
+      return;
+    }
+    
+    try {
+      const userDoc = await getDoc(doc(db, "users", currentUser.uid));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        const userRole = userData.role || "client";
+        const currentPath = window.location.pathname;
+        
+        // Check if trying to access vetdashboard
+        const isAccessingVetDashboard = currentPath === "/vetdashboard" || currentPath.includes("/vetdashboard");
+        
+        // STRICTLY ALLOWED roles for vetdashboard - ONLY admin and doctor
+        const allowedVetRoles = ["admin", "doctor"];
+        
+        // BLOCKED roles for vetdashboard - user and veterinarian
+        const blockedVetRoles = ["user", "veterinarian", "client"];
+        
+        // Check if accessing vetdashboard without proper role
+        if (isAccessingVetDashboard) {
+          // Explicitly block user and veterinarian roles
+          if (blockedVetRoles.includes(userRole)) {
+            console.log(`🚫 Explicitly blocking '${userRole}' role from vetdashboard. Redirecting to userdashboard...`);
+            router.push("/userdashboard");
+            return;
+          }
+          
+          // Check if role is in allowed list
+          if (!allowedVetRoles.includes(userRole)) {
+            console.log(`🚫 Unauthorized access to vetdashboard. Role '${userRole}' not allowed. Redirecting to userdashboard...`);
+            router.push("/userdashboard");
+            return;
+          }
+        }
+        
+        console.log("✅ Access granted for:", userRole, "on", currentPath);
+      } else {
+        console.log("⚠️ User document not found, redirecting to homepage");
+        router.push("/homepage");
+      }
+    } catch (error) {
+      console.error("❌ Error checking access:", error);
+      router.push("/homepage");
+    }
+  };
+
+  checkVetAccess();
+}, [router]); // Don't forget the dependency array!
 
   if (isLoading) {
     return (
