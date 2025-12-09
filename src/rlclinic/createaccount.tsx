@@ -847,7 +847,7 @@ export const Createaccount = () => {
     }
   };
 
-  // FIXED: Check if email exists in Firebase Authentication
+  // Check if email exists in Firebase Authentication
   const checkEmailExistsInAuth = async (email: string): Promise<boolean> => {
     try {
       if (!email) return false;
@@ -876,7 +876,7 @@ export const Createaccount = () => {
     }
   };
 
-  // COMPREHENSIVE EMAIL CHECK - TOTALLY FIXED
+  // COMPREHENSIVE EMAIL CHECK
   const checkEmailExists = async (email: string): Promise<boolean> => {
     try {
       // Check both Firebase Auth AND Firestore
@@ -1034,38 +1034,47 @@ export const Createaccount = () => {
       return;
     }
 
-    // STEP 2: Start loading and check email EXISTS FIRST
+    // STEP 2: Start loading - CHECK EMAIL AND PHONE FIRST
     setLoading(true);
+    setInfo("🔍 Verifying your information...");
 
     try {
-      // CHECK EMAIL FIRST BEFORE ANYTHING ELSE
+      // CHECK EMAIL EXISTENCE FIRST - CRITICAL CHECK
       console.log('🔍 Checking if email already exists...', formData.email);
       const emailExists = await checkEmailExists(formData.email);
       
       if (emailExists) {
         setError("❌ This email is already registered. Please sign in instead.");
+        setInfo("");
         setLoading(false);
-        return; // STOP HERE - NO OTP SENT
+        return; // STOP IMMEDIATELY - NO OTP SENT
       }
       console.log('✅ Email is available');
 
-      // STEP 3: Check phone number
+      // STEP 3: Validate phone format
       const isValidPhone = await validatePhone(formData.phone);
       if (!isValidPhone) {
         setError("Please enter a valid Philippine phone number (11 digits starting with 09)");
+        setInfo("");
         setLoading(false);
         return;
       }
 
+      // STEP 4: Check if phone number exists
+      console.log('🔍 Checking if phone number already exists...', formData.phone);
       const phoneExists = await checkPhoneNumberExists(formData.phone);
       if (phoneExists) {
-        setError("This phone number is already registered. Please use a different number.");
+        setError("❌ This phone number is already registered. Please use a different number.");
+        setInfo("");
         setLoading(false);
         return;
       }
+      console.log('✅ Phone number is available');
 
-      // STEP 4: Only NOW send OTP after all checks pass
-      console.log('📧 All checks passed, sending OTP...');
+      // STEP 5: ALL CHECKS PASSED - NOW send OTP
+      console.log('📧 All validation passed, sending OTP...');
+      setInfo("📧 Sending verification code...");
+      
       const result = await sendEmailOTP(
         formData.email, 
         `${formData.firstname} ${formData.lastname}`
@@ -1074,7 +1083,7 @@ export const Createaccount = () => {
       if (result.success && result.otpHash) {
         setCurrentOtpHash(result.otpHash);
         setOtpSent(true);
-        setInfo(`📧 Verification OTP sent to ${formData.email}. Please check your inbox and spam folder.`);
+        setInfo(`✅ Verification code sent to ${formData.email}. Please check your inbox and spam folder.`);
         setResendCooldown(60);
       }
       
@@ -1085,6 +1094,7 @@ export const Createaccount = () => {
       } else {
         setError("Failed to process your request. Please try again.");
       }
+      setInfo("");
     } finally {
       setLoading(false);
     }
@@ -1127,11 +1137,12 @@ export const Createaccount = () => {
     setOtpLoading(true);
     
     try {
-      // Double check email existence before creating account
+      // DOUBLE CHECK: Verify na wala pa ring existing account
       const emailExists = await checkEmailExists(formData.email);
       if (emailExists) {
         setError("❌ This email is already registered. Please sign in instead.");
         setOtpLoading(false);
+        setOtpSent(false); // I-reset ang OTP screen
         return;
       }
 
@@ -1145,6 +1156,7 @@ export const Createaccount = () => {
       
       console.log('✅ OTP verified, creating user...');
       
+      // Gumawa ng user sa Firebase Auth
       const userCredential = await createUserWithEmailAndPassword(
         auth, 
         formData.email.toLowerCase(), 
@@ -1154,10 +1166,12 @@ export const Createaccount = () => {
       const user = userCredential.user;
       console.log('User created:', user.uid);
       
+      // I-update ang profile
       await updateProfile(user, {
         displayName: `${sanitizeInput(formData.firstname)} ${sanitizeInput(formData.lastname)}`
       });
       
+      // Kumpletuhin ang account creation
       await completeAccountCreation({
         uid: user.uid,
         email: formData.email.toLowerCase(),
@@ -1173,6 +1187,7 @@ export const Createaccount = () => {
         switch (err.code) {
           case 'auth/email-already-in-use':
             setError("❌ This email is already registered. Please sign in instead.");
+            setOtpSent(false); // I-reset ang OTP screen
             break;
           case 'auth/invalid-email':
             setError("Invalid email address format.");
@@ -1230,7 +1245,7 @@ export const Createaccount = () => {
       
       console.log('Google sign up successful:', user.uid);
       
-      // STEP 1: Check if user already exists by UID - ITO ANG UNA
+      // STEP 1: Check if user already exists by UID
       const userDoc = await getDoc(doc(db, "users", user.uid));
       
       if (userDoc.exists()) {
@@ -1781,7 +1796,7 @@ export const Createaccount = () => {
                 </GoogleButton>
               </>
             )}
-            
+
             <LoginRedirect>
               Already have an account?{" "}
               <LoginLink onClick={handleLoginRedirect}>
@@ -1791,8 +1806,6 @@ export const Createaccount = () => {
           </FormContainer>
         </RightPanel>
       </Container>
-
-      {/* Terms and Conditions Modal */}
       {showTermsModal && (
         <ModalOverlay onClick={handleCloseTermsModal}>
           <ModalContent onClick={(e) => e.stopPropagation()}>
@@ -1806,32 +1819,26 @@ export const Createaccount = () => {
                 <SectionText>
                   By accessing and using FurSureCare, you acknowledge that you have read, understood, and agreed to be bound by these Terms and Conditions.
                 </SectionText>
-
                 <SectionTitle>2. Use License</SectionTitle>
                 <SectionText>
                   Permission is granted to temporarily access FurSureCare for personal, non-commercial use only.
                 </SectionText>
-
                 <SectionTitle>3. User Account</SectionTitle>
                 <SectionText>
                   You are responsible for maintaining the confidentiality of your account credentials and for all activities under your account.
                 </SectionText>
-
                 <SectionTitle>4. Privacy Policy</SectionTitle>
                 <SectionText>
                   Your privacy is important to us. Please refer to our Privacy Policy for information about how we collect and use your data.
                 </SectionText>
-
                 <SectionTitle>5. Service Modifications</SectionTitle>
                 <SectionText>
                   FurSureCare reserves the right to modify or discontinue any part of its services with or without notice.
                 </SectionText>
-
                 <SectionTitle>6. Limitation of Liability</SectionTitle>
                 <SectionText>
                   FurSureCare shall not be liable for any indirect, incidental, special, or consequential damages arising from your use of the service.
                 </SectionText>
-
                 <SectionTitle>7. Governing Law</SectionTitle>
                 <SectionText>
                   These Terms shall be governed by and interpreted in accordance with the laws of the Republic of the Philippines.
@@ -1849,5 +1856,4 @@ export const Createaccount = () => {
     </>
   );
 };
-
 export default Createaccount;
